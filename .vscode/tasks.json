@@ -1,0 +1,43 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Rebuild Local",
+            "detail": "Recrea el stack docker (reactor + reactor-db) eligiendo puertos libres.",
+            "type": "shell",
+            "windows": {
+                "command": "powershell.exe",
+                "args": [
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", "${workspaceFolder}\\scripts\\rebuild-local.ps1"
+                ]
+            },
+            "linux": {
+                "command": "pwsh",
+                "args": [
+                    "-NoProfile",
+                    "-File", "${workspaceFolder}/scripts/rebuild-local.ps1"
+                ]
+            },
+            "osx": {
+                "command": "pwsh",
+                "args": [
+                    "-NoProfile",
+                    "-File", "${workspaceFolder}/scripts/rebuild-local.ps1"
+                ]
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

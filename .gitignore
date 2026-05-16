@@ -1,0 +1,14 @@
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# PHP / vendor
+/vendor/
+composer.lock

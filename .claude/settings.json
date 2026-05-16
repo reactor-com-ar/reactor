@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File \".\\\\scripts\\\\rebuild-local.ps1\" 2>&1 | Out-String)",
+      "PowerShell(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File \".\\\\scripts\\\\rebuild-local.ps1\")",
+      "Read(//c/Users/Javier/Documents/Repositorios/reactor_multirepo/reactor-api/framework/**)",
+      "Bash(git check-ignore *)",
+      "Bash(curl -s \"http://localhost:8083/api/devices.php\")",
+      "Bash(docker volume *)",
+      "Bash(docker exec *)",
+      "Bash(docker restart *)"
+    ]
+  }
+}

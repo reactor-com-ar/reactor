@@ -43,17 +43,39 @@ o `.env.production` de la raiz del repo, inyectado al contenedor por
 
 ## Endpoints actuales
 
-| Metodo | Path                  | Descripcion                                       |
-| ------ | --------------------- | ------------------------------------------------- |
-| GET    | `/api/devices.php`    | Listado de dispositivos + summary + dominio       |
-| GET    | `/api/domains.php`    | Listado de dominios con `device_count`            |
-| POST   | `/api/domains.php`    | Crea dominio. Body JSON: `{name, description?}`   |
-| PUT    | `/api/domains.php`    | Actualiza dominio. Body JSON: `{id, name, description?}` |
-| DELETE | `/api/domains.php?id=N` | Elimina dominio (falla si tiene dispositivos)    |
+| Metodo | Path                  | Descripcion                                                 |
+| ------ | --------------------- | ----------------------------------------------------------- |
+| GET    | `/api/devices.php`    | Listado de `dispositivos` + resumen + dominio               |
+| GET    | `/api/domains.php`    | Listado de `dominios` con `dispositivos_count`              |
+| POST   | `/api/domains.php`    | Crea dominio. Body JSON: `{nombre, descripcion?}`           |
+| PUT    | `/api/domains.php`    | Actualiza dominio. Body JSON: `{id, nombre, descripcion?}`  |
+| DELETE | `/api/domains.php?id=N` | Elimina dominio (falla si tiene dispositivos)             |
+| GET    | `/api/users.php`      | Listado de `usuarios` + resumen por rol                     |
+| POST   | `/api/users.php`      | Crea usuario. Body JSON: `{email, nombre, rol, activo?, password}` |
+| PUT    | `/api/users.php`      | Actualiza usuario. Body JSON: `{id, email, nombre, rol, activo?, password?}` |
+| DELETE | `/api/users.php?id=N` | Elimina usuario (falla si es el unico admin activo)         |
+| GET    | `/api/profiles.php`    | Listado de `perfiles` (usuario+dominio+rol) + resumen      |
+| POST   | `/api/profiles.php`    | Crea perfil. Body JSON: `{usuario_id, dominio_id, rol}`    |
+| PUT    | `/api/profiles.php`    | Actualiza rol del perfil. Body JSON: `{id, rol}`           |
+| DELETE | `/api/profiles.php?id=N` | Elimina perfil                                          |
+
+## Tablas
+
+Todos los nombres de tablas y campos viven principalmente en espanol
+(los timestamps estandar `created_at` / `updated_at` / `last_seen_at`
+y los valores de ENUM `online`/`offline`/`error` se mantienen en
+ingles por convencion).
+
+| Tabla          | Campos principales                                                                   |
+| -------------- | ------------------------------------------------------------------------------------- |
+| `dominios`     | `id`, `nombre`, `descripcion`                                                         |
+| `dispositivos` | `id`, `uid`, `dominio_id` (FK), `nombre`, `tipo`, `ubicacion`, `estado`, `last_seen_at` |
+| `usuarios`     | `id`, `email`, `nombre`, `password_hash`, `rol`, `activo`, `last_login_at`            |
+| `perfiles`     | `id`, `usuario_id` (FK), `dominio_id` (FK), `rol` (`admin`/`operador`) — UNIQUE `(usuario_id, dominio_id)` |
 
 ## Proximos pasos sugeridos
 
-- Autenticacion + tabla `users`.
+- Autenticacion con JWT contra la tabla `usuarios`.
 - CRUD de dispositivos (POST/PUT/DELETE).
 - Ingesta de telemetria y graficos en el dashboard.
 - Modulo de alertas y notificaciones.

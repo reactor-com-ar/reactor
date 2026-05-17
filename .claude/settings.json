@@ -19,7 +19,9 @@
       "PowerShell(docker exec reactor sh -c 'echo DB_NAME=$DB_NAME')",
       "PowerShell(docker exec reactor-db mysql -uroot -proot reactor_dev -e \"SHOW CREATE TABLE devices\\\\G\" 2>$null)",
       "PowerShell(docker exec reactor-db mysql -uroot -proot reactor_dev -e \"SELECT d.id, d.uid, d.domain_id, dom.name AS domain FROM devices d JOIN domains dom ON dom.id = d.domain_id;\" 2>$null)",
-      "PowerShell(docker exec reactor-db mysql -uroot -proot reactor_dev -e \"UPDATE devices SET domain_id = CASE WHEN uid IN \\('RX-0001','RX-0002','RX-0003'\\) THEN 2 WHEN uid IN \\('RX-0004','RX-0006'\\) THEN 3 ELSE 1 END; SELECT uid, domain_id FROM devices;\" 2>$null)"
+      "PowerShell(docker exec reactor-db mysql -uroot -proot reactor_dev -e \"UPDATE devices SET domain_id = CASE WHEN uid IN \\('RX-0001','RX-0002','RX-0003'\\) THEN 2 WHEN uid IN \\('RX-0004','RX-0006'\\) THEN 3 ELSE 1 END; SELECT uid, domain_id FROM devices;\" 2>$null)",
+      "Bash(node --check c:/Users/Javier/Documents/Repositorios/reactor/cloud/assets/js/app.js)",
+      "Bash(findstr /i MYSQL)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Javier\\Downloads"

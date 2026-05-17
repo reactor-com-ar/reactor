@@ -15,14 +15,17 @@
     const toastEl          = document.getElementById('toast');
 
     let pendingDevicesDomainFilter = null;
+    let pendingSignalsDeviceFilter = null;
 
     /* ---------- Routing ---------- */
     const routes = {
         dashboard: { title: 'Dashboard',     render: renderDashboard, group: 'inicio'     },
         domains:   { title: 'Dominios',      render: renderDomains,   group: 'propiedad'  },
         devices:   { title: 'Dispositivos',  render: renderDevices,   group: 'inventario' },
+        signals:   { title: 'Señales',       render: renderSignals,   group: 'registros'  },
         alerts:    { title: 'Alertas',       render: renderStub,      group: 'registros'  },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'seguridad'  },
+        profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'seguridad'  },
         settings:  { title: 'Configuración', render: renderStub,      group: null         },
     };
 
@@ -112,8 +115,8 @@
     async function renderDashboard(root) {
         try {
             const data = await api('devices.php');
-            const s = data.summary;
-            const recent = data.devices.slice(0, 5);
+            const s = data.resumen;
+            const recent = data.dispositivos.slice(0, 5);
 
             root.innerHTML = `
                 <div class="stats-bar">
@@ -149,7 +152,7 @@
                             <span>⚠️ Con problemas</span>
                             <a href="#/alerts" class="dash-ver-mas">Ver alertas →</a>
                         </div>
-                        ${devicesTableBody(data.devices.filter(d => d.status !== 'online').slice(0, 5))}
+                        ${devicesTableBody(data.dispositivos.filter(d => d.estado !== 'online').slice(0, 5))}
                     </div>
                 </div>
             `;
@@ -169,9 +172,9 @@
                 api('devices.php'),
                 api('domains.php'),
             ]);
-            const domains = domData.domains;
+            const dominios = domData.dominios;
             const domainOptions = ['<option value="">Todos los dominios</option>']
-                .concat(domains.map(d => `<option value="${d.id}">${escape(d.name)}</option>`))
+                .concat(dominios.map(d => `<option value="${d.id}">${escape(d.nombre)}</option>`))
                 .join('');
 
             root.innerHTML = `
@@ -193,10 +196,10 @@
                     </div>
                 </div>
 
-                <div class="table-card" id="dev-table">${devicesTableBody(data.devices)}</div>
+                <div class="table-card" id="dev-table">${devicesTableBody(data.dispositivos)}</div>
             `;
 
-            wireDevicesToolbar(data.devices);
+            wireDevicesToolbar(data.dispositivos);
 
             if (pendingDevicesDomainFilter != null) {
                 const sel = document.getElementById('dev-domain-filter');
@@ -209,23 +212,23 @@
         }
     }
 
-    function devicesTableBody(devices) {
-        if (!devices.length) {
+    function devicesTableBody(dispositivos) {
+        if (!dispositivos.length) {
             return `<div class="table-empty">No hay dispositivos para mostrar.</div>`;
         }
 
-        const rows = devices.map(d => `
-            <tr>
+        const rows = dispositivos.map(d => `
+            <tr data-id="${d.id}">
                 <td><span class="td-id">${escape(d.uid)}</span></td>
-                <td class="td-nombre">${escape(d.name)}</td>
-                <td>${escape(d.type)}</td>
-                <td><span class="badge badge-info">${escape(d.domain_name)}</span></td>
-                <td>${escape(d.location ?? '—')}</td>
-                <td>${statusBadge(d.status)}</td>
+                <td class="td-nombre">${escape(d.nombre)}</td>
+                <td>${escape(d.tipo)}</td>
+                <td><span class="badge badge-info">${escape(d.dominio_nombre)}</span></td>
+                <td>${escape(d.ubicacion ?? '—')}</td>
+                <td>${statusBadge(d.estado)}</td>
                 <td>${formatDate(d.last_seen_at)}</td>
                 <td class="actions">
-                    <button class="btn-icon-sm" title="Ver"><i class="fa-solid fa-eye"></i></button>
-                    <button class="btn-icon-sm" title="Editar"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-icon-sm" data-act="view"   title="Ver"><i class="fa-solid fa-eye"></i></button>
+                    <button class="btn-icon-sm" data-act="config" title="Editar configuración JSON"><i class="fa-solid fa-pencil"></i></button>
                 </td>
             </tr>
         `).join('');
@@ -259,7 +262,7 @@
         return `<span class="badge ${m.cls}">${escape(m.label)}</span>`;
     }
 
-    function wireDevicesToolbar(allDevices) {
+    function wireDevicesToolbar(allDispositivos) {
         const tableWrap   = document.getElementById('dev-table');
         const searchInput = document.getElementById('dev-search');
         const searchClear = document.getElementById('dev-search-clear');
@@ -270,11 +273,11 @@
         function applyFilters() {
             const q = (searchInput.value || '').trim().toLowerCase();
             const dom = domainSel.value;
-            const filtered = allDevices.filter(d => {
-                if (activeFilter !== 'all' && d.status !== activeFilter) return false;
-                if (dom && String(d.domain_id) !== dom) return false;
+            const filtered = allDispositivos.filter(d => {
+                if (activeFilter !== 'all' && d.estado !== activeFilter) return false;
+                if (dom && String(d.dominio_id) !== dom) return false;
                 if (!q) return true;
-                return (d.uid + ' ' + d.name + ' ' + d.type + ' ' + (d.domain_name || '') + ' ' + (d.location || ''))
+                return (d.uid + ' ' + d.nombre + ' ' + d.tipo + ' ' + (d.dominio_nombre || '') + ' ' + (d.ubicacion || ''))
                     .toLowerCase().includes(q);
             });
             tableWrap.innerHTML = devicesTableBody(filtered);
@@ -310,26 +313,26 @@
                     </div>
                 </div>
 
-                <div class="table-card" id="dom-table">${domainsTableBody(data.domains)}</div>
+                <div class="table-card" id="dom-table">${domainsTableBody(data.dominios)}</div>
             `;
 
-            wireDomainsView(data.domains);
+            wireDomainsView(data.dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
     }
 
-    function domainsTableBody(domains) {
-        if (!domains.length) {
+    function domainsTableBody(dominios) {
+        if (!dominios.length) {
             return `<div class="table-empty">Todavía no hay dominios. Creá el primero con "Nuevo dominio".</div>`;
         }
 
-        const rows = domains.map(d => `
+        const rows = dominios.map(d => `
             <tr data-id="${d.id}">
                 <td><span class="td-id">#${d.id}</span></td>
-                <td class="td-nombre">${escape(d.name)}</td>
-                <td>${escape(d.description ?? '—')}</td>
-                <td><span class="badge badge-info">${d.device_count}</span></td>
+                <td class="td-nombre">${escape(d.nombre)}</td>
+                <td>${escape(d.descripcion ?? '—')}</td>
+                <td><span class="badge badge-info">${d.dispositivos_count}</span></td>
                 <td>${formatDate(d.created_at)}</td>
                 <td class="actions">
                     <button class="btn-icon-sm" data-act="view"   title="Ver"><i class="fa-solid fa-eye"></i></button>
@@ -356,7 +359,7 @@
         `;
     }
 
-    function wireDomainsView(allDomains) {
+    function wireDomainsView(allDominios) {
         const tableWrap   = document.getElementById('dom-table');
         const searchInput = document.getElementById('dom-search');
         const searchClear = document.getElementById('dom-search-clear');
@@ -364,8 +367,8 @@
 
         function applyFilters() {
             const q = (searchInput.value || '').trim().toLowerCase();
-            const filtered = !q ? allDomains : allDomains.filter(d =>
-                (d.name + ' ' + (d.description || '')).toLowerCase().includes(q)
+            const filtered = !q ? allDominios : allDominios.filter(d =>
+                (d.nombre + ' ' + (d.descripcion || '')).toLowerCase().includes(q)
             );
             tableWrap.innerHTML = domainsTableBody(filtered);
             wireRowActions();
@@ -375,7 +378,7 @@
             tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const id = +btn.closest('tr').dataset.id;
-                    const dom = allDomains.find(x => x.id === id);
+                    const dom = allDominios.find(x => x.id === id);
                     if (!dom) return;
                     if (btn.dataset.act === 'view')   openDomainViewModal(dom);
                     if (btn.dataset.act === 'edit')   openDomainModal(dom);
@@ -404,12 +407,12 @@
                 <div class="modal-body">
                     <div class="form-group">
                         <label for="dom-name">Nombre</label>
-                        <input type="text" id="dom-name" maxlength="120" value="${escape(dom?.name ?? '')}" required>
+                        <input type="text" id="dom-name" maxlength="120" value="${escape(dom?.nombre ?? '')}" required>
                         <div class="field-error" id="dom-name-err" style="display:none"></div>
                     </div>
                     <div class="form-group">
                         <label for="dom-desc">Descripción</label>
-                        <textarea id="dom-desc" maxlength="255" placeholder="Opcional">${escape(dom?.description ?? '')}</textarea>
+                        <textarea id="dom-desc" maxlength="255" placeholder="Opcional">${escape(dom?.descripcion ?? '')}</textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -437,13 +440,13 @@
         nameInput.focus();
 
         saveBtn.addEventListener('click', async () => {
-            const name = nameInput.value.trim();
-            const desc = descInput.value.trim();
+            const nombre      = nameInput.value.trim();
+            const descripcion = descInput.value.trim();
 
             nameErr.style.display = 'none';
             nameInput.classList.remove('input-invalid');
 
-            if (!name) {
+            if (!nombre) {
                 nameErr.textContent = 'El nombre es obligatorio';
                 nameErr.style.display = 'block';
                 nameInput.classList.add('input-invalid');
@@ -454,10 +457,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('domains.php', { method: 'PUT', body: { id: dom.id, name, description: desc } });
+                    await api('domains.php', { method: 'PUT', body: { id: dom.id, nombre, descripcion } });
                     toast('Dominio actualizado');
                 } else {
-                    await api('domains.php', { method: 'POST', body: { name, description: desc } });
+                    await api('domains.php', { method: 'POST', body: { nombre, descripcion } });
                     toast('Dominio creado');
                 }
                 close();
@@ -486,15 +489,15 @@
                         </div>
                         <div class="data-row">
                             <dt class="data-label">Nombre</dt>
-                            <dd class="data-value">${escape(dom.name)}</dd>
+                            <dd class="data-value">${escape(dom.nombre)}</dd>
                         </div>
                         <div class="data-row">
                             <dt class="data-label">Descripción</dt>
-                            <dd class="data-value ${dom.description ? '' : 'muted'}">${escape(dom.description ?? 'Sin descripción')}</dd>
+                            <dd class="data-value ${dom.descripcion ? '' : 'muted'}">${escape(dom.descripcion ?? 'Sin descripción')}</dd>
                         </div>
                         <div class="data-row">
                             <dt class="data-label">Dispositivos asociados</dt>
-                            <dd class="data-value"><span class="badge badge-info">${dom.device_count}</span></dd>
+                            <dd class="data-value"><span class="badge badge-info">${dom.dispositivos_count}</span></dd>
                         </div>
                         <div class="data-row">
                             <dt class="data-label">Creado</dt>
@@ -570,7 +573,7 @@
                 } else if (act === 'copy-id') {
                     copyToClipboard(String(dom.id));
                 } else if (act === 'copy-name') {
-                    copyToClipboard(dom.name);
+                    copyToClipboard(dom.nombre);
                 } else if (act === 'delete') {
                     close();
                     confirmDeleteDomain(dom);
@@ -582,8 +585,8 @@
     function confirmDeleteDomain(dom) {
         confirmDialog(
             'Eliminar dominio',
-            `¿Eliminar el dominio "${dom.name}"? Esta acción no se puede deshacer.` +
-            (dom.device_count > 0 ? ` Tiene ${dom.device_count} dispositivo(s) asociado(s).` : ''),
+            `¿Eliminar el dominio "${dom.nombre}"? Esta acción no se puede deshacer.` +
+            (dom.dispositivos_count > 0 ? ` Tiene ${dom.dispositivos_count} dispositivo(s) asociado(s).` : ''),
             async () => {
                 try {
                     await api('domains.php?id=' + dom.id, { method: 'DELETE' });
@@ -691,6 +694,7 @@
                 <td><span class="td-id">#${u.id}</span></td>
                 <td class="td-nombre">${escape(u.nombre)}</td>
                 <td>${escape(u.email)}</td>
+                <td>${u.celular ? escape(u.celular) : '<span class="muted">—</span>'}</td>
                 <td>${rolBadge(u.rol)}</td>
                 <td>${u.activo
                     ? '<span class="badge badge-success">Activo</span>'
@@ -711,6 +715,7 @@
                         <th>ID</th>
                         <th>Nombre</th>
                         <th>Email</th>
+                        <th>Celular</th>
                         <th>Rol</th>
                         <th>Estado</th>
                         <th>Último login</th>
@@ -745,7 +750,7 @@
                     return false;
                 }
                 if (!q) return true;
-                return (u.email + ' ' + u.nombre).toLowerCase().includes(q);
+                return (u.email + ' ' + u.nombre + ' ' + (u.celular || '')).toLowerCase().includes(q);
             });
             tableWrap.innerHTML = usuariosTableBody(filtered);
             wireRowActions();
@@ -805,17 +810,24 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
+                            <label for="usr-celular">Celular</label>
+                            <input type="tel" id="usr-celular" maxlength="30"
+                                   value="${escape(usr?.celular ?? '')}"
+                                   placeholder="+54 9 11 1234-5678">
+                            <div class="field-error" id="usr-celular-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
                             <label for="usr-rol">Rol</label>
                             <select id="usr-rol">${rolOpts}</select>
                         </div>
-                        <div class="form-group">
-                            <label>Estado</label>
-                            <label class="toggle-switch" style="margin-top:6px">
-                                <input type="checkbox" id="usr-activo" ${(!usr || usr.activo) ? 'checked' : ''}>
-                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                <span class="toggle-label" id="usr-activo-label">${(!usr || usr.activo) ? 'Activo' : 'Inactivo'}</span>
-                            </label>
-                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Estado</label>
+                        <label class="toggle-switch" style="margin-top:6px">
+                            <input type="checkbox" id="usr-activo" ${(!usr || usr.activo) ? 'checked' : ''}>
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                            <span class="toggle-label" id="usr-activo-label">${(!usr || usr.activo) ? 'Activo' : 'Inactivo'}</span>
+                        </label>
                     </div>
                     <div class="form-group">
                         <label for="usr-pass">
@@ -843,16 +855,18 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        const nombreInput = backdrop.querySelector('#usr-nombre');
-        const emailInput  = backdrop.querySelector('#usr-email');
-        const rolSel      = backdrop.querySelector('#usr-rol');
-        const activoChk   = backdrop.querySelector('#usr-activo');
-        const activoLbl   = backdrop.querySelector('#usr-activo-label');
-        const passInput   = backdrop.querySelector('#usr-pass');
-        const nombreErr   = backdrop.querySelector('#usr-nombre-err');
-        const emailErr    = backdrop.querySelector('#usr-email-err');
-        const passErr     = backdrop.querySelector('#usr-pass-err');
-        const saveBtn     = backdrop.querySelector('[data-act="save"]');
+        const nombreInput  = backdrop.querySelector('#usr-nombre');
+        const emailInput   = backdrop.querySelector('#usr-email');
+        const celularInput = backdrop.querySelector('#usr-celular');
+        const rolSel       = backdrop.querySelector('#usr-rol');
+        const activoChk    = backdrop.querySelector('#usr-activo');
+        const activoLbl    = backdrop.querySelector('#usr-activo-label');
+        const passInput    = backdrop.querySelector('#usr-pass');
+        const nombreErr    = backdrop.querySelector('#usr-nombre-err');
+        const emailErr     = backdrop.querySelector('#usr-email-err');
+        const celularErr   = backdrop.querySelector('#usr-celular-err');
+        const passErr      = backdrop.querySelector('#usr-pass-err');
+        const saveBtn      = backdrop.querySelector('[data-act="save"]');
 
         activoChk.addEventListener('change', () => {
             activoLbl.textContent = activoChk.checked ? 'Activo' : 'Inactivo';
@@ -861,14 +875,15 @@
         nombreInput.focus();
 
         saveBtn.addEventListener('click', async () => {
-            const nombre = nombreInput.value.trim();
-            const email  = emailInput.value.trim().toLowerCase();
-            const rol    = rolSel.value;
-            const activo = activoChk.checked;
-            const pass   = passInput.value;
+            const nombre  = nombreInput.value.trim();
+            const email   = emailInput.value.trim().toLowerCase();
+            const celular = celularInput.value.trim();
+            const rol     = rolSel.value;
+            const activo  = activoChk.checked;
+            const pass    = passInput.value;
 
-            [nombreErr, emailErr, passErr].forEach(el => el.style.display = 'none');
-            [nombreInput, emailInput, passInput].forEach(el => el.classList.remove('input-invalid'));
+            [nombreErr, emailErr, celularErr, passErr].forEach(el => el.style.display = 'none');
+            [nombreInput, emailInput, celularInput, passInput].forEach(el => el.classList.remove('input-invalid'));
 
             let firstInvalid = null;
             if (!nombre) {
@@ -883,6 +898,12 @@
                 emailInput.classList.add('input-invalid');
                 firstInvalid = firstInvalid || emailInput;
             }
+            if (celular !== '' && !/^[+0-9\s().-]+$/.test(celular)) {
+                celularErr.textContent = 'Solo números, espacios y los signos + ( ) - .';
+                celularErr.style.display = 'block';
+                celularInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || celularInput;
+            }
             if (!isEdit && pass.length < 6) {
                 passErr.textContent = 'Mínimo 6 caracteres';
                 passErr.style.display = 'block';
@@ -896,7 +917,7 @@
             }
             if (firstInvalid) { firstInvalid.focus(); return; }
 
-            const payload = { email, nombre, rol, activo };
+            const payload = { email, nombre, celular, rol, activo };
             if (pass !== '') payload.password = pass;
 
             saveBtn.disabled = true;
@@ -925,6 +946,288 @@
                 try {
                     await api('users.php?id=' + usr.id, { method: 'DELETE' });
                     toast('Usuario eliminado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
+    }
+
+    /* ---------- Views: Perfiles ---------- */
+    const ROLES_PERFIL = [
+        { value: 'admin',    label: 'Administrador', badge: 'badge-danger' },
+        { value: 'operador', label: 'Operador',      badge: 'badge-info'   },
+    ];
+
+    async function renderProfiles(root) {
+        try {
+            const [data, usrData, domData] = await Promise.all([
+                api('profiles.php'),
+                api('users.php'),
+                api('domains.php'),
+            ]);
+            const r = data.resumen;
+
+            root.innerHTML = `
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Administradores</span>
+                        <span class="stat-value orange">${r.admin}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Operadores</span>
+                        <span class="stat-value green">${r.operador}</span>
+                    </div>
+                </div>
+
+                <div class="toolbar">
+                    <div class="toolbar-left">
+                        <div class="search-wrap">
+                            <input type="search" class="search-input" id="prf-search" placeholder="Buscar por usuario o dominio…">
+                            <button class="search-clear" id="prf-search-clear" aria-label="Limpiar">×</button>
+                        </div>
+                        <button class="filter-chip active" data-filter="all">Todos</button>
+                        <button class="filter-chip" data-filter="admin">Admin</button>
+                        <button class="filter-chip" data-filter="operador">Operador</button>
+                    </div>
+                    <div class="toolbar-right">
+                        <button class="btn btn-primary btn-sm" id="prf-new">
+                            <i class="fa-solid fa-plus"></i> Nuevo perfil
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-card" id="prf-table">${perfilesTableBody(data.perfiles)}</div>
+            `;
+
+            wireProfilesView(data.perfiles, usrData.usuarios, domData.dominios);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function perfilesTableBody(perfiles) {
+        if (!perfiles.length) {
+            return `<div class="table-empty">No hay perfiles. Creá el primero con "Nuevo perfil".</div>`;
+        }
+
+        const rows = perfiles.map(p => `
+            <tr data-id="${p.id}">
+                <td><span class="td-id">#${p.id}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(p.usuario_nombre)}</div>
+                    <div class="td-id">${escape(p.usuario_email)}</div>
+                </td>
+                <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
+                <td>${perfilRolBadge(p.rol)}</td>
+                <td>${formatDate(p.created_at)}</td>
+                <td class="actions">
+                    <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+                </td>
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Usuario</th>
+                        <th>Dominio</th>
+                        <th>Rol</th>
+                        <th>Creado</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function perfilRolBadge(rol) {
+        const r = ROLES_PERFIL.find(x => x.value === rol) || { label: rol, badge: 'badge-info' };
+        return `<span class="badge ${r.badge}">${escape(r.label)}</span>`;
+    }
+
+    function wireProfilesView(allPerfiles, allUsuarios, allDominios) {
+        const tableWrap   = document.getElementById('prf-table');
+        const searchInput = document.getElementById('prf-search');
+        const searchClear = document.getElementById('prf-search-clear');
+        const btnNew      = document.getElementById('prf-new');
+        const chips       = document.querySelectorAll('.filter-chip[data-filter]');
+        let activeFilter  = 'all';
+
+        function applyFilters() {
+            const q = (searchInput.value || '').trim().toLowerCase();
+            const filtered = allPerfiles.filter(p => {
+                if (activeFilter !== 'all' && p.rol !== activeFilter) return false;
+                if (!q) return true;
+                return (p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
+                    .toLowerCase().includes(q);
+            });
+            tableWrap.innerHTML = perfilesTableBody(filtered);
+            wireRowActions();
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const p  = allPerfiles.find(x => x.id === id);
+                    if (!p) return;
+                    if (btn.dataset.act === 'edit')   openProfileModal(p, allUsuarios, allDominios);
+                    if (btn.dataset.act === 'delete') confirmDeleteProfile(p);
+                });
+            });
+        }
+
+        chips.forEach(c => c.addEventListener('click', () => {
+            chips.forEach(x => x.classList.remove('active'));
+            c.classList.add('active');
+            activeFilter = c.dataset.filter;
+            applyFilters();
+        }));
+        searchInput.addEventListener('input', applyFilters);
+        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
+        btnNew.addEventListener('click', () => openProfileModal(null, allUsuarios, allDominios));
+
+        wireRowActions();
+    }
+
+    function openProfileModal(prf, allUsuarios, allDominios) {
+        const isEdit = !!prf;
+
+        const usrOpts = ['<option value="">Elegí un usuario…</option>'].concat(
+            allUsuarios.map(u =>
+                `<option value="${u.id}" ${prf?.usuario_id === u.id ? 'selected' : ''}>${escape(u.nombre)} (${escape(u.email)})</option>`
+            )
+        ).join('');
+
+        const domOpts = ['<option value="">Elegí un dominio…</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}" ${prf?.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+
+        const rolOpts = ROLES_PERFIL.map(r =>
+            `<option value="${r.value}" ${prf?.rol === r.value ? 'selected' : ''}>${escape(r.label)}</option>`
+        ).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">${isEdit ? 'Editar perfil' : 'Nuevo perfil'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="prf-usuario">Usuario</label>
+                        <select id="prf-usuario" ${isEdit ? 'disabled' : ''}>${usrOpts}</select>
+                        <div class="field-error" id="prf-usuario-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="prf-dominio">Dominio</label>
+                        <select id="prf-dominio" ${isEdit ? 'disabled' : ''}>${domOpts}</select>
+                        <div class="field-error" id="prf-dominio-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="prf-rol">Rol en el dominio</label>
+                        <select id="prf-rol">${rolOpts}</select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
+                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear perfil'}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const usrSel     = backdrop.querySelector('#prf-usuario');
+        const domSel     = backdrop.querySelector('#prf-dominio');
+        const rolSel     = backdrop.querySelector('#prf-rol');
+        const usrErr     = backdrop.querySelector('#prf-usuario-err');
+        const domErr     = backdrop.querySelector('#prf-dominio-err');
+        const saveBtn    = backdrop.querySelector('[data-act="save"]');
+
+        (isEdit ? rolSel : usrSel).focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const rol = rolSel.value;
+
+            [usrErr, domErr].forEach(el => el.style.display = 'none');
+            [usrSel, domSel].forEach(el => el.classList.remove('input-invalid'));
+
+            if (isEdit) {
+                saveBtn.disabled = true;
+                try {
+                    await api('profiles.php', { method: 'PUT', body: { id: prf.id, rol } });
+                    toast('Perfil actualizado');
+                    close();
+                    navigate();
+                } catch (e) {
+                    saveBtn.disabled = false;
+                    toast(e.message, 'error');
+                }
+                return;
+            }
+
+            const usuario_id = +usrSel.value;
+            const dominio_id = +domSel.value;
+
+            let firstInvalid = null;
+            if (!usuario_id) {
+                usrErr.textContent = 'Elegí un usuario';
+                usrErr.style.display = 'block';
+                usrSel.classList.add('input-invalid');
+                firstInvalid = firstInvalid || usrSel;
+            }
+            if (!dominio_id) {
+                domErr.textContent = 'Elegí un dominio';
+                domErr.style.display = 'block';
+                domSel.classList.add('input-invalid');
+                firstInvalid = firstInvalid || domSel;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            saveBtn.disabled = true;
+            try {
+                await api('profiles.php', { method: 'POST', body: { usuario_id, dominio_id, rol } });
+                toast('Perfil creado');
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    function confirmDeleteProfile(prf) {
+        confirmDialog(
+            'Eliminar perfil',
+            `¿Eliminar el perfil de "${prf.usuario_nombre}" en "${prf.dominio_nombre}"? Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('profiles.php?id=' + prf.id, { method: 'DELETE' });
+                    toast('Perfil eliminado');
                     navigate();
                 } catch (e) {
                     toast(e.message, 'error');

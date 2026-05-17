@@ -74,6 +74,9 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
+                    <a href="#/signals" data-route="signals" class="nav-item nav-sub-item">
+                        <span class="nav-icon">📡</span> Señales
+                    </a>
                     <a href="#/alerts" data-route="alerts" class="nav-item nav-sub-item">
                         <span class="nav-icon">🔔</span> Alertas
                     </a>
@@ -89,6 +92,9 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                 <div class="nav-sub">
                     <a href="#/users" data-route="users" class="nav-item nav-sub-item">
                         <span class="nav-icon">👥</span> Usuarios
+                    </a>
+                    <a href="#/profiles" data-route="profiles" class="nav-item nav-sub-item">
+                        <span class="nav-icon">🪪</span> Perfiles
                     </a>
                 </div>
             </div>

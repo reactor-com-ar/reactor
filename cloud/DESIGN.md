@@ -537,6 +537,102 @@ Para celdas / tarjetas en carga: `<tr><td colspan="N" style="text-align:center;p
 - Para acciones por fila (editar / borrar / ver) usar **FontAwesome 6** (`<i class="fa-solid fa-pencil"></i>`).
 - No usar dos sistemas de iconos en el mismo lugar.
 
+## 21. Menú de acciones (dropdown dentro de modal)
+
+Patrón para agrupar acciones secundarias en modales de consulta ("ver detalle") sin saturar el footer con botones sueltos. El trigger se ancla a la izquierda del footer (`margin-right: auto`) y el botón de cierre primario queda a la derecha. El dropdown vive sobre el área gris, así que usa los tokens normales (`--surface`, `--border`, `--text`, `--muted`) — nunca rojo de fondo.
+
+```html
+<div class="modal-footer">
+  <div class="action-menu action-menu-up" style="margin-right:auto">
+    <button class="btn btn-secondary" data-act="menu-toggle">
+      <i class="fa-solid fa-ellipsis"></i> Acciones
+    </button>
+    <div class="action-menu-dropdown" role="menu">
+      <button class="action-menu-item" role="menuitem">
+        <i class="fa-solid fa-pencil"></i> Editar
+      </button>
+      <button class="action-menu-item" role="menuitem">
+        <i class="fa-regular fa-copy"></i> Copiar
+      </button>
+      <div class="action-menu-divider"></div>
+      <button class="action-menu-item danger" role="menuitem">
+        <i class="fa-solid fa-trash"></i> Eliminar
+      </button>
+    </div>
+  </div>
+  <button class="btn btn-ghost">Cerrar</button>
+</div>
+```
+
+```css
+.action-menu          { position: relative; display: inline-block; }
+.action-menu-dropdown { display: none; position: absolute; left: 0; top: calc(100% + 6px);
+                        background: var(--surface); border: 1px solid var(--border);
+                        border-radius: 10px; box-shadow: var(--shadow-lg);
+                        min-width: 220px; overflow: hidden; z-index: 110; }
+.action-menu.open .action-menu-dropdown { display: block; }
+.action-menu-up .action-menu-dropdown   { top: auto; bottom: calc(100% + 6px); }
+
+.action-menu-item     { display: flex; align-items: center; gap: 10px; width: 100%;
+                        padding: 10px 16px; font-size: .85rem; color: var(--text);
+                        background: none; border: none; cursor: pointer;
+                        text-align: left; font-family: inherit;
+                        transition: background .15s, color .15s; }
+.action-menu-item:hover        { background: var(--bg); color: var(--primary); }
+.action-menu-item.danger:hover { background: var(--bg); color: var(--danger); }
+.action-menu-item i            { width: 16px; text-align: center; color: var(--muted); }
+.action-menu-item:hover i      { color: inherit; }
+.action-menu-divider           { height: 1px; background: var(--border); margin: 4px 0; }
+```
+
+**Reglas:**
+- Trigger: `btn btn-secondary` con `<i class="fa-solid fa-ellipsis"></i> Acciones`. No usar `btn-primary` — la acción primaria del modal (si la hubiera) sigue siendo otra.
+- Iconos: FontAwesome 6 (no emojis dentro del dropdown — está en zona densa y los emojis varían de tamaño entre sistemas).
+- Usar `.action-menu-up` cuando el contenedor esté cerca del borde inferior (típico en footer de modal) para que el dropdown se abra hacia arriba.
+- Cerrar al click fuera del menú y al hacer click en cualquier `.action-menu-item`.
+- Acciones destructivas con la clase `danger`, separadas del resto por `.action-menu-divider`.
+- Un solo dropdown abierto a la vez.
+
+## 22. Lista de datos (vista de consulta)
+
+Para modales de "ver detalle" donde se muestran pares label/valor de solo lectura, sin inputs. Reutiliza la tipografía de las labels de `.form-group` para que la vista de consulta y la de edición se sientan coherentes lado a lado.
+
+```html
+<dl class="data-list">
+  <div class="data-row">
+    <dt class="data-label">ID</dt>
+    <dd class="data-value"><code>#42</code></dd>
+  </div>
+  <div class="data-row">
+    <dt class="data-label">Nombre</dt>
+    <dd class="data-value">Planta Norte</dd>
+  </div>
+  <div class="data-row">
+    <dt class="data-label">Descripción</dt>
+    <dd class="data-value muted">Sin descripción</dd>
+  </div>
+</dl>
+```
+
+```css
+.data-list  { display: flex; flex-direction: column; gap: 14px; }
+.data-row   { display: flex; flex-direction: column; gap: 4px; }
+.data-label { font-size: .75rem; font-weight: 600;
+              text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.data-value { font-size: .9rem; color: var(--text);
+              word-break: break-word; white-space: pre-wrap; }
+.data-value.muted { color: var(--muted); font-style: italic; }
+.data-value code  { font-family: monospace; font-size: .85rem;
+                    background: var(--bg); border: 1px solid var(--border);
+                    border-radius: 6px; padding: 2px 8px; }
+```
+
+**Reglas:**
+- Va dentro de `.modal-body` (no como reemplazo de `.form-group`, que sigue siendo para inputs).
+- Valores vacíos / nulos usan `.data-value.muted` con texto tipo "Sin descripción", "—" o similar, en cursiva muteada.
+- Identificadores (IDs, UIDs, hashes cortos) van envueltos en `<code>` para diferenciarse del texto libre.
+- Si la lista crece más de 8 pares, dividirla en secciones con subtítulos pequeños (`<h4>` `.form-group label`-equivalentes) en lugar de hacer scroll largo.
+
 ---
 
 ## Reglas duras (criterios de aceptación)

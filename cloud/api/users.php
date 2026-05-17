@@ -24,7 +24,7 @@ try {
 function handleList(): void
 {
     $stmt = db()->query(
-        'SELECT id, email, nombre, rol, activo, last_login_at, created_at, updated_at
+        'SELECT id, email, nombre, celular, rol, activo, last_login_at, created_at, updated_at
          FROM usuarios
          ORDER BY activo DESC, nombre ASC'
     );
@@ -56,11 +56,12 @@ function handleCreate(): void
     $in       = readJson();
     $email    = strtolower(trim((string) ($in['email']    ?? '')));
     $nombre   = trim((string) ($in['nombre']   ?? ''));
+    $celular  = trim((string) ($in['celular']  ?? ''));
     $rol      = trim((string) ($in['rol']      ?? 'operador'));
     $activo   = isset($in['activo']) ? (bool) $in['activo'] : true;
     $password = (string) ($in['password'] ?? '');
 
-    validarComunes($email, $nombre, $rol);
+    validarComunes($email, $nombre, $celular, $rol);
     if ($password === '')               json_error('La contrasena es obligatoria', 422);
     if (mb_strlen($password) < 6)       json_error('La contrasena debe tener al menos 6 caracteres', 422);
 
@@ -68,12 +69,13 @@ function handleCreate(): void
 
     try {
         $stmt = db()->prepare(
-            'INSERT INTO usuarios (email, nombre, password_hash, rol, activo)
-             VALUES (:e, :n, :p, :r, :a)'
+            'INSERT INTO usuarios (email, nombre, celular, password_hash, rol, activo)
+             VALUES (:e, :n, :c, :p, :r, :a)'
         );
         $stmt->execute([
             ':e' => $email,
             ':n' => $nombre,
+            ':c' => $celular === '' ? null : $celular,
             ':p' => $hash,
             ':r' => $rol,
             ':a' => $activo ? 1 : 0,
@@ -94,21 +96,23 @@ function handleUpdate(): void
     $id       = (int) ($in['id'] ?? 0);
     $email    = strtolower(trim((string) ($in['email']    ?? '')));
     $nombre   = trim((string) ($in['nombre']   ?? ''));
+    $celular  = trim((string) ($in['celular']  ?? ''));
     $rol      = trim((string) ($in['rol']      ?? 'operador'));
     $activo   = isset($in['activo']) ? (bool) $in['activo'] : true;
     $password = (string) ($in['password'] ?? '');
 
     if ($id <= 0) json_error('Id invalido', 422);
-    validarComunes($email, $nombre, $rol);
+    validarComunes($email, $nombre, $celular, $rol);
 
     if ($password !== '' && mb_strlen($password) < 6) {
         json_error('La contrasena debe tener al menos 6 caracteres', 422);
     }
 
-    $sql    = 'UPDATE usuarios SET email = :e, nombre = :n, rol = :r, activo = :a';
+    $sql    = 'UPDATE usuarios SET email = :e, nombre = :n, celular = :c, rol = :r, activo = :a';
     $params = [
         ':e'  => $email,
         ':n'  => $nombre,
+        ':c'  => $celular === '' ? null : $celular,
         ':r'  => $rol,
         ':a'  => $activo ? 1 : 0,
         ':id' => $id,
@@ -165,13 +169,17 @@ function handleDelete(): void
     json_ok(['id' => $id]);
 }
 
-function validarComunes(string $email, string $nombre, string $rol): void
+function validarComunes(string $email, string $nombre, string $celular, string $rol): void
 {
     if ($email === '')                          json_error('El email es obligatorio', 422);
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) json_error('El email no es valido', 422);
     if (mb_strlen($email) > 120)                json_error('El email no puede superar 120 caracteres', 422);
     if ($nombre === '')                         json_error('El nombre es obligatorio', 422);
     if (mb_strlen($nombre) > 120)               json_error('El nombre no puede superar 120 caracteres', 422);
+    if (mb_strlen($celular) > 30)               json_error('El celular no puede superar 30 caracteres', 422);
+    if ($celular !== '' && !preg_match('/^[+0-9\s().-]+$/', $celular)) {
+        json_error('El celular solo puede contener numeros, espacios y los signos + ( ) - .', 422);
+    }
     if (!in_array($rol, ROLES_VALIDOS, true))   json_error('Rol invalido', 422);
 }
 

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS dispositivos (
     tipo          VARCHAR(60)  NOT NULL,
     ubicacion     VARCHAR(120) DEFAULT NULL,
     estado        ENUM('online','offline','error') NOT NULL DEFAULT 'offline',
+    config_json   JSON         DEFAULT NULL,
     last_seen_at  DATETIME     DEFAULT NULL,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     email         VARCHAR(120) NOT NULL UNIQUE,
     nombre        VARCHAR(120) NOT NULL,
+    celular       VARCHAR(30)  DEFAULT NULL,
     password_hash VARCHAR(255) NOT NULL,
     rol           ENUM('admin','operador','lectura') NOT NULL DEFAULT 'operador',
     activo        TINYINT(1)   NOT NULL DEFAULT 1,
@@ -60,7 +62,85 @@ CREATE TABLE IF NOT EXISTS usuarios (
 -- Seed: usuarios demo para que el ABM no aparezca vacio en desarrollo.
 -- password_hash es un placeholder (no verifica con password_verify); el modulo
 -- de Usuarios permite resetear la clave desde la UI.
-INSERT IGNORE INTO usuarios (email, nombre, password_hash, rol, activo) VALUES
-('admin@reactor.com.ar',     'Administrador',  'placeholder', 'admin',    1),
-('operador@reactor.com.ar',  'Operador Demo',  'placeholder', 'operador', 1),
-('lectura@reactor.com.ar',   'Solo lectura',   'placeholder', 'lectura',  1);
+INSERT IGNORE INTO usuarios (email, nombre, celular, password_hash, rol, activo) VALUES
+('admin@reactor.com.ar',     'Administrador',  '+54 9 11 1234-5678', 'placeholder', 'admin',    1),
+('operador@reactor.com.ar',  'Operador Demo',  '+54 9 11 2345-6789', 'placeholder', 'operador', 1),
+('lectura@reactor.com.ar',   'Solo lectura',   NULL,                 'placeholder', 'lectura',  1);
+
+CREATE TABLE IF NOT EXISTS perfiles (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    usuario_id  INT UNSIGNED NOT NULL,
+    dominio_id  INT UNSIGNED NOT NULL,
+    rol         ENUM('admin','operador') NOT NULL DEFAULT 'operador',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_usuario_dominio (usuario_id, dominio_id),
+    INDEX idx_usuario_id (usuario_id),
+    INDEX idx_dominio_id (dominio_id),
+    INDEX idx_rol (rol),
+    CONSTRAINT fk_perfiles_usuario
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    CONSTRAINT fk_perfiles_dominio
+        FOREIGN KEY (dominio_id) REFERENCES dominios(id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- Seed: admin con perfil admin en todos los dominios; operador con
+-- perfil operador en planta baja y acceso/perimetro.
+INSERT IGNORE INTO perfiles (usuario_id, dominio_id, rol)
+SELECT u.id, d.id, 'admin'
+FROM usuarios u CROSS JOIN dominios d
+WHERE u.email = 'admin@reactor.com.ar';
+
+INSERT IGNORE INTO perfiles (usuario_id, dominio_id, rol)
+SELECT u.id, d.id, 'operador'
+FROM usuarios u CROSS JOIN dominios d
+WHERE u.email = 'operador@reactor.com.ar'
+  AND d.nombre IN ('Planta baja', 'Acceso y perimetro');
+
+CREATE TABLE IF NOT EXISTS senales (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    dispositivo_id INT UNSIGNED NOT NULL,
+    topic          VARCHAR(255) NOT NULL,
+    canal_id       INT UNSIGNED DEFAULT NULL,
+    canal_label    VARCHAR(120) DEFAULT NULL,
+    tipo           VARCHAR(60)  NOT NULL,
+    valor          VARCHAR(255) DEFAULT NULL,
+    payload        JSON         DEFAULT NULL,
+    recibido_at    DATETIME     NOT NULL,
+    created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_dispositivo_recibido (dispositivo_id, recibido_at),
+    INDEX idx_recibido_at          (recibido_at),
+    INDEX idx_tipo                 (tipo),
+    CONSTRAINT fk_senales_dispositivo
+        FOREIGN KEY (dispositivo_id) REFERENCES dispositivos(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+INSERT IGNORE INTO senales (dispositivo_id, topic, canal_id, canal_label, tipo, valor, payload, recibido_at)
+SELECT d.id, CONCAT('reactor/', d.uid, '/data'), 4, 'temp_ambiente', 'lectura', '23.4',
+       JSON_OBJECT('canal_id', 4, 'label', 'temp_ambiente', 'unidad', 'C', 'valor', 23.4),
+       NOW() - INTERVAL 2 MINUTE
+FROM dispositivos d WHERE d.uid = 'RX-0001';
+
+INSERT IGNORE INTO senales (dispositivo_id, topic, canal_id, canal_label, tipo, valor, payload, recibido_at)
+SELECT d.id, CONCAT('reactor/', d.uid, '/data'), 1, 'humedad_relativa', 'lectura', '58',
+       JSON_OBJECT('canal_id', 1, 'label', 'humedad_relativa', 'unidad', '%', 'valor', 58),
+       NOW() - INTERVAL 5 MINUTE
+FROM dispositivos d WHERE d.uid = 'RX-0002';
+
+INSERT IGNORE INTO senales (dispositivo_id, topic, canal_id, canal_label, tipo, valor, payload, recibido_at)
+SELECT d.id, CONCAT('reactor/', d.uid, '/state'), 1, 'rele_1', 'estado', 'on',
+       JSON_OBJECT('canal_id', 1, 'label', 'rele_1', 'estado', 'on'),
+       NOW() - INTERVAL 10 MINUTE
+FROM dispositivos d WHERE d.uid = 'RX-0003';
+
+INSERT IGNORE INTO senales (dispositivo_id, topic, canal_id, canal_label, tipo, valor, payload, recibido_at)
+SELECT d.id, CONCAT('reactor/', d.uid, '/event'), 3, 'puerta_principal', 'evento', 'open',
+       JSON_OBJECT('canal_id', 3, 'label', 'puerta_principal', 'evento', 'open'),
+       NOW() - INTERVAL 30 MINUTE
+FROM dispositivos d WHERE d.uid = 'RX-0006';
+
+INSERT IGNORE INTO senales (dispositivo_id, topic, canal_id, canal_label, tipo, valor, payload, recibido_at)
+SELECT d.id, CONCAT('reactor/', d.uid, '/error'), NULL, NULL, 'error', 'sensor_disconnected',
+       JSON_OBJECT('mensaje', 'No hay respuesta del sensor durante 5 ciclos', 'codigo', 'E_NO_RESPONSE'),
+       NOW() - INTERVAL 15 MINUTE
+FROM dispositivos d WHERE d.uid = 'RX-0005';

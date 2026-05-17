@@ -22,35 +22,35 @@ try {
 function handleList(): void
 {
     $stmt = db()->query(
-        'SELECT d.id, d.name, d.description, d.created_at, d.updated_at,
-                COUNT(dev.id) AS device_count
-         FROM domains d
-         LEFT JOIN devices dev ON dev.domain_id = d.id
+        'SELECT d.id, d.nombre, d.descripcion, d.created_at, d.updated_at,
+                COUNT(dev.id) AS dispositivos_count
+         FROM dominios d
+         LEFT JOIN dispositivos dev ON dev.dominio_id = d.id
          GROUP BY d.id
-         ORDER BY d.name ASC'
+         ORDER BY d.nombre ASC'
     );
 
-    $domains = array_map(static function (array $r): array {
-        $r['device_count'] = (int) $r['device_count'];
+    $dominios = array_map(static function (array $r): array {
+        $r['dispositivos_count'] = (int) $r['dispositivos_count'];
         return $r;
     }, $stmt->fetchAll());
 
-    json_ok(['domains' => $domains]);
+    json_ok(['dominios' => $dominios]);
 }
 
 function handleCreate(): void
 {
-    $in   = readJson();
-    $name = trim((string) ($in['name'] ?? ''));
-    $desc = trim((string) ($in['description'] ?? ''));
+    $in     = readJson();
+    $nombre = trim((string) ($in['nombre']      ?? ''));
+    $desc   = trim((string) ($in['descripcion'] ?? ''));
 
-    if ($name === '')                json_error('El nombre es obligatorio', 422);
-    if (mb_strlen($name) > 120)      json_error('El nombre no puede superar 120 caracteres', 422);
+    if ($nombre === '')              json_error('El nombre es obligatorio', 422);
+    if (mb_strlen($nombre) > 120)    json_error('El nombre no puede superar 120 caracteres', 422);
     if (mb_strlen($desc) > 255)      json_error('La descripcion no puede superar 255 caracteres', 422);
 
     try {
-        $stmt = db()->prepare('INSERT INTO domains (name, description) VALUES (:n, :d)');
-        $stmt->execute([':n' => $name, ':d' => $desc === '' ? null : $desc]);
+        $stmt = db()->prepare('INSERT INTO dominios (nombre, descripcion) VALUES (:n, :d)');
+        $stmt->execute([':n' => $nombre, ':d' => $desc === '' ? null : $desc]);
     } catch (PDOException $e) {
         if ((int) $e->errorInfo[1] === 1062) {
             json_error('Ya existe un dominio con ese nombre', 409);
@@ -63,19 +63,19 @@ function handleCreate(): void
 
 function handleUpdate(): void
 {
-    $in   = readJson();
-    $id   = (int) ($in['id'] ?? 0);
-    $name = trim((string) ($in['name'] ?? ''));
-    $desc = trim((string) ($in['description'] ?? ''));
+    $in     = readJson();
+    $id     = (int) ($in['id'] ?? 0);
+    $nombre = trim((string) ($in['nombre']      ?? ''));
+    $desc   = trim((string) ($in['descripcion'] ?? ''));
 
     if ($id <= 0)                    json_error('Id invalido', 422);
-    if ($name === '')                json_error('El nombre es obligatorio', 422);
-    if (mb_strlen($name) > 120)      json_error('El nombre no puede superar 120 caracteres', 422);
+    if ($nombre === '')              json_error('El nombre es obligatorio', 422);
+    if (mb_strlen($nombre) > 120)    json_error('El nombre no puede superar 120 caracteres', 422);
     if (mb_strlen($desc) > 255)      json_error('La descripcion no puede superar 255 caracteres', 422);
 
     try {
-        $stmt = db()->prepare('UPDATE domains SET name = :n, description = :d WHERE id = :id');
-        $stmt->execute([':n' => $name, ':d' => $desc === '' ? null : $desc, ':id' => $id]);
+        $stmt = db()->prepare('UPDATE dominios SET nombre = :n, descripcion = :d WHERE id = :id');
+        $stmt->execute([':n' => $nombre, ':d' => $desc === '' ? null : $desc, ':id' => $id]);
     } catch (PDOException $e) {
         if ((int) $e->errorInfo[1] === 1062) {
             json_error('Ya existe un dominio con ese nombre', 409);
@@ -84,7 +84,7 @@ function handleUpdate(): void
     }
 
     if ($stmt->rowCount() === 0) {
-        $exists = db()->prepare('SELECT 1 FROM domains WHERE id = :id');
+        $exists = db()->prepare('SELECT 1 FROM dominios WHERE id = :id');
         $exists->execute([':id' => $id]);
         if (!$exists->fetchColumn()) json_error('Dominio no encontrado', 404);
     }
@@ -97,12 +97,14 @@ function handleDelete(): void
     $id = (int) ($_GET['id'] ?? 0);
     if ($id <= 0) json_error('Id invalido', 422);
 
-    $count = (int) db()->query('SELECT COUNT(*) FROM devices WHERE domain_id = ' . $id)->fetchColumn();
+    $stmt = db()->prepare('SELECT COUNT(*) FROM dispositivos WHERE dominio_id = :id');
+    $stmt->execute([':id' => $id]);
+    $count = (int) $stmt->fetchColumn();
     if ($count > 0) {
         json_error("No se puede eliminar: el dominio tiene $count dispositivo(s) asociado(s)", 409);
     }
 
-    $stmt = db()->prepare('DELETE FROM domains WHERE id = :id');
+    $stmt = db()->prepare('DELETE FROM dominios WHERE id = :id');
     $stmt->execute([':id' => $id]);
 
     if ($stmt->rowCount() === 0) json_error('Dominio no encontrado', 404);

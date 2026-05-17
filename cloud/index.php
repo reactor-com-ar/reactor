@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
+
 $appName = 'cloud';
+$versionFile = __DIR__ . '/version.txt';
+$cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : (string) time();
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -9,65 +12,128 @@ $appName = 'cloud';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Reactor · <?= htmlspecialchars($appName) ?></title>
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="assets/css/style.css" rel="stylesheet">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet"
+          href="assets/css/style.css?v=<?= htmlspecialchars($cacheBust) ?>">
 </head>
 <body>
 
-<div class="app-shell">
+<div class="layout">
 
-    <aside class="sidebar">
-        <div class="sidebar-brand">
-            <i class="bi bi-cpu-fill"></i>
-            <div>
-                <div class="brand-title">REACTOR</div>
-                <div class="brand-subtitle">cloud</div>
-            </div>
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+            <img src="assets/img/reactor_white.png?v=<?= htmlspecialchars($cacheBust) ?>"
+                 alt="Reactor" class="sidebar-logo-mark">
         </div>
 
         <nav class="sidebar-nav">
-            <a href="#/dashboard" data-route="dashboard" class="nav-item active">
-                <i class="bi bi-speedometer2"></i> Dashboard
-            </a>
-            <a href="#/devices" data-route="devices" class="nav-item">
-                <i class="bi bi-hdd-stack"></i> Dispositivos
-            </a>
-            <a href="#/alerts" data-route="alerts" class="nav-item">
-                <i class="bi bi-bell"></i> Alertas
-            </a>
-            <a href="#/users" data-route="users" class="nav-item">
-                <i class="bi bi-people"></i> Usuarios
-            </a>
+            <div class="nav-group-wrap" data-group="inicio">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🏠</span>
+                    <span class="nav-group-label">Inicio</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/dashboard" data-route="dashboard" class="nav-item nav-sub-item active">
+                        <span class="nav-icon">📊</span> Dashboard
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="propiedad">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🏢</span>
+                    <span class="nav-group-label">Propiedad</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/domains" data-route="domains" class="nav-item nav-sub-item">
+                        <span class="nav-icon">🗂️</span> Dominios
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="inventario">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">📦</span>
+                    <span class="nav-group-label">Inventario</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/devices" data-route="devices" class="nav-item nav-sub-item">
+                        <span class="nav-icon">🛰️</span> Dispositivos
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="registros">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-group-label">Registros</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/alerts" data-route="alerts" class="nav-item nav-sub-item">
+                        <span class="nav-icon">🔔</span> Alertas
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="seguridad">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🔐</span>
+                    <span class="nav-group-label">Seguridad</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/users" data-route="users" class="nav-item nav-sub-item">
+                        <span class="nav-icon">👥</span> Usuarios
+                    </a>
+                </div>
+            </div>
+
             <a href="#/settings" data-route="settings" class="nav-item">
-                <i class="bi bi-gear"></i> Configuracion
+                <span class="nav-icon">⚙️</span> Configuración
             </a>
         </nav>
 
-        <div class="sidebar-footer">
-            <small>v0.1.0</small>
-        </div>
+        <div class="sidebar-footer">v0.1.0</div>
     </aside>
 
-    <main class="main">
-        <header class="topbar">
-            <div class="topbar-title" id="view-title">Dashboard</div>
-            <div class="topbar-actions">
-                <button class="btn btn-sm btn-outline-light" id="btn-refresh">
-                    <i class="bi bi-arrow-clockwise"></i> Refrescar
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main">
+        <div class="topbar">
+            <div class="topbar-left">
+                <button class="hamburger" id="hamburger" aria-label="Abrir menú">☰</button>
+                <div class="topbar-title" id="view-title">Dashboard</div>
+            </div>
+            <div class="topbar-user">
+                <button class="btn btn-ghost btn-sm" id="btn-refresh" title="Refrescar">
+                    <i class="fa-solid fa-arrows-rotate"></i>
                 </button>
-                <div class="user-chip">
-                    <i class="bi bi-person-circle"></i>
-                    <span>admin</span>
+                <div class="topbar-user-wrap">
+                    <button class="topbar-username" id="btn-user">
+                        <i class="fa-solid fa-circle-user"></i>
+                        <span>admin</span>
+                        <i class="fa-solid fa-caret-down" style="font-size:.7rem"></i>
+                    </button>
+                    <div class="user-dropdown" id="user-dropdown">
+                        <a href="#/settings" class="user-dropdown-item">Configuración</a>
+                        <a href="#" class="user-dropdown-item" id="btn-logout">Salir</a>
+                    </div>
                 </div>
             </div>
-        </header>
+        </div>
 
-        <section class="content" id="view"></section>
-    </main>
+        <div class="content" id="view"></div>
+    </div>
 
 </div>
 
-<script src="assets/js/app.js"></script>
+<div class="toast" id="toast"></div>
+
+<script src="assets/js/app.js?v=<?= htmlspecialchars($cacheBust) ?>"></script>
 </body>
 </html>

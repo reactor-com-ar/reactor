@@ -43,9 +43,13 @@ o `.env.production` de la raiz del repo, inyectado al contenedor por
 
 ## Endpoints actuales
 
-| Metodo | Path                  | Descripcion                                    |
-| ------ | --------------------- | ---------------------------------------------- |
-| GET    | `/api/devices.php`    | Listado de dispositivos + summary por estado   |
+| Metodo | Path                  | Descripcion                                       |
+| ------ | --------------------- | ------------------------------------------------- |
+| GET    | `/api/devices.php`    | Listado de dispositivos + summary + dominio       |
+| GET    | `/api/domains.php`    | Listado de dominios con `device_count`            |
+| POST   | `/api/domains.php`    | Crea dominio. Body JSON: `{name, description?}`   |
+| PUT    | `/api/domains.php`    | Actualiza dominio. Body JSON: `{id, name, description?}` |
+| DELETE | `/api/domains.php?id=N` | Elimina dominio (falla si tiene dispositivos)    |
 
 ## Proximos pasos sugeridos
 

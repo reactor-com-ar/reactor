@@ -20,48 +20,42 @@ con éste.
 
 Definí esto en `:root`. Reemplazá todos los hexadecimales sueltos por estas variables.
 
+Cloud tiene **un único tema** oscuro, organizado en **dos zonas cromáticas bien separadas**:
+
+1. **Chrome de la app** (sidebar vertical + topbar horizontal) — pintados de plano en el rojo institucional **`#C11313`**. Forman una "L" roja continua que enmarca toda la pantalla y aporta la identidad de marca a la primera vista.
+2. **Área de contenido** (cards, modales, inputs, tablas, dropdowns) — grises oscuros neutros. El rojo institucional reaparece dentro de esta zona solo como **acento**: botones primarios, focus ring, links activos, "ver más", chips activos, valores numéricos destacados.
+
+**No hay modo claro ni toggle de tema.**
+
 ```css
 :root {
-  --bg:        #f4f6fb;
-  --surface:   #ffffff;
-  --border:    #e2e8f0;
-  --primary:   #FFA000;   /* naranja de marca */
-  --primary-h: #e08c00;
-  --danger:    #ef4444;
+  --bg:        #1a1a1a;   /* fondo del área de contenido (gris oscuro) */
+  --surface:   #242526;   /* topbar, cards, inputs, dropdowns */
+  --border:    #383838;   /* bordes sutiles en zona gris */
+  --row-hover: #2d2e2f;   /* hover de filas de tabla */
+  --primary:   #C11313;   /* rojo institucional (sidebar + topbar + acentos) */
+  --primary-h: #8e0e0e;   /* hover más oscuro */
+  --danger:    #e62a2a;   /* acciones destructivas */
   --success:   #22c55e;
   --warn:      #f59e0b;
   --info:      #3b82f6;
   --purple:    #8b5cf6;
-  --text:      #1e293b;
-  --muted:     #64748b;
+  --text:      #f0f0f0;   /* texto principal sobre gris */
+  --muted:     #9ca0a4;   /* labels / texto atenuado */
   --radius:    10px;
-  --shadow:    0 1px 4px rgba(0,0,0,.08);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,.12);
-  --row-hover: #f1f5f9;
-}
-
-[data-theme="dark"] {
-  --bg:        #32373D;
-  --surface:   #3d4248;
-  --border:    #555b63;
-  --primary:   #FFA000;
-  --primary-h: #e08c00;
-  --danger:    #ef4444;
-  --success:   #22c55e;
-  --warn:      #f59e0b;
-  --text:      #f0f0f0;
-  --muted:     #aaaaaa;
-  --shadow:    0 1px 4px rgba(0,0,0,.4);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,.6);
-  --row-hover: #4a5058;
+  --shadow:    0 1px 4px rgba(0,0,0,.45);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.65);
 }
 ```
 
 **Reglas:**
-- El modo oscuro se activa seteando `data-theme="dark"` en `<html>` o `<body>`. No tocar markup.
-- Color de marca: `var(--primary)` (naranja `#FFA000`). Usalo para acciones primarias, focus ring, links activos, hover de nav, "ver más", chips activos.
+- **Tema único.** No usar `data-theme`, no inventar tema claro, no agregar toggle de tema en la UI.
+- **Dos zonas cromáticas, sin mezcla.** El chrome (sidebar + topbar) son las *únicas* superficies rojas sólidas. Cards, modales y contenido viven sobre `--bg` / `--surface` en grises. No pintar cards ni modales de rojo.
+- Color de marca: `var(--primary)` (`#C11313`). Fuera del chrome se usa solo como **acento**: acciones primarias, focus ring, links activos, "ver más", chips activos, valores numéricos clave.
+- Dentro del chrome rojo (sidebar y topbar), los hijos (`.sidebar-logo-title`, `.nav-item`, `.topbar-title`, `.topbar-username`, `.btn-ghost`, etc.) **no usan `--text` / `--muted` / `--border`**: usan blanco (`#fff`) y negros translúcidos (`rgba(0,0,0,.18-.28)`) porque el contraste se calcula contra el rojo, no contra el gris. Ver §4 y §5.
+- `--danger` (`#e62a2a`) es un rojo más brillante reservado para acciones destructivas. No mezclarla con `--primary`.
 - Radios: **10px** en cards / inputs / botones (`var(--radius)`), **14px** en modales, **99px** en badges y toasts.
-- Sombras: muy sutiles. `var(--shadow)` en cards / topbar, `var(--shadow-lg)` en modales y dropdowns.
+- Sombras: profundas para destacar sobre el fondo gris oscuro. `var(--shadow)` en cards / topbar, `var(--shadow-lg)` en modales y dropdowns.
 - Tipografía: `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`.
 
 ## 2. Reset & base
@@ -105,46 +99,103 @@ Estructura obligatoria de toda pantalla de cloud:
 
 ## 4. Sidebar
 
+El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus elementos hijos **no usan los tokens `--text` / `--muted` / `--border`**: usan `#fff` para texto y `rgba(0,0,0,.18-.28)` para hover / activo / bordes. El contraste se calcula contra el rojo, no contra el gris del resto de la app.
+
 ```css
-.sidebar-logo  { padding: 20px 20px 16px; border-bottom: 1px solid var(--border);
-                 display: flex; align-items: center; gap: 8px; }
-.sidebar-nav   { padding: 0 0 12px; flex: 1; }
-.sidebar-footer{ padding: 10px 20px; font-size: .75rem; color: var(--muted);
-                 border-top: 1px solid var(--border); text-align: center;
+.sidebar       { background: var(--primary);             /* rojo institucional */
+                 border-right: 1px solid rgba(0,0,0,.25); }
+
+.sidebar-logo  { padding: 18px 20px; border-bottom: 1px solid rgba(0,0,0,.2);
+                 display: flex; align-items: center; justify-content: center; }
+.sidebar-logo-mark  { display: block; width: auto; height: 36px;
+                      max-width: 100%; object-fit: contain; }   /* <img src="assets/img/reactor_white.png"> */
+
+.sidebar-nav   { padding: 8px 0 12px; flex: 1; }
+.sidebar-footer{ padding: 10px 20px; font-size: .75rem; color: rgba(255,255,255,.7);
+                 border-top: 1px solid rgba(0,0,0,.2); text-align: center;
                  letter-spacing: .03em; font-family: monospace; }
 
 .nav-item { display: flex; align-items: center; gap: 10px;
-            padding: 10px 20px; font-size: .9rem; color: var(--muted);
+            padding: 10px 20px; font-size: .9rem; color: rgba(255,255,255,.85);
             cursor: pointer; border-left: 3px solid transparent;
             transition: background .15s, color .15s; text-decoration: none; }
-.nav-item:hover  { background: rgba(255,160,0,.1); color: var(--primary); }
-.nav-item.active { background: var(--primary); color: #fff;
-                   border-left-color: var(--primary); font-weight: 600; }
+.nav-item:hover  { background: rgba(0,0,0,.18); color: #fff; }
+.nav-item.active { background: rgba(0,0,0,.28); color: #fff;
+                   border-left-color: #fff; font-weight: 600; }
 .nav-icon { font-size: 1.1rem; width: 20px; text-align: center; }
 
-/* Grupos colapsables */
-.nav-group-wrap .nav-sub        { display: none; background: var(--bg); }
-.nav-group-wrap.open .nav-sub   { display: block; }
-.nav-group-toggle               { justify-content: space-between; }
-.nav-group-arrow                { font-size: .75rem; font-weight: 700;
-                                  margin-left: auto; transition: transform .2s;
-                                  color: var(--muted); }
-.nav-group-wrap.open .nav-group-arrow { transform: rotate(45deg); }
-.nav-sub-item                   { padding-left: 34px; background: var(--bg); }
+/* Grupos colapsables
+ * Viven dentro del rojo, asi que NO usan --text / --muted / --border:
+ * texto en blanco translucido, las bandas internas son negro translucido
+ * (mas oscuras que el rojo de fondo para indicar nidificacion).
+ */
+.nav-group-wrap                       { display: block; }
+.nav-group-toggle                     { width: 100%; background: none; border: none;
+                                        text-align: left; cursor: pointer;
+                                        font-family: inherit; color: rgba(255,255,255,.85); }
+.nav-group-label                      { flex: 1; }
+.nav-group-arrow                      { margin-left: auto; font-size: 1rem; font-weight: 700;
+                                        line-height: 1; color: rgba(255,255,255,.7);
+                                        transition: transform .2s; }
+.nav-group-wrap.open .nav-group-arrow { transform: rotate(45deg); }   /* + → × */
+.nav-sub                              { display: none; background: rgba(0,0,0,.18);
+                                        border-top: 1px solid rgba(0,0,0,.2);
+                                        border-bottom: 1px solid rgba(0,0,0,.2); }
+.nav-group-wrap.open .nav-sub         { display: block; }
+.nav-sub-item                         { padding-left: 44px; font-size: .85rem; }
+.nav-sub-item.active                  { background: rgba(0,0,0,.32); }
 ```
 
-**Patrón:** logo arriba (36px alto), grupos con flecha `+` que rota 45° al abrir, footer con versión en monospace.
+**Patrón:** la cabecera del sidebar contiene **solo el logo** centrado — `<img src="assets/img/reactor_white.png" class="sidebar-logo-mark">` a 36 px de alto, sin texto "REACTOR / cloud" adjunto. Debajo, los items de primer nivel pueden ser navegación directa (`<a class="nav-item">`) o **grupos colapsables** (`.nav-group-wrap` con un `<button class="nav-group-toggle">` que aloja un `.nav-sub` con uno o más `.nav-sub-item`). El glifo `+` del toggle rota 45° al abrir (queda como `×`). Cuando el JS navega a una sub-ruta debe agregar la clase `open` al grupo correspondiente para que el sub-menú permanezca visible. Footer con versión en monospace. **No** introducir tokens grises ni `--text` / `--muted` / `--border` dentro del sidebar (tampoco del topbar — ver §5): textos en `#fff` u opacidades de blanco; bandas internas y estados en negros translúcidos.
+
+```html
+<nav class="sidebar-nav">
+  <a href="#/dashboard" class="nav-item active">
+    <span class="nav-icon">📊</span> Dashboard
+  </a>
+
+  <div class="nav-group-wrap" data-group="inventario">
+    <button type="button" class="nav-item nav-group-toggle">
+      <span class="nav-icon">📦</span>
+      <span class="nav-group-label">Inventario</span>
+      <span class="nav-group-arrow">+</span>
+    </button>
+    <div class="nav-sub">
+      <a href="#/devices" class="nav-item nav-sub-item">
+        <span class="nav-icon">🛰️</span> Dispositivos
+      </a>
+    </div>
+  </div>
+</nav>
+```
 
 ## 5. Topbar
 
+El topbar comparte el rojo institucional con el sidebar (`background: var(--primary)`). Por eso sus hijos siguen la misma regla del §4: `#fff` u opacidades de blanco para texto, negros translúcidos para estados. **No** usar `--text` / `--muted` / `--border` dentro del topbar — esos tokens están calibrados para gris.
+
+El `.user-dropdown`, en cambio, se despliega *bajo* el topbar sobre el área gris del contenido, así que sí usa los tokens grises normales.
+
 ```css
-.topbar-title    { font-size: 1rem; font-weight: 600; flex: 1; }
+.topbar          { background: var(--primary);
+                   border-bottom: 1px solid rgba(0,0,0,.25); }
+
+.topbar-title    { font-size: 1rem; font-weight: 600; flex: 1; color: #fff; }
 .topbar-user     { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .topbar-username { background: none; border: none; cursor: pointer;
-                   font-size: .85rem; color: var(--muted);
+                   font-size: .85rem; color: rgba(255,255,255,.85);
                    display: flex; align-items: center; gap: 4px;
-                   padding: 6px 10px; border-radius: 8px; transition: background .15s; }
-.topbar-username:hover { background: var(--border); }
+                   padding: 6px 10px; border-radius: 8px;
+                   transition: background .15s, color .15s; }
+.topbar-username:hover { background: rgba(0,0,0,.18); color: #fff; }
+
+/* Botones del topbar — ghost adaptado a fondo rojo */
+.topbar .btn-ghost       { color: rgba(255,255,255,.85);
+                           border-color: rgba(0,0,0,.25);
+                           background: transparent; }
+.topbar .btn-ghost:hover { background: rgba(0,0,0,.18); color: #fff; }
+.topbar .hamburger       { color: #fff; }
+
+/* Dropdown — se renderiza sobre el área gris, usa tokens normales */
 .user-dropdown   { display: none; position: absolute; right: 0; top: calc(100% + 6px);
                    background: var(--surface); border: 1px solid var(--border);
                    border-radius: 10px; box-shadow: var(--shadow-lg);
@@ -163,7 +214,7 @@ Estructura obligatoria de toda pantalla de cloud:
 .btn-primary       { background: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-h); }
 .btn-danger        { background: var(--danger); color: #fff; }
-.btn-danger:hover  { background: #dc2626; }
+.btn-danger:hover  { background: #c91515; }
 .btn-secondary     { background: var(--surface); color: var(--text);
                      border: 1px solid var(--border); }
 .btn-secondary:hover { background: var(--bg); }
@@ -189,7 +240,7 @@ input[type=password], input[type=search], select, textarea {
   color: var(--text); outline: none; transition: border .15s; font-family: inherit;
 }
 input:focus, select:focus, textarea:focus {
-  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(255,160,0,.12);
+  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(193,19,19,.25);
 }
 input:disabled, select:disabled, textarea:disabled,
 input[readonly], textarea[readonly] {
@@ -302,13 +353,15 @@ tbody tr:hover { background: var(--row-hover); }
 
 ## 11. Badges
 
+Los badges usan fondo translúcido sobre el rojo oscuro de la app — no fondos pasteles sólidos (no contrastarían bien con `--surface`).
+
 ```css
 .badge         { display: inline-block; padding: 2px 10px;
                  border-radius: 99px; font-size: .75rem; font-weight: 600; }
-.badge-info    { background: #eff6ff; color: #3b82f6; }
-.badge-success { background: #dcfce7; color: #16a34a; }
-.badge-danger  { background: #fef2f2; color: #dc2626; }
-.badge-warn    { background: #fef9c3; color: #a16207; }
+.badge-info    { background: rgba(59,130,246,.18); color: #93c5fd; }
+.badge-success { background: rgba(34,197,94,.18);  color: #86efac; }
+.badge-danger  { background: rgba(230,42,42,.2);   color: #f5a8a8; }
+.badge-warn    { background: rgba(245,158,11,.18); color: #fcd34d; }
 ```
 
 ## 12. Stat cards (resúmenes numéricos)
@@ -419,11 +472,13 @@ Para "¿Seguro que querés borrar?" y similares.
 ```css
 .toast { position: fixed; bottom: 24px; left: 50%;
          transform: translateX(-50%) translateY(16px);
-         background: #1e293b; color: #fff;
+         background: #0d0d0d; color: var(--text);
+         border: 1px solid var(--border);
          padding: 10px 20px; border-radius: 99px;
          font-size: .88rem; opacity: 0; pointer-events: none;
          transition: opacity .2s, transform .2s;
-         z-index: 200; white-space: nowrap; }
+         z-index: 200; white-space: nowrap;
+         box-shadow: var(--shadow-lg); }
 .toast.show  { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { background: var(--danger); }
 ```
@@ -478,7 +533,7 @@ Para celdas / tarjetas en carga: `<tr><td colspan="N" style="text-align:center;p
 
 ## 20. Iconografía
 
-- Para nav y headers de cards usar **emojis** (📊 📋 ⚠️ 💬 👥 📦 💰 🛒 🏷️ 🛵 ⚙️ 🔔). Son legibles, no requieren librería y respetan dark mode.
+- Para nav y headers de cards usar **emojis** (📊 📋 ⚠️ 💬 👥 📦 💰 🛒 🏷️ 🛵 ⚙️ 🔔). Son legibles, no requieren librería y se ven bien tanto sobre el rojo del sidebar como sobre los grises del contenido.
 - Para acciones por fila (editar / borrar / ver) usar **FontAwesome 6** (`<i class="fa-solid fa-pencil"></i>`).
 - No usar dos sistemas de iconos en el mismo lugar.
 
@@ -487,9 +542,9 @@ Para celdas / tarjetas en carga: `<tr><td colspan="N" style="text-align:center;p
 ## Reglas duras (criterios de aceptación)
 
 1. **Ningún color hardcodeado** en el HTML/CSS final. Todo sale de las variables.
-2. **Dark mode funciona** con solo `data-theme="dark"`, sin tocar markup.
+2. **Tema único con dos zonas:** chrome (sidebar + topbar) en rojo `#C11313` + resto en grises oscuros. No hay modo claro, no hay toggle de tema, no se usa `data-theme`. Nada fuera del chrome se pinta de rojo sólido — el rojo solo aparece como acento (botones primarios, focus, chips, links).
 3. **Una sola acción primaria** por pantalla / modal. El resto secundarias o ghost.
-4. **Focus visible naranja** en todos los inputs / selects / textareas.
+4. **Focus visible rojo** en todos los inputs / selects / textareas (`box-shadow` con el rojo institucional).
 5. **Loading** explícito: spinner o `.table-empty` — nunca tabla en blanco sin feedback.
 6. **Layout fijo**: sidebar 220px, topbar 60px, content padding 24px.
 7. **Densidad**: padding `10–14px` en celdas; gaps `12–20px` entre cards.

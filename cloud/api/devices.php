@@ -6,12 +6,18 @@ require __DIR__ . '/bootstrap.php';
 
 try {
     $stmt = db()->query(
-        'SELECT id, uid, name, type, location, status, last_seen_at, created_at
-         FROM devices
-         ORDER BY status = "error" DESC, status = "online" DESC, name ASC'
+        'SELECT d.id, d.uid, d.name, d.type, d.location, d.status,
+                d.last_seen_at, d.created_at,
+                d.domain_id, dom.name AS domain_name
+         FROM devices d
+         JOIN domains dom ON dom.id = d.domain_id
+         ORDER BY d.status = "error" DESC, d.status = "online" DESC, d.name ASC'
     );
 
-    $devices = $stmt->fetchAll();
+    $devices = array_map(static function (array $r): array {
+        $r['domain_id'] = (int) $r['domain_id'];
+        return $r;
+    }, $stmt->fetchAll());
 
     $summary = [
         'total'   => count($devices),
@@ -24,7 +30,7 @@ try {
         $summary[$d['status']] = ($summary[$d['status']] ?? 0) + 1;
     }
 
-    json_response([
+    json_ok([
         'summary' => $summary,
         'devices' => $devices,
     ]);

@@ -93,7 +93,9 @@ function Get-FreePort {
 }
 
 # --- Pick ports ---------------------------------------------------------------
-$AppPort = Get-FreePort -Start 8080
+# Cloud preferido en 8086 (convencion del proyecto). Si esta ocupado, se busca
+# el siguiente libre hacia arriba.
+$AppPort = Get-FreePort -Start 8086
 $DbPort  = Get-FreePort -Start 3307 -Reserved @($AppPort)
 
 Write-Host "==> Puertos elegidos:" -ForegroundColor Red
@@ -111,26 +113,27 @@ REACTOR_DB_PORT=$DbPort
 Set-Content -Path $envPath -Value $envBody -Encoding ascii
 
 # --- Force-clean stale containers (idempotent) --------------------------------
-# Solo borramos lo que existe, asi no escribimos a stderr (que PS 5.1
-# convertiria en NativeCommandError y abortaria el script con Stop)
+# El orden importa:
+#   1) `docker compose down -v --remove-orphans` SIEMPRE primero. Borra
+#      contenedores, red y -- critico -- el volumen `reactor-db-data` del
+#      proyecto. Si saltearamos esto el volumen sobrevive y MySQL no vuelve
+#      a correr schema.sql en el siguiente up (initdb solo se ejecuta en
+#      DB virgen), dejando el schema desactualizado.
+#   2) `docker rm -f` como fallback por si quedaron contenedores con esos
+#      nombres pero sin label de compose (ej. de una version vieja del script).
+# Nota: no redirigimos stderr (2>) para no convertirlo en NativeCommandError
+# con $ErrorActionPreference=Stop. La salida de stderr va a la consola y ya.
 Write-Host "==> Limpiando contenedores previos..." -ForegroundColor Red
+
+& docker compose -p reactor down -v --remove-orphans | Out-Null
+# LASTEXITCODE puede ser != 0 si no habia nada que borrar; no es un error real.
 
 $existingNames = @(& docker ps -a --format '{{.Names}}')
 foreach ($name in @('reactor', 'reactor-db')) {
     if ($existingNames -contains $name) {
-        Write-Host "    removiendo $name"
+        Write-Host "    removiendo $name (huerfano sin label compose)"
         & docker rm -f $name | Out-Null
     }
-}
-
-# Down del proyecto compose si tiene recursos asociados (red/volumen huerfanos)
-$composeIds = @(& docker compose -p reactor ps -aq)
-if ($composeIds.Count -gt 0) {
-    & docker compose -p reactor down -v --remove-orphans | Out-Null
-} else {
-    # Igual limpiamos red/volumen huerfanos si quedaron de un run anterior
-    $net = @(& docker network ls --filter "name=^reactor_default$" --format '{{.Name}}')
-    if ($net.Count -gt 0) { & docker network rm reactor_default | Out-Null }
 }
 
 # --- Build & up ---------------------------------------------------------------
@@ -161,6 +164,33 @@ while ((Get-Date) -lt $deadline) {
         $r = Invoke-WebRequest -Uri "http://localhost:$AppPort/" -UseBasicParsing -TimeoutSec 2
         if ($r.StatusCode -eq 200) { $ok = $true; break }
     } catch { Start-Sleep -Milliseconds 800 }
+}
+
+# --- Aplicar migraciones idempotentes -----------------------------------------
+# `docker-entrypoint-initdb.d` SOLO procesa archivos en su raiz y SOLO la
+# primera vez (DB virgen), asi que las migraciones de cloud/sql/migrations/
+# nunca se ejecutarian solas. Las corremos siempre, en orden alfabetico.
+# Todas estan escritas como idempotentes (chequean information_schema antes
+# de ALTER), asi que reaplicarlas es no-op.
+$migrationsDir = Join-Path $RepoRoot 'cloud/sql/migrations'
+if (Test-Path $migrationsDir) {
+    Write-Host ""
+    Write-Host "==> Aplicando migraciones de cloud/sql/migrations/ ..." -ForegroundColor Red
+    $migrations = @(Get-ChildItem -Path $migrationsDir -Filter '*.sql' | Sort-Object Name)
+    foreach ($m in $migrations) {
+        Write-Host "    $($m.Name)"
+        & docker cp $m.FullName "reactor-db:/tmp/migration.sql" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR copiando $($m.Name) al contenedor reactor-db" -ForegroundColor Red
+            exit 1
+        }
+        & docker exec reactor-db sh -c 'mysql -uroot -proot reactor_dev < /tmp/migration.sql'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR aplicando $($m.Name)" -ForegroundColor Red
+            exit 1
+        }
+    }
+    & docker exec reactor-db rm -f /tmp/migration.sql | Out-Null
 }
 
 Write-Host ""

@@ -384,11 +384,27 @@ tbody tr:hover { background: var(--row-hover); }
     padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
 }
-.modal-title    { font-size: 1rem; font-weight: 700; }
+.modal-title    { font-size: 1rem; font-weight: 700; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.modal-subtitle { font-size: .8rem; font-weight: 500; color: var(--muted); }
 .modal-body     { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .modal-footer   {
     padding: 16px 24px; border-top: 1px solid var(--border);
     display: flex; gap: 10px; justify-content: flex-end;
+}
+
+/* Variante ancha para editores monoespaciados (JSON, logs, etc.). */
+.modal.modal-wide { max-width: 760px; }
+
+/* Editor JSON: textarea monoespaciado, altura amplia, no envuelve lineas. */
+.json-editor {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .82rem;
+    line-height: 1.5;
+    min-height: 360px;
+    max-height: 60vh;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 2;
 }
 
 /* ---------- 15. Confirm dialog ---------- */

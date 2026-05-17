@@ -45,7 +45,8 @@ o `.env.production` de la raiz del repo, inyectado al contenedor por
 
 | Metodo | Path                  | Descripcion                                                 |
 | ------ | --------------------- | ----------------------------------------------------------- |
-| GET    | `/api/devices.php`    | Listado de `dispositivos` + resumen + dominio               |
+| GET    | `/api/devices.php`    | Listado de `dispositivos` + resumen + dominio + `config_json` (parseado) |
+| PUT    | `/api/devices.php`    | Actualiza `config_json` de un dispositivo. Body JSON: `{id, config_json}` (`config_json` puede ser cualquier estructura JSON o `null`; hasta 64 KB serializado) |
 | GET    | `/api/domains.php`    | Listado de `dominios` con `dispositivos_count`              |
 | POST   | `/api/domains.php`    | Crea dominio. Body JSON: `{nombre, descripcion?}`           |
 | PUT    | `/api/domains.php`    | Actualiza dominio. Body JSON: `{id, nombre, descripcion?}`  |
@@ -58,6 +59,7 @@ o `.env.production` de la raiz del repo, inyectado al contenedor por
 | POST   | `/api/profiles.php`    | Crea perfil. Body JSON: `{usuario_id, dominio_id, rol}`    |
 | PUT    | `/api/profiles.php`    | Actualiza rol del perfil. Body JSON: `{id, rol}`           |
 | DELETE | `/api/profiles.php?id=N` | Elimina perfil                                          |
+| GET    | `/api/signals.php`     | Listado de `senales` (lecturas/estados/eventos/errores) + resumen. Query opcional: `dispositivo_id`, `limit` (default 500, max 2000) |
 
 ## Tablas
 
@@ -69,9 +71,10 @@ ingles por convencion).
 | Tabla          | Campos principales                                                                   |
 | -------------- | ------------------------------------------------------------------------------------- |
 | `dominios`     | `id`, `nombre`, `descripcion`                                                         |
-| `dispositivos` | `id`, `uid`, `dominio_id` (FK), `nombre`, `tipo`, `ubicacion`, `estado`, `last_seen_at` |
+| `dispositivos` | `id`, `uid`, `dominio_id` (FK), `nombre`, `tipo`, `ubicacion`, `estado`, `config_json` (JSON libre editable desde la UI), `last_seen_at` |
 | `usuarios`     | `id`, `email`, `nombre`, `password_hash`, `rol`, `activo`, `last_login_at`            |
 | `perfiles`     | `id`, `usuario_id` (FK), `dominio_id` (FK), `rol` (`admin`/`operador`) — UNIQUE `(usuario_id, dominio_id)` |
+| `senales`      | `id`, `dispositivo_id` (FK), `topic`, `canal_id`, `canal_label`, `tipo`, `valor`, `payload` (JSON), `recibido_at` — historial inmutable de mensajes MQTT |
 
 ## Proximos pasos sugeridos
 

@@ -22,6 +22,7 @@
         dashboard: { title: 'Dashboard',     render: renderDashboard, group: 'inicio'     },
         domains:   { title: 'Dominios',      render: renderDomains,   group: 'propiedad'  },
         devices:   { title: 'Dispositivos',  render: renderDevices,   group: 'inventario' },
+        chips:     { title: 'Chips',         render: renderChips,     group: 'inventario' },
         signals:   { title: 'Señales',       render: renderSignals,   group: 'registros'  },
         alerts:    { title: 'Alertas',       render: renderStub,      group: 'registros'  },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'seguridad'  },
@@ -281,6 +282,18 @@
                     .toLowerCase().includes(q);
             });
             tableWrap.innerHTML = devicesTableBody(filtered);
+            wireRowActions();
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const d  = allDispositivos.find(x => x.id === id);
+                    if (!d) return;
+                    if (btn.dataset.act === 'config') openDeviceConfigModal(d);
+                });
+            });
         }
 
         chips.forEach(c => c.addEventListener('click', () => {
@@ -292,6 +305,111 @@
         searchInput.addEventListener('input', applyFilters);
         searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
         domainSel.addEventListener('change', applyFilters);
+
+        wireRowActions();
+    }
+
+    function openDeviceConfigModal(dev) {
+        const initialValue = dev.config_json
+            ? JSON.stringify(dev.config_json, null, 2)
+            : '';
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">
+                        Configuración JSON
+                        <span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uid)}</code></span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="dev-config-json">
+                            JSON libre. La validación de la estructura la hace el firmware al recibirla.
+                        </label>
+                        <textarea id="dev-config-json"
+                                  class="json-editor"
+                                  spellcheck="false"
+                                  autocomplete="off"
+                                  placeholder='{ "channels": [] }'>${escape(initialValue)}</textarea>
+                        <div class="field-error" id="dev-config-err" style="display:none"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="format" style="margin-right:auto">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Formatear
+                    </button>
+                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
+                    <button class="btn btn-primary" data-act="save">Guardar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const editor    = backdrop.querySelector('#dev-config-json');
+        const errorBox  = backdrop.querySelector('#dev-config-err');
+        const formatBtn = backdrop.querySelector('[data-act="format"]');
+        const saveBtn   = backdrop.querySelector('[data-act="save"]');
+
+        function clearError() {
+            errorBox.style.display = 'none';
+            editor.classList.remove('input-invalid');
+        }
+        function showError(msg) {
+            errorBox.textContent = msg;
+            errorBox.style.display = 'block';
+            editor.classList.add('input-invalid');
+        }
+        function parseEditor() {
+            const raw = editor.value.trim();
+            if (raw === '') return { ok: true, value: null };
+            try {
+                return { ok: true, value: JSON.parse(raw) };
+            } catch (e) {
+                return { ok: false, error: e.message };
+            }
+        }
+
+        editor.addEventListener('input', clearError);
+        editor.focus();
+
+        formatBtn.addEventListener('click', () => {
+            const r = parseEditor();
+            if (!r.ok) { showError('No se puede formatear: ' + r.error); return; }
+            editor.value = r.value === null ? '' : JSON.stringify(r.value, null, 2);
+            clearError();
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            const r = parseEditor();
+            if (!r.ok) { showError('JSON inválido: ' + r.error); editor.focus(); return; }
+
+            saveBtn.disabled = true;
+            try {
+                await api('devices.php', {
+                    method: 'PUT',
+                    body: { id: dev.id, config_json: r.value },
+                });
+                toast('Configuración guardada');
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
     }
 
     /* ---------- Views: Dominios ---------- */
@@ -1234,6 +1352,301 @@
                 }
             }
         );
+    }
+
+    /* ---------- Views: Señales ---------- */
+    const TIPO_SENAL_BADGE = {
+        lectura: 'badge-info',
+        estado:  'badge-success',
+        evento:  'badge-warn',
+        error:   'badge-danger',
+    };
+
+    async function renderSignals(root) {
+        try {
+            const [data, devData] = await Promise.all([
+                api('signals.php' + (pendingSignalsDeviceFilter ? `?dispositivo_id=${pendingSignalsDeviceFilter}` : '')),
+                api('devices.php'),
+            ]);
+            const dispositivos = devData.dispositivos;
+            const initialDevice = pendingSignalsDeviceFilter;
+            pendingSignalsDeviceFilter = null;
+
+            const devOptions = ['<option value="">Todos los dispositivos</option>']
+                .concat(dispositivos.map(d =>
+                    `<option value="${d.id}" ${initialDevice && +initialDevice === d.id ? 'selected' : ''}>${escape(d.uid)} · ${escape(d.nombre)}</option>`
+                ))
+                .join('');
+
+            const r = data.resumen;
+
+            root.innerHTML = `
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total señales</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Últimas 24 h</span>
+                        <span class="stat-value green">${r.ultimas_24h}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Dispositivos activos (24 h)</span>
+                        <span class="stat-value">${r.dispositivos_activos}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Errores</span>
+                        <span class="stat-value red">${r.errores}</span>
+                    </div>
+                </div>
+
+                <div class="toolbar">
+                    <div class="toolbar-left">
+                        <div class="search-wrap">
+                            <input type="search" class="search-input" id="sig-search" placeholder="Buscar por dispositivo, topic, canal o valor…">
+                            <button class="search-clear" id="sig-search-clear" aria-label="Limpiar">×</button>
+                        </div>
+                        <select id="sig-device-filter">${devOptions}</select>
+                        <button class="filter-chip active" data-filter="all">Todos</button>
+                        <button class="filter-chip" data-filter="lectura">Lectura</button>
+                        <button class="filter-chip" data-filter="estado">Estado</button>
+                        <button class="filter-chip" data-filter="evento">Evento</button>
+                        <button class="filter-chip" data-filter="error">Error</button>
+                    </div>
+                    <div class="toolbar-right">
+                        <span class="td-id">Mostrando hasta ${data.limit} señales más recientes</span>
+                    </div>
+                </div>
+
+                <div class="table-card" id="sig-table">${signalsTableBody(data.senales)}</div>
+            `;
+
+            wireSignalsView(data.senales, initialDevice);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function signalsTableBody(senales) {
+        if (!senales.length) {
+            return `<div class="table-empty">No hay señales registradas todavía.</div>`;
+        }
+
+        const rows = senales.map(s => `
+            <tr data-id="${s.id}">
+                <td><span class="td-id">${formatDate(s.recibido_at)}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(s.dispositivo_nombre)}</div>
+                    <div class="td-id">${escape(s.dispositivo_uid)}</div>
+                </td>
+                <td><span class="badge badge-info">${escape(s.dominio_nombre)}</span></td>
+                <td>${s.canal_label
+                    ? `<span class="td-nombre">${escape(s.canal_label)}</span>` +
+                      (s.canal_id != null ? ` <span class="td-id">#${s.canal_id}</span>` : '')
+                    : '<span class="td-id">—</span>'}</td>
+                <td>${signalTipoBadge(s.tipo)}</td>
+                <td>${s.valor != null && s.valor !== '' ? escape(s.valor) : '<span class="td-id">—</span>'}</td>
+                <td><span class="td-id">${escape(s.topic)}</span></td>
+                <td class="actions">
+                    <button class="btn-icon-sm" data-act="view" title="Ver detalle"><i class="fa-solid fa-eye"></i></button>
+                </td>
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Recibido</th>
+                        <th>Dispositivo</th>
+                        <th>Dominio</th>
+                        <th>Canal</th>
+                        <th>Tipo</th>
+                        <th>Valor</th>
+                        <th>Topic</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function signalTipoBadge(tipo) {
+        const cls = TIPO_SENAL_BADGE[tipo] || 'badge-info';
+        return `<span class="badge ${cls}">${escape(tipo)}</span>`;
+    }
+
+    function wireSignalsView(allSenales, initialDevice) {
+        const tableWrap   = document.getElementById('sig-table');
+        const searchInput = document.getElementById('sig-search');
+        const searchClear = document.getElementById('sig-search-clear');
+        const devSel      = document.getElementById('sig-device-filter');
+        const chips       = document.querySelectorAll('.filter-chip[data-filter]');
+        let activeFilter  = 'all';
+
+        if (initialDevice) devSel.value = String(initialDevice);
+
+        function applyFilters() {
+            const q   = (searchInput.value || '').trim().toLowerCase();
+            const dev = devSel.value;
+            const filtered = allSenales.filter(s => {
+                if (activeFilter !== 'all' && s.tipo !== activeFilter) return false;
+                if (dev && String(s.dispositivo_id) !== dev) return false;
+                if (!q) return true;
+                return (s.dispositivo_nombre + ' ' + s.dispositivo_uid + ' ' + s.topic + ' ' +
+                        (s.canal_label || '') + ' ' + (s.valor || '') + ' ' + s.tipo)
+                    .toLowerCase().includes(q);
+            });
+            tableWrap.innerHTML = signalsTableBody(filtered);
+            wireRowActions();
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act="view"]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const s  = allSenales.find(x => x.id === id);
+                    if (s) openSignalViewModal(s);
+                });
+            });
+        }
+
+        chips.forEach(c => c.addEventListener('click', () => {
+            chips.forEach(x => x.classList.remove('active'));
+            c.classList.add('active');
+            activeFilter = c.dataset.filter;
+            applyFilters();
+        }));
+        searchInput.addEventListener('input', applyFilters);
+        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
+        devSel.addEventListener('change', applyFilters);
+
+        wireRowActions();
+    }
+
+    function openSignalViewModal(s) {
+        const payloadStr = formatPayload(s.payload);
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Detalle de la señal</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <dl class="data-list">
+                        <div class="data-row">
+                            <dt class="data-label">ID</dt>
+                            <dd class="data-value"><code>#${s.id}</code></dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Recibido</dt>
+                            <dd class="data-value">${formatDate(s.recibido_at)}</dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Dispositivo</dt>
+                            <dd class="data-value">${escape(s.dispositivo_nombre)} <code>${escape(s.dispositivo_uid)}</code></dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Dominio</dt>
+                            <dd class="data-value"><span class="badge badge-info">${escape(s.dominio_nombre)}</span></dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Topic MQTT</dt>
+                            <dd class="data-value"><code>${escape(s.topic)}</code></dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Canal</dt>
+                            <dd class="data-value ${s.canal_label ? '' : 'muted'}">${s.canal_label
+                                ? escape(s.canal_label) + (s.canal_id != null ? ` <code>#${s.canal_id}</code>` : '')
+                                : 'Sin canal asociado'}</dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Tipo</dt>
+                            <dd class="data-value">${signalTipoBadge(s.tipo)}</dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Valor</dt>
+                            <dd class="data-value ${s.valor != null && s.valor !== '' ? '' : 'muted'}">${
+                                s.valor != null && s.valor !== '' ? escape(s.valor) : 'Sin valor'
+                            }</dd>
+                        </div>
+                        <div class="data-row">
+                            <dt class="data-label">Payload</dt>
+                            <dd class="data-value ${payloadStr ? '' : 'muted'}">${
+                                payloadStr
+                                    ? `<pre style="margin:0;font-family:monospace;font-size:.82rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;overflow-x:auto;white-space:pre-wrap">${escape(payloadStr)}</pre>`
+                                    : 'Sin payload'
+                            }</dd>
+                        </div>
+                    </dl>
+                </div>
+                <div class="modal-footer">
+                    <div class="action-menu action-menu-up" id="sig-view-menu" style="margin-right:auto">
+                        <button class="btn btn-secondary" data-act="menu-toggle">
+                            <i class="fa-solid fa-ellipsis"></i> Acciones
+                        </button>
+                        <div class="action-menu-dropdown" role="menu">
+                            <button class="action-menu-item" data-act="go-device" role="menuitem">
+                                <i class="fa-solid fa-satellite-dish"></i> Ver dispositivo
+                            </button>
+                            <button class="action-menu-item" data-act="copy-topic" role="menuitem">
+                                <i class="fa-regular fa-copy"></i> Copiar topic
+                            </button>
+                            <button class="action-menu-item" data-act="copy-payload" role="menuitem">
+                                <i class="fa-regular fa-copy"></i> Copiar payload
+                            </button>
+                        </div>
+                    </div>
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const menu       = backdrop.querySelector('#sig-view-menu');
+        const menuToggle = menu.querySelector('[data-act="menu-toggle"]');
+
+        menuToggle.addEventListener('click', e => {
+            e.stopPropagation();
+            menu.classList.toggle('open');
+        });
+        backdrop.addEventListener('click', e => {
+            if (!menu.contains(e.target)) menu.classList.remove('open');
+        });
+
+        menu.querySelectorAll('.action-menu-item').forEach(item => {
+            item.addEventListener('click', () => {
+                menu.classList.remove('open');
+                const act = item.dataset.act;
+                if (act === 'go-device') {
+                    close();
+                    window.location.hash = '#/devices';
+                } else if (act === 'copy-topic') {
+                    copyToClipboard(s.topic);
+                } else if (act === 'copy-payload') {
+                    copyToClipboard(payloadStr || '');
+                }
+            });
+        });
+    }
+
+    function formatPayload(p) {
+        if (p == null || p === '') return '';
+        if (typeof p === 'object') return JSON.stringify(p, null, 2);
+        try { return JSON.stringify(JSON.parse(p), null, 2); } catch (_) { return String(p); }
     }
 
     /* ---------- Views: Stub ---------- */

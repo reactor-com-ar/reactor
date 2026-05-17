@@ -64,6 +64,9 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                     <a href="#/devices" data-route="devices" class="nav-item nav-sub-item">
                         <span class="nav-icon">🛰️</span> Dispositivos
                     </a>
+                    <a href="#/chips" data-route="chips" class="nav-item nav-sub-item">
+                        <span class="nav-icon">📶</span> Chips
+                    </a>
                 </div>
             </div>
 

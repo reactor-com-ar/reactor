@@ -21,7 +21,10 @@
       "PowerShell(docker exec reactor-db mysql -uroot -proot reactor_dev -e \"SELECT d.id, d.uid, d.domain_id, dom.name AS domain FROM devices d JOIN domains dom ON dom.id = d.domain_id;\" 2>$null)",
       "PowerShell(docker exec reactor-db mysql -uroot -proot reactor_dev -e \"UPDATE devices SET domain_id = CASE WHEN uid IN \\('RX-0001','RX-0002','RX-0003'\\) THEN 2 WHEN uid IN \\('RX-0004','RX-0006'\\) THEN 3 ELSE 1 END; SELECT uid, domain_id FROM devices;\" 2>$null)",
       "Bash(node --check c:/Users/Javier/Documents/Repositorios/reactor/cloud/assets/js/app.js)",
-      "Bash(findstr /i MYSQL)"
+      "Bash(findstr /i MYSQL)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri 'http://localhost:8083/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8083 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8083 -> ERROR: $\\($_.Exception.Message\\)\" }; try { $r = Invoke-WebRequest -Uri 'http://localhost:8080/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8080 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8080 -> ERROR: $\\($_.Exception.Message\\)\" })",
+      "Bash(docker compose *)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri 'http://localhost:8086/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8086 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8086 -> ERROR: $\\($_.Exception.Message\\)\" })"
     ],
     "additionalDirectories": [
       "C:\\Users\\Javier\\Downloads"

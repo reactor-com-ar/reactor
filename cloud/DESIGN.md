@@ -442,11 +442,20 @@ Si la stat-card es clickeable, agregale `.dash-link`:
 .modal-backdrop.open .modal { transform: scale(1) translateY(0); }
 .modal-header   { padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
                   display: flex; align-items: center; justify-content: space-between; }
-.modal-title    { font-size: 1rem; font-weight: 700; }
+.modal-title    { font-size: 1rem; font-weight: 700;
+                  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.modal-subtitle { font-size: .8rem; font-weight: 500; color: var(--muted); }
 .modal-body     { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .modal-footer   { padding: 16px 24px; border-top: 1px solid var(--border);
                   display: flex; gap: 10px; justify-content: flex-end; }
+
+/* Variante ancha para editores monoespaciados (JSON, logs, etc.). */
+.modal.modal-wide { max-width: 760px; }
 ```
+
+**Variantes:**
+- `.modal-wide`: aumenta el `max-width` a 760px. Usar **solo** cuando el contenido sea un editor monoespaciado (JSON, logs, payloads) que necesita ancho real para no envolver — ver §23. Los formularios normales se quedan en el ancho base de 520px.
+- `.modal-subtitle`: chip secundario al lado del título (mismo bloque `.modal-title`) para identificar el recurso editado, por ejemplo `Configuración JSON · Nombre · <code>UID</code>`. No reemplaza al título, lo complementa.
 
 ## 15. Confirm dialog (alerta de confirmación)
 
@@ -632,6 +641,61 @@ Para modales de "ver detalle" donde se muestran pares label/valor de solo lectur
 - Valores vacíos / nulos usan `.data-value.muted` con texto tipo "Sin descripción", "—" o similar, en cursiva muteada.
 - Identificadores (IDs, UIDs, hashes cortos) van envueltos en `<code>` para diferenciarse del texto libre.
 - Si la lista crece más de 8 pares, dividirla en secciones con subtítulos pequeños (`<h4>` `.form-group label`-equivalentes) en lugar de hacer scroll largo.
+
+## 23. Editor JSON (textarea monoespaciado)
+
+Para pantallas que necesitan editar un blob JSON crudo (configuración de dispositivos, payloads, plantillas). No es un editor con syntax-highlighting — es un `<textarea>` con fuente monoespaciada, sin envoltura de línea y con utilidades de formateo + validación al guardar.
+
+Va siempre dentro de un `.modal.modal-wide` (ver §14) para que el JSON respire a lo ancho. La validación es solo sintáctica del lado del cliente (`JSON.parse` + try/catch) y vuelve a validarse en el backend; no se imponen schemas en la UI.
+
+```html
+<div class="modal-backdrop open">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title">
+        Configuración JSON
+        <span class="modal-subtitle">Sensor A · <code>RX-0001</code></span>
+      </div>
+      <button class="btn-icon-sm">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="cfg">JSON libre. La validación de la estructura la hace el firmware al recibirla.</label>
+        <textarea id="cfg" class="json-editor" spellcheck="false" autocomplete="off"></textarea>
+        <div class="field-error" style="display:none"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" style="margin-right:auto">
+        <i class="fa-solid fa-wand-magic-sparkles"></i> Formatear
+      </button>
+      <button class="btn btn-ghost">Cancelar</button>
+      <button class="btn btn-primary">Guardar</button>
+    </div>
+  </div>
+</div>
+```
+
+```css
+.json-editor {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .82rem;
+    line-height: 1.5;
+    min-height: 360px;
+    max-height: 60vh;
+    white-space: pre;       /* sin word-wrap: el JSON no se envuelve */
+    overflow: auto;         /* scroll horizontal si la linea es larga */
+    tab-size: 2;
+}
+```
+
+**Reglas:**
+- Modal en variante `.modal-wide` (760px). Si el contenido cabe en 520px no es un caso de editor JSON: usá inputs comunes.
+- Textarea con clase `.json-editor`. Heredá los tokens normales de `input/textarea` (§7) — solo cambia tipografía, alto y `white-space`.
+- Botón **Formatear** a la izquierda del footer (`margin-right:auto`, ghost). Re-serializa el contenido con `JSON.stringify(v, null, 2)`. Si el JSON está roto, mostrar el error y no formatear.
+- Validar al guardar: parse, marcar `input-invalid` + `.field-error` con el mensaje del error de parseo. No deshabilitar el botón Guardar hasta que el contenido sea válido — el usuario tiene que poder intentarlo y ver el error.
+- Aceptar **textarea vacío = JSON nulo** (limpiar configuración). Documentarlo en el label si aplica.
+- No usar resaltado de sintaxis ni librerías tipo Monaco/CodeMirror: contradice §1 del STACK (sin build step, sin librerías UI pesadas).
 
 ---
 

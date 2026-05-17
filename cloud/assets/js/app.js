@@ -27,7 +27,7 @@
         alerts:    { title: 'Alertas',       render: renderStub,      group: 'registros'  },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'seguridad'  },
         profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'seguridad'  },
-        settings:  { title: 'Configuración', render: renderStub,      group: null         },
+        tools:     { title: 'Herramientas',  render: renderTools,     group: 'administracion' },
     };
 
     function currentRoute() {
@@ -200,7 +200,7 @@
                 <div class="table-card" id="dev-table">${devicesTableBody(data.dispositivos)}</div>
             `;
 
-            wireDevicesToolbar(data.dispositivos);
+            wireDevicesToolbar(data.dispositivos, dominios);
 
             if (pendingDevicesDomainFilter != null) {
                 const sel = document.getElementById('dev-domain-filter');
@@ -228,8 +228,8 @@
                 <td>${statusBadge(d.estado)}</td>
                 <td>${formatDate(d.last_seen_at)}</td>
                 <td class="actions">
-                    <button class="btn-icon-sm" data-act="view"   title="Ver"><i class="fa-solid fa-eye"></i></button>
-                    <button class="btn-icon-sm" data-act="config" title="Editar configuración JSON"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-icon-sm" data-act="edit"   title="Editar dispositivo"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-icon-sm" data-act="delete" title="Eliminar dispositivo"><i class="fa-solid fa-trash"></i></button>
                 </td>
             </tr>
         `).join('');
@@ -263,7 +263,7 @@
         return `<span class="badge ${m.cls}">${escape(m.label)}</span>`;
     }
 
-    function wireDevicesToolbar(allDispositivos) {
+    function wireDevicesToolbar(allDispositivos, allDominios) {
         const tableWrap   = document.getElementById('dev-table');
         const searchInput = document.getElementById('dev-search');
         const searchClear = document.getElementById('dev-search-clear');
@@ -291,7 +291,8 @@
                     const id = +btn.closest('tr').dataset.id;
                     const d  = allDispositivos.find(x => x.id === id);
                     if (!d) return;
-                    if (btn.dataset.act === 'config') openDeviceConfigModal(d);
+                    if (btn.dataset.act === 'edit')   openDeviceModal(d, allDominios);
+                    if (btn.dataset.act === 'delete') confirmDeleteDevice(d);
                 });
             });
         }
@@ -309,8 +310,38 @@
         wireRowActions();
     }
 
-    function openDeviceConfigModal(dev) {
-        const initialValue = dev.config_json
+    const ESTADOS_DISPOSITIVO = [
+        { value: 'online',  label: 'Online'  },
+        { value: 'offline', label: 'Offline' },
+        { value: 'error',   label: 'Error'   },
+    ];
+
+    function confirmDeleteDevice(dev) {
+        confirmDialog(
+            'Eliminar dispositivo',
+            `¿Eliminar el dispositivo ${dev.nombre} (UID ${dev.uid})? Se borrarán también sus señales asociadas. Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('devices.php?id=' + dev.id, { method: 'DELETE' });
+                    toast('Dispositivo eliminado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
+    }
+
+    function openDeviceModal(dev, allDominios) {
+        const domOpts = allDominios.map(d =>
+            `<option value="${d.id}" ${dev.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
+        ).join('');
+
+        const estadoOpts = ESTADOS_DISPOSITIVO.map(e =>
+            `<option value="${e.value}" ${dev.estado === e.value ? 'selected' : ''}>${escape(e.label)}</option>`
+        ).join('');
+
+        const initialJson = dev.config_json
             ? JSON.stringify(dev.config_json, null, 2)
             : '';
 
@@ -320,30 +351,68 @@
             <div class="modal modal-wide" role="dialog" aria-modal="true">
                 <div class="modal-header">
                     <div class="modal-title">
-                        Configuración JSON
+                        Editar dispositivo
                         <span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uid)}</code></span>
                     </div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="dev-dominio">Dominio</label>
+                            <select id="dev-dominio">${domOpts}</select>
+                        </div>
+                        <div class="form-group">
+                            <label for="dev-estado">Estado</label>
+                            <select id="dev-estado">${estadoOpts}</select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="dev-uid">UID</label>
+                            <input type="text" id="dev-uid" maxlength="64"
+                                   value="${escape(dev.uid)}"
+                                   placeholder="RX-0001" required>
+                            <div class="field-error" id="dev-uid-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="dev-tipo">Tipo</label>
+                            <input type="text" id="dev-tipo" maxlength="60"
+                                   value="${escape(dev.tipo)}"
+                                   placeholder="temperature / humidity / actuator…" required>
+                            <div class="field-error" id="dev-tipo-err" style="display:none"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="dev-nombre">Nombre</label>
+                        <input type="text" id="dev-nombre" maxlength="120"
+                               value="${escape(dev.nombre)}" required>
+                        <div class="field-error" id="dev-nombre-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="dev-ubicacion">Ubicación</label>
+                        <input type="text" id="dev-ubicacion" maxlength="120"
+                               value="${escape(dev.ubicacion ?? '')}"
+                               placeholder="Opcional">
+                    </div>
                     <div class="form-group">
                         <label for="dev-config-json">
-                            JSON libre. La validación de la estructura la hace el firmware al recibirla.
+                            Configuración (JSON libre — vacío equivale a limpiar; la estructura la valida el firmware)
                         </label>
                         <textarea id="dev-config-json"
                                   class="json-editor"
                                   spellcheck="false"
                                   autocomplete="off"
-                                  placeholder='{ "channels": [] }'>${escape(initialValue)}</textarea>
+                                  placeholder='{ "channels": [] }'>${escape(initialJson)}</textarea>
                         <div class="field-error" id="dev-config-err" style="display:none"></div>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-ghost" data-act="format" style="margin-right:auto">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> Formatear
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Formatear JSON
                     </button>
                     <button class="btn btn-ghost"   data-act="close">Cancelar</button>
-                    <button class="btn btn-primary" data-act="save">Guardar</button>
+                    <button class="btn btn-primary" data-act="save">Guardar cambios</button>
                 </div>
             </div>
         `;
@@ -358,51 +427,102 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        const editor    = backdrop.querySelector('#dev-config-json');
-        const errorBox  = backdrop.querySelector('#dev-config-err');
-        const formatBtn = backdrop.querySelector('[data-act="format"]');
-        const saveBtn   = backdrop.querySelector('[data-act="save"]');
+        const domSel      = backdrop.querySelector('#dev-dominio');
+        const estadoSel   = backdrop.querySelector('#dev-estado');
+        const uidInput    = backdrop.querySelector('#dev-uid');
+        const tipoInput   = backdrop.querySelector('#dev-tipo');
+        const nombreInput = backdrop.querySelector('#dev-nombre');
+        const ubicInput   = backdrop.querySelector('#dev-ubicacion');
+        const editor      = backdrop.querySelector('#dev-config-json');
+        const uidErr      = backdrop.querySelector('#dev-uid-err');
+        const tipoErr     = backdrop.querySelector('#dev-tipo-err');
+        const nombreErr   = backdrop.querySelector('#dev-nombre-err');
+        const cfgErr      = backdrop.querySelector('#dev-config-err');
+        const formatBtn   = backdrop.querySelector('[data-act="format"]');
+        const saveBtn     = backdrop.querySelector('[data-act="save"]');
 
-        function clearError() {
-            errorBox.style.display = 'none';
-            editor.classList.remove('input-invalid');
-        }
-        function showError(msg) {
-            errorBox.textContent = msg;
-            errorBox.style.display = 'block';
-            editor.classList.add('input-invalid');
-        }
         function parseEditor() {
             const raw = editor.value.trim();
             if (raw === '') return { ok: true, value: null };
-            try {
-                return { ok: true, value: JSON.parse(raw) };
-            } catch (e) {
-                return { ok: false, error: e.message };
-            }
+            try { return { ok: true, value: JSON.parse(raw) }; }
+            catch (e) { return { ok: false, error: e.message }; }
+        }
+        function clearCfgError() {
+            cfgErr.style.display = 'none';
+            editor.classList.remove('input-invalid');
+        }
+        function showCfgError(msg) {
+            cfgErr.textContent = msg;
+            cfgErr.style.display = 'block';
+            editor.classList.add('input-invalid');
         }
 
-        editor.addEventListener('input', clearError);
-        editor.focus();
+        editor.addEventListener('input', clearCfgError);
+        nombreInput.focus();
+        nombreInput.select();
 
         formatBtn.addEventListener('click', () => {
             const r = parseEditor();
-            if (!r.ok) { showError('No se puede formatear: ' + r.error); return; }
+            if (!r.ok) { showCfgError('No se puede formatear: ' + r.error); return; }
             editor.value = r.value === null ? '' : JSON.stringify(r.value, null, 2);
-            clearError();
+            clearCfgError();
         });
 
         saveBtn.addEventListener('click', async () => {
+            [uidErr, tipoErr, nombreErr].forEach(el => el.style.display = 'none');
+            [uidInput, tipoInput, nombreInput].forEach(el => el.classList.remove('input-invalid'));
+            clearCfgError();
+
+            const uid        = uidInput.value.trim();
+            const dominio_id = +domSel.value;
+            const nombre     = nombreInput.value.trim();
+            const tipo       = tipoInput.value.trim();
+            const ubicacion  = ubicInput.value.trim();
+            const estado     = estadoSel.value;
+
+            let firstInvalid = null;
+            if (!uid) {
+                uidErr.textContent = 'El UID es obligatorio';
+                uidErr.style.display = 'block';
+                uidInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || uidInput;
+            }
+            if (!nombre) {
+                nombreErr.textContent = 'El nombre es obligatorio';
+                nombreErr.style.display = 'block';
+                nombreInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || nombreInput;
+            }
+            if (!tipo) {
+                tipoErr.textContent = 'El tipo es obligatorio';
+                tipoErr.style.display = 'block';
+                tipoInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || tipoInput;
+            }
+
             const r = parseEditor();
-            if (!r.ok) { showError('JSON inválido: ' + r.error); editor.focus(); return; }
+            if (!r.ok) {
+                showCfgError('JSON inválido: ' + r.error);
+                firstInvalid = firstInvalid || editor;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
 
             saveBtn.disabled = true;
             try {
                 await api('devices.php', {
                     method: 'PUT',
-                    body: { id: dev.id, config_json: r.value },
+                    body: {
+                        id: dev.id,
+                        uid,
+                        dominio_id,
+                        nombre,
+                        tipo,
+                        ubicacion,
+                        estado,
+                        config_json: r.value,
+                    },
                 });
-                toast('Configuración guardada');
+                toast('Dispositivo actualizado');
                 close();
                 navigate();
             } catch (e) {
@@ -410,6 +530,357 @@
                 toast(e.message, 'error');
             }
         });
+    }
+
+    /* ---------- Views: Chips (SIM) ---------- */
+    const ESTADOS_CHIP = [
+        { value: 'activo',     label: 'Activo',     badge: 'badge-success' },
+        { value: 'inactivo',   label: 'Inactivo',   badge: 'badge-warn'    },
+        { value: 'suspendido', label: 'Suspendido', badge: 'badge-danger'  },
+    ];
+
+    async function renderChips(root) {
+        try {
+            const [data, domData] = await Promise.all([
+                api('chips.php'),
+                api('domains.php'),
+            ]);
+            const r = data.resumen;
+            const dominios = domData.dominios;
+
+            const domOptions = ['<option value="">Todos los dominios</option>']
+                .concat(dominios.map(d =>
+                    `<option value="${d.id}">${escape(d.nombre)}</option>`
+                ))
+                .join('');
+
+            root.innerHTML = `
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Activos</span>
+                        <span class="stat-value green">${r.activo}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Inactivos</span>
+                        <span class="stat-value orange">${r.inactivo}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Suspendidos</span>
+                        <span class="stat-value red">${r.suspendido}</span>
+                    </div>
+                </div>
+
+                <div class="toolbar">
+                    <div class="toolbar-left">
+                        <div class="search-wrap">
+                            <input type="search" class="search-input" id="chip-search" placeholder="Buscar por número, ICCID, operador o notas…">
+                            <button class="search-clear" id="chip-search-clear" aria-label="Limpiar">×</button>
+                        </div>
+                        <select id="chip-dom-filter">${domOptions}</select>
+                        <button class="filter-chip active" data-filter="all">Todos</button>
+                        <button class="filter-chip" data-filter="activo">Activos</button>
+                        <button class="filter-chip" data-filter="inactivo">Inactivos</button>
+                        <button class="filter-chip" data-filter="suspendido">Suspendidos</button>
+                    </div>
+                    <div class="toolbar-right">
+                        <button class="btn btn-primary btn-sm" id="chip-new">
+                            <i class="fa-solid fa-plus"></i> Nuevo chip
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-card" id="chip-table">${chipsTableBody(data.chips)}</div>
+            `;
+
+            wireChipsView(data.chips, dominios);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function chipsTableBody(chips) {
+        if (!chips.length) {
+            return `<div class="table-empty">Todavía no hay chips cargados. Creá el primero con "Nuevo chip".</div>`;
+        }
+
+        const rows = chips.map(c => `
+            <tr data-id="${c.id}">
+                <td><span class="td-id">#${c.id}</span></td>
+                <td class="td-nombre">${escape(c.operador)}</td>
+                <td>${escape(c.numero)}</td>
+                <td><span class="td-id">${escape(c.iccid)}</span></td>
+                <td><span class="badge badge-info">${escape(c.dominio_nombre)}</span></td>
+                <td>${c.apn ? escape(c.apn) : '<span class="td-id">—</span>'}</td>
+                <td>${c.plan ? escape(c.plan) : '<span class="td-id">—</span>'}</td>
+                <td>${chipEstadoBadge(c.estado)}</td>
+                <td class="actions">
+                    <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+                </td>
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Operador</th>
+                        <th>Número</th>
+                        <th>ICCID</th>
+                        <th>Dominio</th>
+                        <th>APN</th>
+                        <th>Plan</th>
+                        <th>Estado</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function chipEstadoBadge(estado) {
+        const e = ESTADOS_CHIP.find(x => x.value === estado) || { label: estado, badge: 'badge-info' };
+        return `<span class="badge ${e.badge}">${escape(e.label)}</span>`;
+    }
+
+    function wireChipsView(allChips, allDominios) {
+        const tableWrap   = document.getElementById('chip-table');
+        const searchInput = document.getElementById('chip-search');
+        const searchClear = document.getElementById('chip-search-clear');
+        const domSel      = document.getElementById('chip-dom-filter');
+        const btnNew      = document.getElementById('chip-new');
+        const filterChips = document.querySelectorAll('.filter-chip[data-filter]');
+        let activeFilter  = 'all';
+
+        function applyFilters() {
+            const q   = (searchInput.value || '').trim().toLowerCase();
+            const dom = domSel.value;
+            const filtered = allChips.filter(c => {
+                if (activeFilter !== 'all' && c.estado !== activeFilter) return false;
+                if (dom && String(c.dominio_id) !== dom) return false;
+                if (!q) return true;
+                return (c.numero + ' ' + c.iccid + ' ' + c.operador + ' ' +
+                        (c.apn || '') + ' ' + (c.plan || '') + ' ' + (c.notas || ''))
+                    .toLowerCase().includes(q);
+            });
+            tableWrap.innerHTML = chipsTableBody(filtered);
+            wireRowActions();
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const c  = allChips.find(x => x.id === id);
+                    if (!c) return;
+                    if (btn.dataset.act === 'edit')   openChipModal(c, allDominios);
+                    if (btn.dataset.act === 'delete') confirmDeleteChip(c);
+                });
+            });
+        }
+
+        filterChips.forEach(c => c.addEventListener('click', () => {
+            filterChips.forEach(x => x.classList.remove('active'));
+            c.classList.add('active');
+            activeFilter = c.dataset.filter;
+            applyFilters();
+        }));
+        searchInput.addEventListener('input', applyFilters);
+        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
+        domSel.addEventListener('change', applyFilters);
+        btnNew.addEventListener('click', () => openChipModal(null, allDominios));
+
+        wireRowActions();
+    }
+
+    function openChipModal(chip, allDominios) {
+        const isEdit = !!chip;
+
+        const domOpts = ['<option value="">Elegí un dominio…</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}" ${chip?.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+
+        const estadoOpts = ESTADOS_CHIP.map(e =>
+            `<option value="${e.value}" ${(chip?.estado ?? 'activo') === e.value ? 'selected' : ''}>${escape(e.label)}</option>`
+        ).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">${isEdit ? 'Editar chip' : 'Nuevo chip'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="chip-dominio">Dominio</label>
+                            <select id="chip-dominio">${domOpts}</select>
+                            <div class="field-error" id="chip-dominio-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="chip-estado">Estado</label>
+                            <select id="chip-estado">${estadoOpts}</select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="chip-numero">Número de línea</label>
+                            <input type="text" id="chip-numero" maxlength="30"
+                                   value="${escape(chip?.numero ?? '')}"
+                                   placeholder="+54 9 11 1234-5678" required>
+                            <div class="field-error" id="chip-numero-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="chip-operador">Operador</label>
+                            <input type="text" id="chip-operador" maxlength="60"
+                                   value="${escape(chip?.operador ?? '')}"
+                                   placeholder="Movistar / Claro / Personal" required>
+                            <div class="field-error" id="chip-operador-err" style="display:none"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="chip-iccid">ICCID</label>
+                        <input type="text" id="chip-iccid" maxlength="22"
+                               value="${escape(chip?.iccid ?? '')}"
+                               placeholder="18 a 22 dígitos" required>
+                        <div class="field-error" id="chip-iccid-err" style="display:none"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="chip-apn">APN</label>
+                            <input type="text" id="chip-apn" maxlength="120"
+                                   value="${escape(chip?.apn ?? '')}"
+                                   placeholder="Opcional">
+                        </div>
+                        <div class="form-group">
+                            <label for="chip-plan">Plan</label>
+                            <input type="text" id="chip-plan" maxlength="120"
+                                   value="${escape(chip?.plan ?? '')}"
+                                   placeholder="Opcional">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="chip-notas">Notas</label>
+                        <textarea id="chip-notas" maxlength="500" placeholder="Opcional">${escape(chip?.notas ?? '')}</textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
+                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear chip'}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const domInput      = backdrop.querySelector('#chip-dominio');
+        const estadoSel     = backdrop.querySelector('#chip-estado');
+        const numeroInput   = backdrop.querySelector('#chip-numero');
+        const operadorInput = backdrop.querySelector('#chip-operador');
+        const iccidInput    = backdrop.querySelector('#chip-iccid');
+        const apnInput      = backdrop.querySelector('#chip-apn');
+        const planInput     = backdrop.querySelector('#chip-plan');
+        const notasInput    = backdrop.querySelector('#chip-notas');
+        const domErr        = backdrop.querySelector('#chip-dominio-err');
+        const numeroErr     = backdrop.querySelector('#chip-numero-err');
+        const operadorErr   = backdrop.querySelector('#chip-operador-err');
+        const iccidErr      = backdrop.querySelector('#chip-iccid-err');
+        const saveBtn       = backdrop.querySelector('[data-act="save"]');
+
+        (isEdit ? estadoSel : domInput).focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const dominio_id = +domInput.value;
+            const numero     = numeroInput.value.trim();
+            const operador   = operadorInput.value.trim();
+            const iccid      = iccidInput.value.trim();
+            const apn        = apnInput.value.trim();
+            const plan       = planInput.value.trim();
+            const estado     = estadoSel.value;
+            const notas      = notasInput.value.trim();
+
+            [domErr, numeroErr, operadorErr, iccidErr].forEach(el => el.style.display = 'none');
+            [domInput, numeroInput, operadorInput, iccidInput].forEach(el => el.classList.remove('input-invalid'));
+
+            let firstInvalid = null;
+            if (!dominio_id) {
+                domErr.textContent = 'Elegí un dominio';
+                domErr.style.display = 'block';
+                domInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || domInput;
+            }
+            if (!numero) {
+                numeroErr.textContent = 'El número es obligatorio';
+                numeroErr.style.display = 'block';
+                numeroInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || numeroInput;
+            }
+            if (!operador) {
+                operadorErr.textContent = 'El operador es obligatorio';
+                operadorErr.style.display = 'block';
+                operadorInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || operadorInput;
+            }
+            if (!/^[0-9]{18,22}$/.test(iccid)) {
+                iccidErr.textContent = 'El ICCID debe tener entre 18 y 22 dígitos numéricos';
+                iccidErr.style.display = 'block';
+                iccidInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || iccidInput;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = { dominio_id, numero, operador, iccid, apn, plan, estado, notas };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('chips.php', { method: 'PUT', body: { id: chip.id, ...payload } });
+                    toast('Chip actualizado');
+                } else {
+                    await api('chips.php', { method: 'POST', body: payload });
+                    toast('Chip creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    function confirmDeleteChip(chip) {
+        confirmDialog(
+            'Eliminar chip',
+            `¿Eliminar el chip ${chip.operador} ${chip.numero} (ICCID ${chip.iccid})? Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('chips.php?id=' + chip.id, { method: 'DELETE' });
+                    toast('Chip eliminado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
     }
 
     /* ---------- Views: Dominios ---------- */
@@ -701,10 +1172,13 @@
     }
 
     function confirmDeleteDomain(dom) {
+        const reassignNote = dom.dispositivos_count > 0
+            ? ` Sus ${dom.dispositivos_count} dispositivo(s) asociado(s) (y los chips, si los hubiera) se reasignarán al dominio "General". Los perfiles de acceso a este dominio se eliminarán.`
+            : ` Los perfiles de acceso a este dominio se eliminarán (los chips asociados, si los hubiera, se reasignarán a "General").`;
+
         confirmDialog(
             'Eliminar dominio',
-            `¿Eliminar el dominio "${dom.nombre}"? Esta acción no se puede deshacer.` +
-            (dom.dispositivos_count > 0 ? ` Tiene ${dom.dispositivos_count} dispositivo(s) asociado(s).` : ''),
+            `¿Eliminar el dominio "${dom.nombre}"?` + reassignNote + ' Esta acción no se puede deshacer.',
             async () => {
                 try {
                     await api('domains.php?id=' + dom.id, { method: 'DELETE' });
@@ -1647,6 +2121,34 @@
         if (p == null || p === '') return '';
         if (typeof p === 'object') return JSON.stringify(p, null, 2);
         try { return JSON.stringify(JSON.parse(p), null, 2); } catch (_) { return String(p); }
+    }
+
+    /* ---------- Views: Herramientas ---------- */
+    const toolsCatalog = [
+        { icon: '🛰️', title: 'Simulador de señales',  desc: 'Genera y envía señales sintéticas para probar la ingesta.' },
+        { icon: '🔔', title: 'Disparador de alertas',  desc: 'Activa alertas de prueba para validar notificaciones.' },
+        { icon: '📤', title: 'Test de webhooks',       desc: 'Envía payloads JSON a un endpoint externo.' },
+        { icon: '🧪', title: 'Sandbox de payloads',    desc: 'Editor JSON para probar configuraciones de dispositivos.' },
+    ];
+
+    function renderTools(root) {
+        root.innerHTML = `
+            <div class="tile-grid">
+                ${toolsCatalog.map(t => `
+                    <button type="button" class="tile-card" data-tool="${escape(t.title)}">
+                        <span class="tile-icon">${t.icon}</span>
+                        <span class="tile-title">${escape(t.title)}</span>
+                        <span class="tile-desc">${escape(t.desc)}</span>
+                    </button>
+                `).join('')}
+            </div>
+        `;
+
+        root.querySelectorAll('.tile-card').forEach(btn => {
+            btn.addEventListener('click', () => {
+                toast(`${btn.dataset.tool}: próximamente`);
+            });
+        });
     }
 
     /* ---------- Views: Stub ---------- */

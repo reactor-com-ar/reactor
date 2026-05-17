@@ -102,9 +102,18 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                 </div>
             </div>
 
-            <a href="#/settings" data-route="settings" class="nav-item">
-                <span class="nav-icon">⚙️</span> Configuración
-            </a>
+            <div class="nav-group-wrap" data-group="administracion">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🛠️</span>
+                    <span class="nav-group-label">Administración</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/tools" data-route="tools" class="nav-item nav-sub-item">
+                        <span class="nav-icon">🧪</span> Herramientas
+                    </a>
+                </div>
+            </div>
         </nav>
 
         <div class="sidebar-footer">v0.1.0</div>
@@ -129,7 +138,6 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                         <i class="fa-solid fa-caret-down" style="font-size:.7rem"></i>
                     </button>
                     <div class="user-dropdown" id="user-dropdown">
-                        <a href="#/settings" class="user-dropdown-item">Configuración</a>
                         <a href="#" class="user-dropdown-item" id="btn-logout">Salir</a>
                     </div>
                 </div>

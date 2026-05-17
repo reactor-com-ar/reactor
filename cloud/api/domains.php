@@ -95,19 +95,36 @@ function handleUpdate(): void
 function handleDelete(): void
 {
     $id = (int) ($_GET['id'] ?? 0);
-    if ($id <= 0) json_error('Id invalido', 422);
+    if ($id <= 0)    json_error('Id invalido', 422);
+    if ($id === 1)   json_error('No se puede eliminar el dominio por defecto "General"', 409);
 
-    $stmt = db()->prepare('SELECT COUNT(*) FROM dispositivos WHERE dominio_id = :id');
-    $stmt->execute([':id' => $id]);
-    $count = (int) $stmt->fetchColumn();
-    if ($count > 0) {
-        json_error("No se puede eliminar: el dominio tiene $count dispositivo(s) asociado(s)", 409);
+    $pdo = db();
+
+    $exists = $pdo->prepare('SELECT 1 FROM dominios WHERE id = :id');
+    $exists->execute([':id' => $id]);
+    if (!$exists->fetchColumn()) json_error('Dominio no encontrado', 404);
+
+    try {
+        $pdo->beginTransaction();
+
+        // Reasignar dispositivos y chips al dominio por defecto "General" (id = 1).
+        $pdo->prepare('UPDATE dispositivos SET dominio_id = 1 WHERE dominio_id = :id')
+            ->execute([':id' => $id]);
+        $pdo->prepare('UPDATE chips        SET dominio_id = 1 WHERE dominio_id = :id')
+            ->execute([':id' => $id]);
+
+        // Los perfiles son permisos por dominio: si el dominio desaparece, se borran.
+        $pdo->prepare('DELETE FROM perfiles WHERE dominio_id = :id')
+            ->execute([':id' => $id]);
+
+        $pdo->prepare('DELETE FROM dominios WHERE id = :id')
+            ->execute([':id' => $id]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
     }
-
-    $stmt = db()->prepare('DELETE FROM dominios WHERE id = :id');
-    $stmt->execute([':id' => $id]);
-
-    if ($stmt->rowCount() === 0) json_error('Dominio no encontrado', 404);
 
     json_ok(['id' => $id]);
 }

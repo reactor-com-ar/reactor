@@ -24,7 +24,11 @@
       "Bash(findstr /i MYSQL)",
       "PowerShell(try { $r = Invoke-WebRequest -Uri 'http://localhost:8083/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8083 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8083 -> ERROR: $\\($_.Exception.Message\\)\" }; try { $r = Invoke-WebRequest -Uri 'http://localhost:8080/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8080 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8080 -> ERROR: $\\($_.Exception.Message\\)\" })",
       "Bash(docker compose *)",
-      "PowerShell(try { $r = Invoke-WebRequest -Uri 'http://localhost:8086/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8086 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8086 -> ERROR: $\\($_.Exception.Message\\)\" })"
+      "PowerShell(try { $r = Invoke-WebRequest -Uri 'http://localhost:8086/' -UseBasicParsing -TimeoutSec 5; Write-Output \"8086 -> $\\($r.StatusCode\\)\" } catch { Write-Output \"8086 -> ERROR: $\\($_.Exception.Message\\)\" })",
+      "Bash(git -C \"c:\\\\Users\\\\Javier\\\\Documents\\\\Repositorios\\\\reactor\" show --stat c4f72bb)",
+      "Bash(git -C \"c:\\\\Users\\\\Javier\\\\Documents\\\\Repositorios\\\\reactor\" show c4f72bb -- cloud/assets/js/app.js)",
+      "Bash(node -c \"c:\\\\Users\\\\Javier\\\\Documents\\\\Repositorios\\\\reactor\\\\cloud\\\\assets\\\\js\\\\app.js\")",
+      "Bash(docker cp *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Javier\\Downloads"

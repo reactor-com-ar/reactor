@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+const DISPOSITIVO_ESTADOS = ['online', 'offline', 'error'];
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
     switch ($method) {
-        case 'GET':    handleList();         break;
-        case 'PUT':    handleUpdateConfig(); break;
+        case 'GET':    handleList();   break;
+        case 'PUT':    handleUpdate(); break;
+        case 'DELETE': handleDelete(); break;
         default:
             json_error('Metodo no permitido', 405);
     }
@@ -53,27 +56,37 @@ function handleList(): void
     ]);
 }
 
-function handleUpdateConfig(): void
+function handleUpdate(): void
 {
     $in = readJson();
     $id = (int) ($in['id'] ?? 0);
-
     if ($id <= 0) json_error('Id invalido', 422);
-    if (!array_key_exists('config_json', $in)) json_error('Falta config_json', 422);
 
-    $config = $in['config_json'];
+    $data = validateDevicePayload($in);
 
-    // Permitir null (limpiar config) o cualquier estructura JSON serializable.
-    if ($config !== null) {
-        $encoded = json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if ($encoded === false) json_error('config_json no es serializable', 422);
-        if (strlen($encoded) > 65535) json_error('config_json supera 64 KB', 422);
-    } else {
-        $encoded = null;
+    try {
+        $stmt = db()->prepare(
+            'UPDATE dispositivos
+                SET uid = :uid, dominio_id = :dom, nombre = :nom, tipo = :tipo,
+                    ubicacion = :ubi, estado = :est, config_json = :cfg
+              WHERE id = :id'
+        );
+        $stmt->execute([
+            ':uid'  => $data['uid'],
+            ':dom'  => $data['dominio_id'],
+            ':nom'  => $data['nombre'],
+            ':tipo' => $data['tipo'],
+            ':ubi'  => $data['ubicacion'],
+            ':est'  => $data['estado'],
+            ':cfg'  => $data['config_json'],
+            ':id'   => $id,
+        ]);
+    } catch (PDOException $e) {
+        if ((int) ($e->errorInfo[1] ?? 0) === 1062) {
+            json_error('Ya existe un dispositivo con ese UID', 409);
+        }
+        throw $e;
     }
-
-    $stmt = db()->prepare('UPDATE dispositivos SET config_json = :c WHERE id = :id');
-    $stmt->execute([':c' => $encoded, ':id' => $id]);
 
     if ($stmt->rowCount() === 0) {
         $exists = db()->prepare('SELECT 1 FROM dispositivos WHERE id = :id');
@@ -82,6 +95,64 @@ function handleUpdateConfig(): void
     }
 
     json_ok(['id' => $id]);
+}
+
+function handleDelete(): void
+{
+    $id = (int) ($_GET['id'] ?? 0);
+    if ($id <= 0) json_error('Id invalido', 422);
+
+    $stmt = db()->prepare('DELETE FROM dispositivos WHERE id = :id');
+    $stmt->execute([':id' => $id]);
+
+    if ($stmt->rowCount() === 0) json_error('Dispositivo no encontrado', 404);
+
+    json_ok(['id' => $id]);
+}
+
+function validateDevicePayload(array $in): array
+{
+    $uid        = trim((string) ($in['uid']       ?? ''));
+    $dominio_id = (int)         ($in['dominio_id'] ?? 0);
+    $nombre     = trim((string) ($in['nombre']    ?? ''));
+    $tipo       = trim((string) ($in['tipo']      ?? ''));
+    $ubicacion  = trim((string) ($in['ubicacion'] ?? ''));
+    $estado     = trim((string) ($in['estado']    ?? 'offline'));
+
+    if ($uid === '')                 json_error('El UID es obligatorio', 422);
+    if (mb_strlen($uid) > 64)        json_error('El UID no puede superar 64 caracteres', 422);
+    if ($dominio_id <= 0)            json_error('Elegi un dominio', 422);
+    if ($nombre === '')              json_error('El nombre es obligatorio', 422);
+    if (mb_strlen($nombre) > 120)    json_error('El nombre no puede superar 120 caracteres', 422);
+    if ($tipo === '')                json_error('El tipo es obligatorio', 422);
+    if (mb_strlen($tipo) > 60)       json_error('El tipo no puede superar 60 caracteres', 422);
+    if (mb_strlen($ubicacion) > 120) json_error('La ubicacion no puede superar 120 caracteres', 422);
+    if (!in_array($estado, DISPOSITIVO_ESTADOS, true))
+        json_error('Estado invalido', 422);
+
+    $exists = db()->prepare('SELECT 1 FROM dominios WHERE id = :id');
+    $exists->execute([':id' => $dominio_id]);
+    if (!$exists->fetchColumn()) json_error('El dominio no existe', 422);
+
+    if (!array_key_exists('config_json', $in)) json_error('Falta config_json', 422);
+    $config = $in['config_json'];
+    if ($config !== null) {
+        $encoded = json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($encoded === false)       json_error('config_json no es serializable', 422);
+        if (strlen($encoded) > 65535) json_error('config_json supera 64 KB', 422);
+    } else {
+        $encoded = null;
+    }
+
+    return [
+        'uid'         => $uid,
+        'dominio_id'  => $dominio_id,
+        'nombre'      => $nombre,
+        'tipo'        => $tipo,
+        'ubicacion'   => $ubicacion === '' ? null : $ubicacion,
+        'estado'      => $estado,
+        'config_json' => $encoded,
+    ];
 }
 
 function readJson(): array

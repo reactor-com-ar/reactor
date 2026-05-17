@@ -696,6 +696,50 @@ Va siempre dentro de un `.modal.modal-wide` (ver §14) para que el JSON respire 
 - Validar al guardar: parse, marcar `input-invalid` + `.field-error` con el mensaje del error de parseo. No deshabilitar el botón Guardar hasta que el contenido sea válido — el usuario tiene que poder intentarlo y ver el error.
 - Aceptar **textarea vacío = JSON nulo** (limpiar configuración). Documentarlo en el label si aplica.
 - No usar resaltado de sintaxis ni librerías tipo Monaco/CodeMirror: contradice §1 del STACK (sin build step, sin librerías UI pesadas).
+- El editor JSON puede convivir con `.form-group` de campos normales dentro del mismo `.modal-wide` (ej.: "Editar dispositivo" combina dominio / estado / UID / tipo / nombre / ubicación + `Configuración` JSON). En ese caso el JSON va como **último `.form-group`** del cuerpo, después del resto de los inputs, y el botón **Formatear** sigue alineado a la izquierda del footer con `margin-right:auto`.
+
+## 24. Tile grid (menú de navegación / lanzadores)
+
+Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterrizaje (por ejemplo Herramientas, donde cada tile lanza una utilidad de testing o navega a una sub-pantalla). No es para datos numéricos: para eso está `.stat-card` (§12).
+
+```html
+<div class="tile-grid">
+  <button type="button" class="tile-card">
+    <span class="tile-icon">🛰️</span>
+    <span class="tile-title">Simulador de señales</span>
+    <span class="tile-desc">Genera y envía señales sintéticas para probar la ingesta.</span>
+  </button>
+  <a href="#/tools/webhooks" class="tile-card">
+    <span class="tile-icon">📤</span>
+    <span class="tile-title">Test de webhooks</span>
+    <span class="tile-desc">Envía payloads JSON a un endpoint externo.</span>
+  </a>
+</div>
+```
+
+```css
+.tile-grid  { display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+              gap: 16px; }
+.tile-card  { background: var(--surface); border: 1px solid var(--border);
+              border-radius: var(--radius); padding: 20px;
+              display: flex; flex-direction: column; gap: 6px;
+              text-align: left; cursor: pointer; text-decoration: none;
+              color: var(--text); font-family: inherit;
+              transition: border-color .15s, background .15s, transform .1s; }
+.tile-card:hover  { border-color: var(--primary); background: var(--row-hover); }
+.tile-card:active { transform: scale(.98); }
+.tile-icon  { font-size: 1.6rem; line-height: 1; margin-bottom: 4px; }
+.tile-title { font-weight: 600; font-size: .95rem; color: var(--text); }
+.tile-desc  { font-size: .8rem; color: var(--muted); }
+```
+
+**Reglas:**
+- El tile puede ser `<a href="#/<ruta>">` (cuando navega a otra pantalla) o `<button type="button">` (cuando dispara una acción in-situ, por ejemplo abrir un modal o ejecutar un test).
+- Estructura interna: emoji-icono (§20) + título corto + descripción breve. La descripción es opcional si el título alcanza.
+- Hover marca el borde en `--primary` para reforzar que es clickeable. El tile vive en zona gris, no se pinta de rojo sólido — el rojo entra solo como acento (§1).
+- Columna mínima 220px con `auto-fill`: el grid se acomoda solo desde una sola tarjeta hasta varias por fila.
+- No anidar `tile-grid`s ni mezclar `tile-card` con `stat-card` en el mismo contenedor: cada uno tiene su semántica.
 
 ---
 

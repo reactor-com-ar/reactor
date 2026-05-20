@@ -23,14 +23,26 @@ try {
 
 function handleList(): void
 {
+    // Esquema real (db/schema.sql -> tabla `usuarios`): correo, roles, habilitado,
+    // ingresado, registrado. Se aliasan a los nombres que ya usa el front (email, rol,
+    // last_login_at, created_at) para no tocar el JS.
     $stmt = db()->query(
-        'SELECT id, email, nombre, celular, rol, activo, last_login_at, created_at, updated_at
+        "SELECT id,
+                correo     AS email,
+                nombre,
+                celular,
+                roles      AS rol,
+                habilitado,
+                ingresado  AS last_login_at,
+                registrado AS created_at
          FROM usuarios
-         ORDER BY activo DESC, nombre ASC'
+         ORDER BY habilitado DESC, nombre ASC"
     );
 
     $usuarios = array_map(static function (array $r): array {
-        $r['activo'] = (int) $r['activo'] === 1;
+        $hab = strtoupper((string) ($r['habilitado'] ?? ''));
+        $r['activo'] = in_array($hab, ['S', '1', 'Y'], true);
+        unset($r['habilitado']);
         return $r;
     }, $stmt->fetchAll());
 

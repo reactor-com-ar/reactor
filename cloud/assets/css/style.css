@@ -255,6 +255,10 @@ textarea { resize: vertical; min-height: 60px; }
 .field-error   { margin-top: 4px; font-size: .78rem; color: var(--danger); }
 .input-invalid { border-color: var(--danger) !important; box-shadow: 0 0 0 2px rgba(239,68,68,.18); }
 
+/* Utilitario: texto secundario / "vacío". Usado en celdas de tabla y
+ * dentro de tarjetas de consulta cuando un campo no tiene valor. */
+.muted { color: var(--muted); }
+
 /* ---------- 8. Formularios ---------- */
 .form-row    { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-row-3  { grid-template-columns: repeat(3, 1fr); }
@@ -364,6 +368,58 @@ tbody tr:hover { background: var(--row-hover); }
     justify-content: space-between;
 }
 .dash-ver-mas { font-size: .78rem; font-weight: 500; color: var(--primary); }
+
+/* ---------- 13.1 Feed en vivo (dashboard) ---------- */
+.dash-live-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.dash-live-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: .72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-weight: 500;
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, .6);
+    animation: live-pulse 1.4s infinite;
+}
+
+.live-paused .live-dot {
+    background: var(--muted);
+    animation: none;
+    box-shadow: none;
+}
+
+@keyframes live-pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(34, 197, 94, .55); }
+    70%  { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);   }
+    100% { box-shadow: 0 0 0 0   rgba(34, 197, 94, 0);   }
+}
+
+.live-feed-table tbody tr.is-new {
+    animation: live-row-flash 1s ease-out;
+}
+
+@keyframes live-row-flash {
+    0%   { background-color: rgba(34, 197, 94, .18); }
+    100% { background-color: transparent; }
+}
+
+.sentido-icon          { font-size: 1rem; }
+.sentido-icon.sentido-out { color: var(--success); }   /* S — upload (verde) */
+.sentido-icon.sentido-in  { color: var(--info); }      /* E — download (azul) */
 
 /* ---------- 14. Modales ---------- */
 .modal-backdrop {
@@ -567,7 +623,121 @@ tbody tr:hover { background: var(--row-hover); }
     padding: 2px 8px;
 }
 
-/* ---------- 24. Tile grid (menú de navegación) ----------
+/* ---------- 23. ABM: header del módulo ----------
+ * Bloque obligatorio al tope de todo listado ABM: título de la entidad
+ * en plural + subtítulo descriptivo en una sola frase. Va antes de los
+ * KPIs (si los hay) y de la toolbar. Ver ABM.md §1.1.
+ */
+.module-header   { margin-bottom: 18px; }
+.module-title    {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0 0 4px;
+    line-height: 1.2;
+}
+.module-subtitle {
+    font-size: .88rem;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.4;
+}
+
+/* ---------- 24. ABM: columnas de acción del listado ----------
+ * Cada ícono (Consultar/Editar/Eliminar) va en su propia columna al
+ * final de la tabla, en ese orden. Las columnas son angostas y centradas.
+ */
+th.action-col, td.action-col {
+    width: 1%;
+    white-space: nowrap;
+    text-align: center;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+/* ---------- 25. ABM: tarjetas de consulta (read-only) ----------
+ * Modal "Consultar" muestra TODOS los campos del registro. Cada campo es
+ * una tarjeta con esquinas redondeadas y fondo exactamente 10% más oscuro
+ * que `--surface` (regla obligatoria de ABM.md, no variar por módulo).
+ * Tarjetas de 50% para valores cortos (códigos, fechas, estados, booleanos)
+ * y 100% para valores largos (descripciones, JSON, payloads, direcciones).
+ */
+.view-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.view-card {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.view-card-half { flex: 1 1 calc(50% - 6px); }
+.view-card-full { flex: 1 1 100%; }
+.view-card-label {
+    font-size: .75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--muted);
+}
+.view-card-value {
+    font-size: .9rem;
+    color: var(--text);
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+.view-card-value.muted { color: var(--muted); font-style: italic; }
+.view-card-value code  {
+    font-family: monospace;
+    font-size: .85rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 8px;
+}
+.view-card-value pre {
+    margin: 0;
+    font-family: monospace;
+    font-size: .82rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+    .view-card-half { flex: 1 1 100%; }
+}
+
+/* ---------- 26. ABM: Modal de Filtros ----------
+ * Centraliza todos los filtros del listado (ver ABM.md §3). Estructura:
+ *   - Header con título "Filtros" + botón ×.
+ *   - Body en grilla 2-col (colapsa a 1 col bajo 640px). El primer campo
+ *     siempre es `Código`; al final van `Límite`, `Ordenar por`, `Dirección`.
+ *   - Footer: Limpiar (ghost) | Cancelar (secondary) | Aplicar (primary),
+ *     todos alineados a la derecha por el `.modal-footer` base.
+ *
+ * Trigger: botón `Filtros` (secondary, icono fa-filter) en la toolbar del
+ * listado. La búsqueda rápida del toolbar es sólo un atajo: el modal es
+ * la fuente completa de filtros del módulo.
+ */
+.filters-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+}
+@media (max-width: 640px) {
+    .filters-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- 27. Tile grid (menú de navegación) ----------
  * Grilla de tarjetas-botón usadas como menú de aterrizaje hacia
  * sub-pantallas o disparadores de acción (Herramientas, etc.).
  * No es para datos numéricos: para eso está .stat-card (§12).

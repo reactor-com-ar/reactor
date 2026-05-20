@@ -11,6 +11,7 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 try {
     switch ($method) {
         case 'GET':    handleList();   break;
+        case 'POST':   handleCreate(); break;
         case 'PUT':    handleUpdate(); break;
         case 'DELETE': handleDelete(); break;
         default:
@@ -22,38 +23,102 @@ try {
 
 function handleList(): void
 {
+    // Esquema real (db/schema.sql -> tabla `dispositivos`): no hay `uid`, `tipo`,
+    // `ubicacion`, `estado` (string) ni `config_json`. Mapeos / derivaciones:
+    //   uid          -> uuid
+    //   tipo         -> ''                       (sin equivalente directo)
+    //   ubicacion    -> coordenadas
+    //   estado       -> derivado de habilitado/enlace (smallint):
+    //                      habilitado <> 1            -> 'error'
+    //                      habilitado = 1 AND enlace=1 -> 'online'
+    //                      resto                      -> 'offline'
+    //   last_seen_at -> latido
+    //   created_at   -> COALESCE(instalacion, fabricacion)
+    //   config_json  -> null  (no existe en el esquema)
+    //   dominio_id   -> dominio
     $stmt = db()->query(
-        'SELECT d.id, d.uid, d.nombre, d.tipo, d.ubicacion, d.estado,
-                d.config_json, d.last_seen_at, d.created_at,
-                d.dominio_id, dom.nombre AS dominio_nombre
+        "SELECT d.id,
+                d.uuid                                 AS uid,
+                d.nombre,
+                ''                                     AS tipo,
+                d.coordenadas                          AS ubicacion,
+                CASE
+                    WHEN d.habilitado <> 1 THEN 'error'
+                    WHEN d.enlace = 1      THEN 'online'
+                    ELSE 'offline'
+                END                                    AS estado,
+                d.latido                               AS last_seen_at,
+                COALESCE(d.instalacion, d.fabricacion) AS created_at,
+                d.dominio                              AS dominio_id,
+                COALESCE(dom.nombre, '—')              AS dominio_nombre
          FROM dispositivos d
-         JOIN dominios dom ON dom.id = d.dominio_id
-         ORDER BY d.estado = "error" DESC, d.estado = "online" DESC, d.nombre ASC'
+         LEFT JOIN dominios dom ON dom.id = d.dominio
+         ORDER BY FIELD(
+                      CASE
+                          WHEN d.habilitado <> 1 THEN 'error'
+                          WHEN d.enlace = 1      THEN 'online'
+                          ELSE 'offline'
+                      END,
+                      'error', 'online', 'offline'
+                  ),
+                  d.nombre ASC"
     );
 
     $dispositivos = array_map(static function (array $r): array {
         $r['dominio_id']  = (int) $r['dominio_id'];
-        $r['config_json'] = $r['config_json'] !== null
-            ? json_decode($r['config_json'], true)
-            : null;
+        $r['config_json'] = null;
         return $r;
     }, $stmt->fetchAll());
 
+    // Resumen del dashboard: cuenta solo dispositivos habilitados.
+    // `estado === 'error'` proviene de `habilitado <> 1` (deshabilitados), no
+    // de una condicion de falla real, asi que esos quedan fuera del total.
     $resumen = [
-        'total'   => count($dispositivos),
+        'total'   => 0,
         'online'  => 0,
         'offline' => 0,
-        'error'   => 0,
     ];
 
     foreach ($dispositivos as $d) {
-        $resumen[$d['estado']] = ($resumen[$d['estado']] ?? 0) + 1;
+        if ($d['estado'] === 'error') continue;
+        $resumen['total']++;
+        $resumen[$d['estado']]++;
     }
 
     json_ok([
         'resumen'      => $resumen,
         'dispositivos' => $dispositivos,
     ]);
+}
+
+function handleCreate(): void
+{
+    $in   = readJson();
+    $data = validateDevicePayload($in);
+
+    try {
+        $stmt = db()->prepare(
+            'INSERT INTO dispositivos
+                (uid, dominio_id, nombre, tipo, ubicacion, estado, config_json)
+             VALUES (:uid, :dom, :nom, :tipo, :ubi, :est, :cfg)'
+        );
+        $stmt->execute([
+            ':uid'  => $data['uid'],
+            ':dom'  => $data['dominio_id'],
+            ':nom'  => $data['nombre'],
+            ':tipo' => $data['tipo'],
+            ':ubi'  => $data['ubicacion'],
+            ':est'  => $data['estado'],
+            ':cfg'  => $data['config_json'],
+        ]);
+    } catch (PDOException $e) {
+        if ((int) ($e->errorInfo[1] ?? 0) === 1062) {
+            json_error('Ya existe un dispositivo con ese UID', 409);
+        }
+        throw $e;
+    }
+
+    json_ok(['id' => (int) db()->lastInsertId()]);
 }
 
 function handleUpdate(): void

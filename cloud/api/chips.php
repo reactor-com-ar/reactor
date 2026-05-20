@@ -23,13 +23,38 @@ try {
 
 function handleList(): void
 {
+    // Esquema real (db/schema.sql -> tabla `chips`): los nombres son distintos.
+    // Mapeos:
+    //   numero      -> telefono
+    //   iccid       -> serie
+    //   operador    -> compania     (varchar(2), código del operador)
+    //   apn         -> NULL         (no existe en el esquema)
+    //   notas       -> comentario
+    //   created_at  -> registrado
+    //   updated_at  -> recargado
+    //   dominio_id  -> dominio
+    // El `estado` en el esquema es smallint; se traduce a las etiquetas que
+    // espera el front: 1='activo', 2='suspendido', resto='inactivo'.
     $stmt = db()->query(
-        'SELECT c.id, c.dominio_id, c.numero, c.iccid, c.operador, c.apn, c.plan,
-                c.estado, c.notas, c.created_at, c.updated_at,
-                dom.nombre AS dominio_nombre
+        "SELECT c.id,
+                c.dominio                AS dominio_id,
+                c.telefono               AS numero,
+                c.serie                  AS iccid,
+                c.compania               AS operador,
+                NULL                     AS apn,
+                c.plan,
+                CASE c.estado
+                    WHEN 1 THEN 'activo'
+                    WHEN 2 THEN 'suspendido'
+                    ELSE        'inactivo'
+                END                      AS estado,
+                c.comentario             AS notas,
+                c.registrado             AS created_at,
+                c.recargado              AS updated_at,
+                COALESCE(dom.nombre,'—') AS dominio_nombre
          FROM chips c
-         JOIN dominios dom ON dom.id = c.dominio_id
-         ORDER BY c.estado = "activo" DESC, c.operador ASC, c.numero ASC'
+         LEFT JOIN dominios dom ON dom.id = c.dominio
+         ORDER BY (c.estado = 1) DESC, c.compania ASC, c.telefono ASC"
     );
 
     $chips = array_map(static function (array $r): array {

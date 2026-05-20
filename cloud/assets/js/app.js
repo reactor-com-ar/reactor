@@ -14,17 +14,23 @@
     const sidebarOverlay   = document.getElementById('sidebar-overlay');
     const toastEl          = document.getElementById('toast');
 
-    let pendingDevicesDomainFilter = null;
+    let pendingDispositivosDominioFilter = null;
     let pendingSignalsDeviceFilter = null;
+
+    // Cleanup de la vista activa (timers, listeners globales). navigate() lo invoca
+    // antes de renderizar la nueva vista; cada render que necesite cleanup lo asigna
+    // como función nullable. Hoy lo usa el feed en vivo del dashboard.
+    let activeViewCleanup = null;
 
     /* ---------- Routing ---------- */
     const routes = {
-        dashboard: { title: 'Dashboard',     render: renderDashboard, group: 'inicio'     },
-        domains:   { title: 'Dominios',      render: renderDomains,   group: 'propiedad'  },
-        devices:   { title: 'Dispositivos',  render: renderDevices,   group: 'inventario' },
-        chips:     { title: 'Chips',         render: renderChips,     group: 'inventario' },
-        signals:   { title: 'Señales',       render: renderSignals,   group: 'registros'  },
-        alerts:    { title: 'Alertas',       render: renderStub,      group: 'registros'  },
+        dashboard:    { title: 'Dashboard',     render: renderDashboard,    group: 'inicio'     },
+        dominios:     { title: 'Dominios',      render: renderDominios,     group: 'propiedad'  },
+        dispositivos: { title: 'Dispositivos',  render: renderDispositivos, group: 'inventario' },
+        chips:        { title: 'Chips',         render: renderChips,        group: 'inventario' },
+        signals:   { title: 'Señales',              render: renderSignals,   group: 'registros'  },
+        registros: { title: 'Historial de registros', render: renderRegistros, group: 'registros'  },
+        alerts:    { title: 'Alertas',              render: renderStub,      group: 'registros'  },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'seguridad'  },
         profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'seguridad'  },
         tools:     { title: 'Herramientas',  render: renderTools,     group: 'administracion' },
@@ -36,6 +42,11 @@
     }
 
     function navigate() {
+        if (typeof activeViewCleanup === 'function') {
+            try { activeViewCleanup(); } catch (_) { /* noop */ }
+            activeViewCleanup = null;
+        }
+
         const key = currentRoute();
         const route = routes[key];
 
@@ -112,40 +123,184 @@
         return body.data;
     }
 
+    /* ---------- ABM helpers ---------- */
+    // Tarjeta read-only para modal de Consulta (50% del ancho, 2 por fila).
+    function viewCardHalf(label, value) {
+        return `<div class="view-card view-card-half">
+            <div class="view-card-label">${escape(label)}</div>
+            <div class="view-card-value">${value}</div>
+        </div>`;
+    }
+    // Tarjeta read-only ancha (100% del ancho) para valores largos.
+    function viewCardFull(label, value) {
+        return `<div class="view-card view-card-full">
+            <div class="view-card-label">${escape(label)}</div>
+            <div class="view-card-value">${value}</div>
+        </div>`;
+    }
+    function viewGrid(cards) {
+        return `<div class="view-grid">${cards.join('')}</div>`;
+    }
+    // Celdas <th> de las columnas de acción (una por icono).
+    function actionHeaderCells(opts) {
+        let h = '';
+        if (opts.view)   h += '<th class="action-col"></th>';
+        if (opts.edit)   h += '<th class="action-col"></th>';
+        if (opts.delete) h += '<th class="action-col"></th>';
+        return h;
+    }
+    // Celdas <td> con los iconos de acción, en orden Consultar / Editar / Eliminar.
+    function actionCells(opts) {
+        let h = '';
+        if (opts.view) {
+            h += `<td class="action-col"><button class="btn-icon-sm" data-act="view"   title="Consultar"><i class="fa-solid fa-eye"></i></button></td>`;
+        }
+        if (opts.edit) {
+            h += `<td class="action-col"><button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button></td>`;
+        }
+        if (opts.delete) {
+            h += `<td class="action-col"><button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button></td>`;
+        }
+        return h;
+    }
+    // Lee el valor numérico del campo Límite respetando default 100.
+    function readLimit(input, fallback) {
+        const v = parseInt(input?.value || '', 10);
+        if (!Number.isFinite(v) || v <= 0) return fallback ?? 100;
+        return v;
+    }
+
+    // Header del módulo (ABM.md §1.1): título de la entidad en plural +
+    // subtítulo descriptivo. Va antes de KPIs y toolbar.
+    function moduleHeader(title, subtitle) {
+        return `
+            <div class="module-header">
+                <h1 class="module-title">${escape(title)}</h1>
+                <p class="module-subtitle">${escape(subtitle)}</p>
+            </div>
+        `;
+    }
+
+    // Toolbar del listado ABM (ABM.md §2):
+    //   - Zona izquierda: input de búsqueda rápida + botón Filtros.
+    //   - Zona derecha:   botón primario "+ Nuevo <entidad>".
+    // `idPrefix` se usa para los ids: `${idPrefix}-quick`, `${idPrefix}-filters`,
+    // `${idPrefix}-new`. `quickPlaceholder` lista los campos sobre los que opera.
+    function abmToolbar({ idPrefix, quickPlaceholder, newLabel }) {
+        // newLabel = null|false ⇒ módulo read-only (señales, alertas): se omite
+        // el botón `+ Nuevo` (ver DESIGN.md §9). El resto del toolbar (búsqueda
+        // rápida + Filtros) se mantiene igual.
+        const newBtn = newLabel
+            ? `<button type="button" class="btn btn-primary btn-sm" id="${idPrefix}-new">
+                   <i class="fa-solid fa-plus"></i> ${escape(newLabel)}
+               </button>`
+            : '';
+        return `
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <div class="search-wrap">
+                        <input type="search" id="${idPrefix}-quick" class="search-input"
+                               placeholder="${escape(quickPlaceholder)}">
+                        <button type="button" class="search-clear"
+                                data-act="quick-clear" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">×</button>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" id="${idPrefix}-filters">
+                        <i class="fa-solid fa-filter"></i> Filtros
+                    </button>
+                </div>
+                <div class="toolbar-right">${newBtn}</div>
+            </div>
+        `;
+    }
+
+    // Abre el Modal de Filtros (ABM.md §3). Recibe:
+    //   - title:      siempre "Filtros" (lo dejamos parametrizable por las dudas).
+    //   - bodyHtml:   HTML de la grilla de campos (form-rows o .filters-grid).
+    //                 Las ids deben empezar con `${idPrefix}-fm-…` para evitar choques.
+    //   - onApply(modal): callback que lee los campos y aplica los filtros.
+    //                     El modal se cierra automáticamente al volver.
+    //   - onClear(modal): callback opcional que resetea los campos a defaults.
+    //                     Si no se pasa, "Limpiar" no hace nada visual.
+    function openFiltersModal({ bodyHtml, onApply, onClear }) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="filters-title">
+                <div class="modal-header">
+                    <div class="modal-title" id="filters-title">Filtros</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">${bodyHtml}</div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost"     data-act="clear">Limpiar</button>
+                    <button class="btn btn-secondary" data-act="close">Cancelar</button>
+                    <button class="btn btn-primary"   data-act="apply">Aplicar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const modal = backdrop.querySelector('.modal');
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.querySelector('[data-act="clear"]').addEventListener('click', () => {
+            if (typeof onClear === 'function') onClear(modal);
+        });
+        backdrop.querySelector('[data-act="apply"]').addEventListener('click', () => {
+            onApply(modal);
+            close();
+        });
+
+        return modal;
+    }
+
     /* ---------- Views: Dashboard ---------- */
     async function renderDashboard(root) {
         try {
-            const data = await api('devices.php');
+            const data = await api('dispositivos.php');
             const s = data.resumen;
-            const recent = data.dispositivos.slice(0, 5);
+            // Las tarjetas y los listados del dashboard cuentan solo dispositivos
+            // habilitados. Los deshabilitados (estado 'error' en el mapeo de la API)
+            // no representan una falla, asi que quedan fuera de la vista resumen.
+            const activos = data.dispositivos.filter(d => d.estado !== 'error');
 
             root.innerHTML = `
                 <div class="stats-bar">
-                    <div class="stat-card dash-link" data-go="devices">
+                    <div class="stat-card dash-link" data-go="dispositivos">
                         <span class="stat-label">Total dispositivos</span>
                         <span class="stat-value">${s.total}</span>
                     </div>
-                    <div class="stat-card dash-link" data-go="devices">
+                    <div class="stat-card dash-link" data-go="dispositivos">
                         <span class="stat-label">Online</span>
                         <span class="stat-value green">${s.online}</span>
                     </div>
-                    <div class="stat-card dash-link" data-go="devices">
+                    <div class="stat-card dash-link" data-go="dispositivos">
                         <span class="stat-label">Offline</span>
                         <span class="stat-value muted">${s.offline}</span>
-                    </div>
-                    <div class="stat-card dash-link" data-go="devices">
-                        <span class="stat-label">Con error</span>
-                        <span class="stat-value red">${s.error}</span>
                     </div>
                 </div>
 
                 <div class="dash-grid">
-                    <div class="table-card">
+                    <div class="table-card dash-live-card" id="live-feed-card">
                         <div class="dash-table-header">
-                            <span>🛰️ Dispositivos recientes</span>
-                            <a href="#/devices" class="dash-ver-mas">Ver todos →</a>
+                            <span>📡 Señales en vivo</span>
+                            <div class="dash-live-controls">
+                                <span class="dash-live-status" id="live-feed-status">
+                                    <span class="live-dot"></span> En vivo · 500 ms
+                                </span>
+                                <button type="button" class="btn-icon-sm" id="live-feed-toggle"
+                                        title="Pausar" aria-label="Pausar feed">
+                                    <i class="fa-solid fa-pause"></i>
+                                </button>
+                                <a href="#/signals" class="dash-ver-mas">Ver todas →</a>
+                            </div>
                         </div>
-                        ${devicesTableBody(recent)}
+                        <div id="live-feed-body"><div class="table-empty">Esperando señales…</div></div>
                     </div>
 
                     <div class="table-card">
@@ -153,7 +308,7 @@
                             <span>⚠️ Con problemas</span>
                             <a href="#/alerts" class="dash-ver-mas">Ver alertas →</a>
                         </div>
-                        ${devicesTableBody(data.dispositivos.filter(d => d.estado !== 'online').slice(0, 5))}
+                        ${dispositivosTableBody(activos.filter(d => d.estado !== 'online').slice(0, 5))}
                     </div>
                 </div>
             `;
@@ -161,65 +316,206 @@
             root.querySelectorAll('[data-go]').forEach(el => {
                 el.addEventListener('click', () => { window.location.hash = '#/' + el.dataset.go; });
             });
+
+            activeViewCleanup = startDashboardLiveFeed();
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
+    }
+
+    /* Feed en vivo del dashboard (cada 500 ms).
+     *
+     * Mantiene un buffer de las últimas 20 señales y poll-ea
+     * `signals_live.php?since_id=…` para traer sólo las nuevas. Pausa
+     * automáticamente al pasar el mouse sobre la card; el botón
+     * pausa/play permite congelar el feed manualmente para inspeccionar
+     * una señal. Devuelve una función de cleanup que apaga el timer —
+     * la consume `activeViewCleanup` al navegar a otra vista. */
+    function startDashboardLiveFeed() {
+        const card = document.getElementById('live-feed-card');
+        if (!card) return () => {};
+
+        const body   = card.querySelector('#live-feed-body');
+        const toggle = card.querySelector('#live-feed-toggle');
+        const status = card.querySelector('#live-feed-status');
+
+        const MAX_ROWS    = 5;
+        const TICK_MS     = 500;
+        let buffer        = [];
+        let maxId         = 0;
+        let userPaused    = false;
+        let hoverPaused   = false;
+        let fetching      = false;
+        let pendingRender = false;
+
+        const isPaused = () => userPaused || hoverPaused;
+
+        function updateStatus() {
+            if (userPaused) {
+                status.innerHTML = '<span class="live-dot"></span> Pausado';
+                card.classList.add('live-paused');
+            } else if (hoverPaused) {
+                status.innerHTML = '<span class="live-dot"></span> En pausa (hover)';
+                card.classList.add('live-paused');
+            } else {
+                status.innerHTML = '<span class="live-dot"></span> En vivo · 500 ms';
+                card.classList.remove('live-paused');
+            }
+        }
+
+        function renderRows(highlightIds) {
+            if (!buffer.length) {
+                body.innerHTML = `<div class="table-empty">Esperando señales…</div>`;
+                return;
+            }
+            const highlight = new Set(highlightIds || []);
+            const rows = buffer.map(s => `
+                <tr${highlight.has(s.id) ? ' class="is-new"' : ''} data-id="${s.id}">
+                    <td>
+                        <div class="td-id">${escape(formatDateOnly(s.fecha))}</div>
+                        <div class="td-id">${escape(formatTime(s.fecha))}</div>
+                    </td>
+                    <td>
+                        <div class="td-nombre">${escape(s.dispositivo_nombre ?? '—')}</div>
+                        ${s.dispositivo_uuid ? `<div class="td-id">${escape(s.dispositivo_uuid)}</div>` : ''}
+                    </td>
+                    <td>${s.canal != null ? `<span class="td-id">#${s.canal}</span>` : '<span class="td-id">—</span>'}</td>
+                    <td>${sentidoLiveIcon(s.sentido)}</td>
+                    <td><span class="td-id">${escape(s.topic ?? '')}</span></td>
+                    <td>${s.mensaje != null && s.mensaje !== '' ? escape(s.mensaje) : '<span class="td-id">—</span>'}</td>
+                </tr>
+            `).join('');
+            body.innerHTML = `
+                <table class="live-feed-table">
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Dispositivo</th>
+                            <th>Canal</th>
+                            <th>Sentido</th>
+                            <th>Topic</th>
+                            <th>Mensaje</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        async function tick() {
+            if (!document.body.contains(card)) return;  // ya navegamos a otra vista
+            if (fetching || isPaused()) return;
+            fetching = true;
+            try {
+                const qs = new URLSearchParams();
+                qs.set('since_id', String(maxId));
+                qs.set('limit',    String(MAX_ROWS));
+                const data = await api('signals_live.php?' + qs.toString());
+
+                if (data.last_id > maxId) maxId = data.last_id;
+                if (data.senales && data.senales.length) {
+                    // signals_live.php devuelve DESC (nuevas primero);
+                    // buffer ya está DESC -> concat preserva orden.
+                    const newIds = data.senales.map(s => s.id);
+                    buffer = data.senales.concat(buffer).slice(0, MAX_ROWS);
+                    renderRows(newIds);
+                } else if (pendingRender) {
+                    renderRows([]);
+                    pendingRender = false;
+                }
+            } catch (_) {
+                // Silencioso: con polling de 500 ms un error transitorio se
+                // recupera en el próximo tick. Si pasara a ser persistente
+                // habría que mostrarlo en el status.
+            } finally {
+                fetching = false;
+            }
+        }
+
+        toggle.addEventListener('click', () => {
+            userPaused = !userPaused;
+            toggle.innerHTML = userPaused
+                ? '<i class="fa-solid fa-play"></i>'
+                : '<i class="fa-solid fa-pause"></i>';
+            toggle.title      = userPaused ? 'Reanudar' : 'Pausar';
+            toggle.setAttribute('aria-label', toggle.title + ' feed');
+            updateStatus();
+        });
+        card.addEventListener('mouseenter', () => { hoverPaused = true;  updateStatus(); });
+        card.addEventListener('mouseleave', () => { hoverPaused = false; updateStatus(); });
+
+        updateStatus();
+        pendingRender = true;
+        tick();
+        const intervalId = setInterval(tick, TICK_MS);
+
+        return function cleanup() {
+            clearInterval(intervalId);
+        };
     }
 
     /* ---------- Views: Dispositivos ---------- */
-    async function renderDevices(root) {
+    const ORDEN_DISPOSITIVOS = [
+        { value: 'id',           label: 'Código'          },
+        { value: 'last_seen_at', label: 'Última conexión' },
+        { value: 'nombre',       label: 'Nombre'          },
+        { value: 'uid',          label: 'UID'             },
+        { value: 'tipo',         label: 'Tipo'            },
+        { value: 'estado',       label: 'Estado'          },
+        { value: 'created_at',   label: 'Creado'          },
+    ];
+    const ESTADOS_DISPOSITIVO_FILTRO = [
+        { value: 'online',  label: 'Online'      },
+        { value: 'offline', label: 'Offline'     },
+        { value: 'error',   label: 'Con error'   },
+    ];
+
+    function dispositivosDefaults() {
+        return {
+            codigo: '', texto: '', dominio: '', estado: '',
+            orden:  'last_seen_at', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderDispositivos(root) {
         try {
             const [data, domData] = await Promise.all([
-                api('devices.php'),
-                api('domains.php'),
+                api('dispositivos.php'),
+                api('dominios.php'),
             ]);
-            const dominios = domData.dominios;
-            const domainOptions = ['<option value="">Todos los dominios</option>']
-                .concat(dominios.map(d => `<option value="${d.id}">${escape(d.nombre)}</option>`))
-                .join('');
+            const dispositivos = data.dispositivos;
+            const dominios     = domData.dominios;
+
+            const state = dispositivosDefaults();
+            if (pendingDispositivosDominioFilter != null) {
+                state.dominio = String(pendingDispositivosDominioFilter);
+                pendingDispositivosDominioFilter = null;
+            }
 
             root.innerHTML = `
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-wrap">
-                            <input type="search" class="search-input" id="dev-search" placeholder="Buscar dispositivo…">
-                            <button class="search-clear" id="dev-search-clear" aria-label="Limpiar">×</button>
-                        </div>
-                        <select id="dev-domain-filter">${domainOptions}</select>
-                        <button class="filter-chip active" data-filter="all">Todos</button>
-                        <button class="filter-chip" data-filter="online">Online</button>
-                        <button class="filter-chip" data-filter="offline">Offline</button>
-                        <button class="filter-chip" data-filter="error">Con error</button>
-                    </div>
-                    <div class="toolbar-right">
-                        <button class="btn btn-ghost btn-sm"><i class="fa-solid fa-file-export"></i> Exportar</button>
-                        <button class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Nuevo</button>
-                    </div>
-                </div>
-
-                <div class="table-card" id="dev-table">${devicesTableBody(data.dispositivos)}</div>
+                ${moduleHeader('Dispositivos', 'Inventario de dispositivos conectados a la plataforma, su dominio asignado y su última actividad.')}
+                ${abmToolbar({
+                    idPrefix:         'dev',
+                    quickPlaceholder: 'Buscar UID, nombre, tipo, ubicación…',
+                    newLabel:         'Nuevo dispositivo',
+                })}
+                <div class="table-card" id="dev-table"></div>
             `;
 
-            wireDevicesToolbar(data.dispositivos, dominios);
-
-            if (pendingDevicesDomainFilter != null) {
-                const sel = document.getElementById('dev-domain-filter');
-                sel.value = String(pendingDevicesDomainFilter);
-                pendingDevicesDomainFilter = null;
-                sel.dispatchEvent(new Event('change'));
-            }
+            wireDevicesView(state, dispositivos, dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
     }
 
-    function devicesTableBody(dispositivos) {
+    function dispositivosTableBody(dispositivos) {
         if (!dispositivos.length) {
             return `<div class="table-empty">No hay dispositivos para mostrar.</div>`;
         }
 
         const rows = dispositivos.map(d => `
             <tr data-id="${d.id}">
+                <td><span class="td-id">#${d.id}</span></td>
                 <td><span class="td-id">${escape(d.uid)}</span></td>
                 <td class="td-nombre">${escape(d.nombre)}</td>
                 <td>${escape(d.tipo)}</td>
@@ -227,10 +523,7 @@
                 <td>${escape(d.ubicacion ?? '—')}</td>
                 <td>${statusBadge(d.estado)}</td>
                 <td>${formatDate(d.last_seen_at)}</td>
-                <td class="actions">
-                    <button class="btn-icon-sm" data-act="edit"   title="Editar dispositivo"><i class="fa-solid fa-pencil"></i></button>
-                    <button class="btn-icon-sm" data-act="delete" title="Eliminar dispositivo"><i class="fa-solid fa-trash"></i></button>
-                </td>
+                ${actionCells({ view: true, edit: true, delete: true })}
             </tr>
         `).join('');
 
@@ -238,6 +531,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th>Código</th>
                         <th>UID</th>
                         <th>Nombre</th>
                         <th>Tipo</th>
@@ -245,7 +539,7 @@
                         <th>Ubicación</th>
                         <th>Estado</th>
                         <th>Última conexión</th>
-                        <th></th>
+                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -263,25 +557,34 @@
         return `<span class="badge ${m.cls}">${escape(m.label)}</span>`;
     }
 
-    function wireDevicesToolbar(allDispositivos, allDominios) {
-        const tableWrap   = document.getElementById('dev-table');
-        const searchInput = document.getElementById('dev-search');
-        const searchClear = document.getElementById('dev-search-clear');
-        const domainSel   = document.getElementById('dev-domain-filter');
-        const chips       = document.querySelectorAll('.filter-chip[data-filter]');
-        let activeFilter  = 'all';
+    function wireDevicesView(state, allDispositivos, allDominios) {
+        const tableWrap = document.getElementById('dev-table');
+        const quick     = document.getElementById('dev-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('dev-filters');
+        const btnNew    = document.getElementById('dev-new');
 
-        function applyFilters() {
-            const q = (searchInput.value || '').trim().toLowerCase();
-            const dom = domainSel.value;
-            const filtered = allDispositivos.filter(d => {
-                if (activeFilter !== 'all' && d.estado !== activeFilter) return false;
-                if (dom && String(d.dominio_id) !== dom) return false;
-                if (!q) return true;
-                return (d.uid + ' ' + d.nombre + ' ' + d.tipo + ' ' + (d.dominio_nombre || '') + ' ' + (d.ubicacion || ''))
-                    .toLowerCase().includes(q);
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allDispositivos.filter(d => {
+                if (Number.isFinite(codigo) && d.id !== codigo) return false;
+                if (state.estado  && d.estado !== state.estado) return false;
+                if (state.dominio && String(d.dominio_id) !== state.dominio) return false;
+                if (q && !(d.uid + ' ' + d.nombre + ' ' + d.tipo + ' ' + (d.dominio_nombre || '') + ' ' + (d.ubicacion || ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
             });
-            tableWrap.innerHTML = devicesTableBody(filtered);
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = dispositivosTableBody(filtered.slice(0, state.limit));
             wireRowActions();
         }
 
@@ -291,23 +594,151 @@
                     const id = +btn.closest('tr').dataset.id;
                     const d  = allDispositivos.find(x => x.id === id);
                     if (!d) return;
+                    if (btn.dataset.act === 'view')   openDeviceViewModal(d);
                     if (btn.dataset.act === 'edit')   openDeviceModal(d, allDominios);
                     if (btn.dataset.act === 'delete') confirmDeleteDevice(d);
                 });
             });
         }
 
-        chips.forEach(c => c.addEventListener('click', () => {
-            chips.forEach(x => x.classList.remove('active'));
-            c.classList.add('active');
-            activeFilter = c.dataset.filter;
-            applyFilters();
-        }));
-        searchInput.addEventListener('input', applyFilters);
-        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
-        domainSel.addEventListener('change', applyFilters);
+        quick.value = state.texto;
+        quick.addEventListener('input', () => {
+            state.texto = quick.value.trim();
+            applyAndRender();
+        });
+        quickClr.addEventListener('click', () => {
+            quick.value = '';
+            state.texto = '';
+            applyAndRender();
+            quick.focus();
+        });
 
-        wireRowActions();
+        btnFilt.addEventListener('click', () => openDevicesFiltersModal(state, allDominios, applyAndRender));
+        btnNew.addEventListener('click',  () => openDeviceModal(null, allDominios));
+
+        applyAndRender();
+    }
+
+    function openDevicesFiltersModal(state, allDominios, onApply) {
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d => `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`)
+        ).join('');
+        const estOpts = ['<option value="">Todos los estados</option>'].concat(
+            ESTADOS_DISPOSITIVO_FILTRO.map(e =>
+                `<option value="${e.value}"${e.value === state.estado ? ' selected' : ''}>${escape(e.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_DISPOSITIVOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="dev-fm-codigo">Código</label>
+                    <input type="number" id="dev-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="dev-fm-texto">Buscar (UID / nombre / tipo / ubicación)</label>
+                    <input type="search" id="dev-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="dev-fm-dominio">Dominio</label>
+                    <select id="dev-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dev-fm-estado">Estado</label>
+                    <select id="dev-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dev-fm-limit">Límite</label>
+                    <input type="number" id="dev-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="dev-fm-orden">Ordenar por</label>
+                    <select id="dev-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dev-fm-dir">Dirección</label>
+                    <select id="dev-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo  = modal.querySelector('#dev-fm-codigo').value.trim();
+                state.texto   = modal.querySelector('#dev-fm-texto').value.trim();
+                state.dominio = modal.querySelector('#dev-fm-dominio').value;
+                state.estado  = modal.querySelector('#dev-fm-estado').value;
+                state.orden   = modal.querySelector('#dev-fm-orden').value;
+                state.dir     = modal.querySelector('#dev-fm-dir').value;
+                state.limit   = readLimit(modal.querySelector('#dev-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = dispositivosDefaults();
+                modal.querySelector('#dev-fm-codigo').value  = d.codigo;
+                modal.querySelector('#dev-fm-texto').value   = d.texto;
+                modal.querySelector('#dev-fm-dominio').value = d.dominio;
+                modal.querySelector('#dev-fm-estado').value  = d.estado;
+                modal.querySelector('#dev-fm-orden').value   = d.orden;
+                modal.querySelector('#dev-fm-dir').value     = d.dir;
+                modal.querySelector('#dev-fm-limit').value   = String(d.limit);
+            },
+        });
+    }
+
+    function openDeviceViewModal(dev) {
+        const cfgStr = dev.config_json
+            ? (typeof dev.config_json === 'object'
+                ? JSON.stringify(dev.config_json, null, 2)
+                : String(dev.config_json))
+            : '';
+        const cfgValue = cfgStr
+            ? `<pre>${escape(cfgStr)}</pre>`
+            : `<span class="muted">Sin configuración</span>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar dispositivo</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',           `<code>#${dev.id}</code>`),
+                        viewCardHalf('UID',              `<code>${escape(dev.uid)}</code>`),
+                        viewCardHalf('Nombre',           escape(dev.nombre)),
+                        viewCardHalf('Tipo',             escape(dev.tipo)),
+                        viewCardHalf('Dominio',          `<span class="badge badge-info">${escape(dev.dominio_nombre)}</span>`),
+                        viewCardHalf('Estado',           statusBadge(dev.estado)),
+                        viewCardHalf('Ubicación',        dev.ubicacion ? escape(dev.ubicacion) : `<span class="muted">—</span>`),
+                        viewCardHalf('Última conexión',  escape(formatDate(dev.last_seen_at))),
+                        viewCardHalf('Creado',           escape(formatDate(dev.created_at))),
+                        viewCardFull('Configuración (JSON)', cfgValue),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
 
     const ESTADOS_DISPOSITIVO = [
@@ -322,7 +753,7 @@
             `¿Eliminar el dispositivo ${dev.nombre} (UID ${dev.uid})? Se borrarán también sus señales asociadas. Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('devices.php?id=' + dev.id, { method: 'DELETE' });
+                    await api('dispositivos.php?id=' + dev.id, { method: 'DELETE' });
                     toast('Dispositivo eliminado');
                     navigate();
                 } catch (e) {
@@ -333,16 +764,23 @@
     }
 
     function openDeviceModal(dev, allDominios) {
-        const domOpts = allDominios.map(d =>
-            `<option value="${d.id}" ${dev.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
-        ).join('');
+        const isEdit = !!dev;
+
+        const domOpts = (isEdit ? '' : '<option value="">Elegí un dominio…</option>') +
+            allDominios.map(d =>
+                `<option value="${d.id}" ${dev?.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
+            ).join('');
 
         const estadoOpts = ESTADOS_DISPOSITIVO.map(e =>
-            `<option value="${e.value}" ${dev.estado === e.value ? 'selected' : ''}>${escape(e.label)}</option>`
+            `<option value="${e.value}" ${(dev?.estado ?? 'offline') === e.value ? 'selected' : ''}>${escape(e.label)}</option>`
         ).join('');
 
-        const initialJson = dev.config_json
+        const initialJson = dev?.config_json
             ? JSON.stringify(dev.config_json, null, 2)
+            : '';
+
+        const titleSubtitle = isEdit
+            ? `<span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uid)}</code></span>`
             : '';
 
         const backdrop = document.createElement('div');
@@ -351,8 +789,8 @@
             <div class="modal modal-wide" role="dialog" aria-modal="true">
                 <div class="modal-header">
                     <div class="modal-title">
-                        Editar dispositivo
-                        <span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uid)}</code></span>
+                        ${isEdit ? 'Editar dispositivo' : 'Nuevo dispositivo'}
+                        ${titleSubtitle}
                     </div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
@@ -361,6 +799,7 @@
                         <div class="form-group">
                             <label for="dev-dominio">Dominio</label>
                             <select id="dev-dominio">${domOpts}</select>
+                            <div class="field-error" id="dev-dominio-err" style="display:none"></div>
                         </div>
                         <div class="form-group">
                             <label for="dev-estado">Estado</label>
@@ -371,14 +810,14 @@
                         <div class="form-group">
                             <label for="dev-uid">UID</label>
                             <input type="text" id="dev-uid" maxlength="64"
-                                   value="${escape(dev.uid)}"
+                                   value="${escape(dev?.uid ?? '')}"
                                    placeholder="RX-0001" required>
                             <div class="field-error" id="dev-uid-err" style="display:none"></div>
                         </div>
                         <div class="form-group">
                             <label for="dev-tipo">Tipo</label>
                             <input type="text" id="dev-tipo" maxlength="60"
-                                   value="${escape(dev.tipo)}"
+                                   value="${escape(dev?.tipo ?? '')}"
                                    placeholder="temperature / humidity / actuator…" required>
                             <div class="field-error" id="dev-tipo-err" style="display:none"></div>
                         </div>
@@ -386,13 +825,13 @@
                     <div class="form-group">
                         <label for="dev-nombre">Nombre</label>
                         <input type="text" id="dev-nombre" maxlength="120"
-                               value="${escape(dev.nombre)}" required>
+                               value="${escape(dev?.nombre ?? '')}" required>
                         <div class="field-error" id="dev-nombre-err" style="display:none"></div>
                     </div>
                     <div class="form-group">
                         <label for="dev-ubicacion">Ubicación</label>
                         <input type="text" id="dev-ubicacion" maxlength="120"
-                               value="${escape(dev.ubicacion ?? '')}"
+                               value="${escape(dev?.ubicacion ?? '')}"
                                placeholder="Opcional">
                     </div>
                     <div class="form-group">
@@ -412,7 +851,7 @@
                         <i class="fa-solid fa-wand-magic-sparkles"></i> Formatear JSON
                     </button>
                     <button class="btn btn-ghost"   data-act="close">Cancelar</button>
-                    <button class="btn btn-primary" data-act="save">Guardar cambios</button>
+                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear dispositivo'}</button>
                 </div>
             </div>
         `;
@@ -434,6 +873,7 @@
         const nombreInput = backdrop.querySelector('#dev-nombre');
         const ubicInput   = backdrop.querySelector('#dev-ubicacion');
         const editor      = backdrop.querySelector('#dev-config-json');
+        const domErr      = backdrop.querySelector('#dev-dominio-err');
         const uidErr      = backdrop.querySelector('#dev-uid-err');
         const tipoErr     = backdrop.querySelector('#dev-tipo-err');
         const nombreErr   = backdrop.querySelector('#dev-nombre-err');
@@ -458,8 +898,8 @@
         }
 
         editor.addEventListener('input', clearCfgError);
-        nombreInput.focus();
-        nombreInput.select();
+        (isEdit ? nombreInput : domSel).focus();
+        if (isEdit) nombreInput.select();
 
         formatBtn.addEventListener('click', () => {
             const r = parseEditor();
@@ -469,8 +909,8 @@
         });
 
         saveBtn.addEventListener('click', async () => {
-            [uidErr, tipoErr, nombreErr].forEach(el => el.style.display = 'none');
-            [uidInput, tipoInput, nombreInput].forEach(el => el.classList.remove('input-invalid'));
+            [domErr, uidErr, tipoErr, nombreErr].forEach(el => el.style.display = 'none');
+            [domSel, uidInput, tipoInput, nombreInput].forEach(el => el.classList.remove('input-invalid'));
             clearCfgError();
 
             const uid        = uidInput.value.trim();
@@ -481,6 +921,12 @@
             const estado     = estadoSel.value;
 
             let firstInvalid = null;
+            if (!dominio_id) {
+                domErr.textContent = 'Elegí un dominio';
+                domErr.style.display = 'block';
+                domSel.classList.add('input-invalid');
+                firstInvalid = firstInvalid || domSel;
+            }
             if (!uid) {
                 uidErr.textContent = 'El UID es obligatorio';
                 uidErr.style.display = 'block';
@@ -507,22 +953,17 @@
             }
             if (firstInvalid) { firstInvalid.focus(); return; }
 
+            const payload = { uid, dominio_id, nombre, tipo, ubicacion, estado, config_json: r.value };
+
             saveBtn.disabled = true;
             try {
-                await api('devices.php', {
-                    method: 'PUT',
-                    body: {
-                        id: dev.id,
-                        uid,
-                        dominio_id,
-                        nombre,
-                        tipo,
-                        ubicacion,
-                        estado,
-                        config_json: r.value,
-                    },
-                });
-                toast('Dispositivo actualizado');
+                if (isEdit) {
+                    await api('dispositivos.php', { method: 'PUT', body: { id: dev.id, ...payload } });
+                    toast('Dispositivo actualizado');
+                } else {
+                    await api('dispositivos.php', { method: 'POST', body: payload });
+                    toast('Dispositivo creado');
+                }
                 close();
                 navigate();
             } catch (e) {
@@ -539,22 +980,36 @@
         { value: 'suspendido', label: 'Suspendido', badge: 'badge-danger'  },
     ];
 
+    const ORDEN_CHIPS = [
+        { value: 'id',         label: 'Código'      },
+        { value: 'operador',   label: 'Operador'    },
+        { value: 'numero',     label: 'Número'      },
+        { value: 'iccid',      label: 'ICCID'       },
+        { value: 'estado',     label: 'Estado'      },
+        { value: 'created_at', label: 'Creado'      },
+    ];
+
+    function chipsDefaults() {
+        return {
+            codigo: '', texto: '', dominio: '', estado: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
     async function renderChips(root) {
         try {
             const [data, domData] = await Promise.all([
                 api('chips.php'),
-                api('domains.php'),
+                api('dominios.php'),
             ]);
             const r = data.resumen;
             const dominios = domData.dominios;
+            const chips    = data.chips;
 
-            const domOptions = ['<option value="">Todos los dominios</option>']
-                .concat(dominios.map(d =>
-                    `<option value="${d.id}">${escape(d.nombre)}</option>`
-                ))
-                .join('');
+            const state = chipsDefaults();
 
             root.innerHTML = `
+                ${moduleHeader('Chips', 'Líneas SIM disponibles para los dispositivos: estado, dominio asignado y datos del operador.')}
                 <div class="stats-bar">
                     <div class="stat-card">
                         <span class="stat-label">Total</span>
@@ -573,30 +1028,15 @@
                         <span class="stat-value red">${r.suspendido}</span>
                     </div>
                 </div>
-
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-wrap">
-                            <input type="search" class="search-input" id="chip-search" placeholder="Buscar por número, ICCID, operador o notas…">
-                            <button class="search-clear" id="chip-search-clear" aria-label="Limpiar">×</button>
-                        </div>
-                        <select id="chip-dom-filter">${domOptions}</select>
-                        <button class="filter-chip active" data-filter="all">Todos</button>
-                        <button class="filter-chip" data-filter="activo">Activos</button>
-                        <button class="filter-chip" data-filter="inactivo">Inactivos</button>
-                        <button class="filter-chip" data-filter="suspendido">Suspendidos</button>
-                    </div>
-                    <div class="toolbar-right">
-                        <button class="btn btn-primary btn-sm" id="chip-new">
-                            <i class="fa-solid fa-plus"></i> Nuevo chip
-                        </button>
-                    </div>
-                </div>
-
-                <div class="table-card" id="chip-table">${chipsTableBody(data.chips)}</div>
+                ${abmToolbar({
+                    idPrefix:         'chip',
+                    quickPlaceholder: 'Buscar operador, número, ICCID, notas…',
+                    newLabel:         'Nuevo chip',
+                })}
+                <div class="table-card" id="chip-table"></div>
             `;
 
-            wireChipsView(data.chips, dominios);
+            wireChipsView(state, chips, dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
@@ -617,10 +1057,7 @@
                 <td>${c.apn ? escape(c.apn) : '<span class="td-id">—</span>'}</td>
                 <td>${c.plan ? escape(c.plan) : '<span class="td-id">—</span>'}</td>
                 <td>${chipEstadoBadge(c.estado)}</td>
-                <td class="actions">
-                    <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
-                    <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
-                </td>
+                ${actionCells({ view: true, edit: true, delete: true })}
             </tr>
         `).join('');
 
@@ -628,7 +1065,7 @@
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Código</th>
                         <th>Operador</th>
                         <th>Número</th>
                         <th>ICCID</th>
@@ -636,7 +1073,7 @@
                         <th>APN</th>
                         <th>Plan</th>
                         <th>Estado</th>
-                        <th></th>
+                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -649,27 +1086,35 @@
         return `<span class="badge ${e.badge}">${escape(e.label)}</span>`;
     }
 
-    function wireChipsView(allChips, allDominios) {
-        const tableWrap   = document.getElementById('chip-table');
-        const searchInput = document.getElementById('chip-search');
-        const searchClear = document.getElementById('chip-search-clear');
-        const domSel      = document.getElementById('chip-dom-filter');
-        const btnNew      = document.getElementById('chip-new');
-        const filterChips = document.querySelectorAll('.filter-chip[data-filter]');
-        let activeFilter  = 'all';
+    function wireChipsView(state, allChips, allDominios) {
+        const tableWrap = document.getElementById('chip-table');
+        const quick     = document.getElementById('chip-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('chip-filters');
+        const btnNew    = document.getElementById('chip-new');
 
-        function applyFilters() {
-            const q   = (searchInput.value || '').trim().toLowerCase();
-            const dom = domSel.value;
-            const filtered = allChips.filter(c => {
-                if (activeFilter !== 'all' && c.estado !== activeFilter) return false;
-                if (dom && String(c.dominio_id) !== dom) return false;
-                if (!q) return true;
-                return (c.numero + ' ' + c.iccid + ' ' + c.operador + ' ' +
-                        (c.apn || '') + ' ' + (c.plan || '') + ' ' + (c.notas || ''))
-                    .toLowerCase().includes(q);
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allChips.filter(c => {
+                if (Number.isFinite(codigo) && c.id !== codigo) return false;
+                if (state.estado  && c.estado !== state.estado) return false;
+                if (state.dominio && String(c.dominio_id) !== state.dominio) return false;
+                if (q && !(c.numero + ' ' + c.iccid + ' ' + c.operador + ' ' +
+                           (c.apn || '') + ' ' + (c.plan || '') + ' ' + (c.notas || ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
             });
-            tableWrap.innerHTML = chipsTableBody(filtered);
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = chipsTableBody(filtered.slice(0, state.limit));
             wireRowActions();
         }
 
@@ -679,24 +1124,137 @@
                     const id = +btn.closest('tr').dataset.id;
                     const c  = allChips.find(x => x.id === id);
                     if (!c) return;
+                    if (btn.dataset.act === 'view')   openChipViewModal(c);
                     if (btn.dataset.act === 'edit')   openChipModal(c, allDominios);
                     if (btn.dataset.act === 'delete') confirmDeleteChip(c);
                 });
             });
         }
 
-        filterChips.forEach(c => c.addEventListener('click', () => {
-            filterChips.forEach(x => x.classList.remove('active'));
-            c.classList.add('active');
-            activeFilter = c.dataset.filter;
-            applyFilters();
-        }));
-        searchInput.addEventListener('input', applyFilters);
-        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
-        domSel.addEventListener('change', applyFilters);
-        btnNew.addEventListener('click', () => openChipModal(null, allDominios));
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
 
-        wireRowActions();
+        btnFilt.addEventListener('click', () => openChipsFiltersModal(state, allDominios, applyAndRender));
+        btnNew.addEventListener('click',  () => openChipModal(null, allDominios));
+
+        applyAndRender();
+    }
+
+    function openChipsFiltersModal(state, allDominios, onApply) {
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d => `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`)
+        ).join('');
+        const estOpts = ['<option value="">Todos los estados</option>'].concat(
+            ESTADOS_CHIP.map(e =>
+                `<option value="${e.value}"${e.value === state.estado ? ' selected' : ''}>${escape(e.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_CHIPS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="chip-fm-codigo">Código</label>
+                    <input type="number" id="chip-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="chip-fm-texto">Buscar (operador / nº / ICCID / notas)</label>
+                    <input type="search" id="chip-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="chip-fm-dominio">Dominio</label>
+                    <select id="chip-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="chip-fm-estado">Estado</label>
+                    <select id="chip-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="chip-fm-limit">Límite</label>
+                    <input type="number" id="chip-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="chip-fm-orden">Ordenar por</label>
+                    <select id="chip-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="chip-fm-dir">Dirección</label>
+                    <select id="chip-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo  = modal.querySelector('#chip-fm-codigo').value.trim();
+                state.texto   = modal.querySelector('#chip-fm-texto').value.trim();
+                state.dominio = modal.querySelector('#chip-fm-dominio').value;
+                state.estado  = modal.querySelector('#chip-fm-estado').value;
+                state.orden   = modal.querySelector('#chip-fm-orden').value;
+                state.dir     = modal.querySelector('#chip-fm-dir').value;
+                state.limit   = readLimit(modal.querySelector('#chip-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = chipsDefaults();
+                modal.querySelector('#chip-fm-codigo').value  = d.codigo;
+                modal.querySelector('#chip-fm-texto').value   = d.texto;
+                modal.querySelector('#chip-fm-dominio').value = d.dominio;
+                modal.querySelector('#chip-fm-estado').value  = d.estado;
+                modal.querySelector('#chip-fm-orden').value   = d.orden;
+                modal.querySelector('#chip-fm-dir').value     = d.dir;
+                modal.querySelector('#chip-fm-limit').value   = String(d.limit);
+            },
+        });
+    }
+
+    function openChipViewModal(chip) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar chip</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',   `<code>#${chip.id}</code>`),
+                        viewCardHalf('Operador', escape(chip.operador)),
+                        viewCardHalf('Número',   escape(chip.numero)),
+                        viewCardHalf('ICCID',    `<code>${escape(chip.iccid)}</code>`),
+                        viewCardHalf('Dominio',  `<span class="badge badge-info">${escape(chip.dominio_nombre)}</span>`),
+                        viewCardHalf('Estado',   chipEstadoBadge(chip.estado)),
+                        viewCardHalf('APN',      chip.apn  ? escape(chip.apn)  : `<span class="muted">—</span>`),
+                        viewCardHalf('Plan',     chip.plan ? escape(chip.plan) : `<span class="muted">—</span>`),
+                        viewCardHalf('Creado',   escape(formatDate(chip.created_at))),
+                        viewCardHalf('Actualizado', escape(formatDate(chip.updated_at))),
+                        viewCardFull('Notas',    chip.notas ? escape(chip.notas) : `<span class="muted">Sin notas</span>`),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
 
     function openChipModal(chip, allDominios) {
@@ -884,34 +1442,42 @@
     }
 
     /* ---------- Views: Dominios ---------- */
-    async function renderDomains(root) {
-        try {
-            const data = await api('domains.php');
-            root.innerHTML = `
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-wrap">
-                            <input type="search" class="search-input" id="dom-search" placeholder="Buscar dominio…">
-                            <button class="search-clear" id="dom-search-clear" aria-label="Limpiar">×</button>
-                        </div>
-                    </div>
-                    <div class="toolbar-right">
-                        <button class="btn btn-primary btn-sm" id="dom-new">
-                            <i class="fa-solid fa-plus"></i> Nuevo dominio
-                        </button>
-                    </div>
-                </div>
+    const ORDEN_DOMINIOS = [
+        { value: 'id',         label: 'Código'      },
+        { value: 'nombre',     label: 'Nombre'      },
+        { value: 'created_at', label: 'Creado'      },
+    ];
 
-                <div class="table-card" id="dom-table">${domainsTableBody(data.dominios)}</div>
+    function dominiosDefaults() {
+        return {
+            codigo: '', texto: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderDominios(root) {
+        try {
+            const data = await api('dominios.php');
+            const dominios = data.dominios;
+            const state = dominiosDefaults();
+
+            root.innerHTML = `
+                ${moduleHeader('Dominios', 'Espacios lógicos que agrupan dispositivos, chips y perfiles de acceso.')}
+                ${abmToolbar({
+                    idPrefix:         'dom',
+                    quickPlaceholder: 'Buscar nombre o descripción…',
+                    newLabel:         'Nuevo dominio',
+                })}
+                <div class="table-card" id="dom-table"></div>
             `;
 
-            wireDomainsView(data.dominios);
+            wireDomainsView(state, dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
     }
 
-    function domainsTableBody(dominios) {
+    function dominiosTableBody(dominios) {
         if (!dominios.length) {
             return `<div class="table-empty">Todavía no hay dominios. Creá el primero con "Nuevo dominio".</div>`;
         }
@@ -923,11 +1489,7 @@
                 <td>${escape(d.descripcion ?? '—')}</td>
                 <td><span class="badge badge-info">${d.dispositivos_count}</span></td>
                 <td>${formatDate(d.created_at)}</td>
-                <td class="actions">
-                    <button class="btn-icon-sm" data-act="view"   title="Ver"><i class="fa-solid fa-eye"></i></button>
-                    <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
-                    <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
-                </td>
+                ${actionCells({ view: true, edit: true, delete: true })}
             </tr>
         `).join('');
 
@@ -935,12 +1497,12 @@
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Código</th>
                         <th>Nombre</th>
                         <th>Descripción</th>
                         <th>Dispositivos</th>
                         <th>Creado</th>
-                        <th></th>
+                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -948,18 +1510,31 @@
         `;
     }
 
-    function wireDomainsView(allDominios) {
-        const tableWrap   = document.getElementById('dom-table');
-        const searchInput = document.getElementById('dom-search');
-        const searchClear = document.getElementById('dom-search-clear');
-        const btnNew      = document.getElementById('dom-new');
+    function wireDomainsView(state, allDominios) {
+        const tableWrap = document.getElementById('dom-table');
+        const quick     = document.getElementById('dom-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('dom-filters');
+        const btnNew    = document.getElementById('dom-new');
 
-        function applyFilters() {
-            const q = (searchInput.value || '').trim().toLowerCase();
-            const filtered = !q ? allDominios : allDominios.filter(d =>
-                (d.nombre + ' ' + (d.descripcion || '')).toLowerCase().includes(q)
-            );
-            tableWrap.innerHTML = domainsTableBody(filtered);
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allDominios.filter(d => {
+                if (Number.isFinite(codigo) && d.id !== codigo) return false;
+                if (q && !(d.nombre + ' ' + (d.descripcion || '')).toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = dominiosTableBody(filtered.slice(0, state.limit));
             wireRowActions();
         }
 
@@ -976,11 +1551,71 @@
             });
         }
 
-        searchInput.addEventListener('input', applyFilters);
-        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
-        btnNew.addEventListener('click', () => openDomainModal(null));
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
 
-        wireRowActions();
+        btnFilt.addEventListener('click', () => openDominiosFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openDomainModal(null));
+
+        applyAndRender();
+    }
+
+    function openDominiosFiltersModal(state, onApply) {
+        const ordOpts = ORDEN_DOMINIOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="dom-fm-codigo">Código</label>
+                    <input type="number" id="dom-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="dom-fm-texto">Buscar (nombre / descripción)</label>
+                    <input type="search" id="dom-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="dom-fm-limit">Límite</label>
+                    <input type="number" id="dom-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="dom-fm-orden">Ordenar por</label>
+                    <select id="dom-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dom-fm-dir">Dirección</label>
+                    <select id="dom-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo = modal.querySelector('#dom-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#dom-fm-texto').value.trim();
+                state.orden  = modal.querySelector('#dom-fm-orden').value;
+                state.dir    = modal.querySelector('#dom-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#dom-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = dominiosDefaults();
+                modal.querySelector('#dom-fm-codigo').value = d.codigo;
+                modal.querySelector('#dom-fm-texto').value  = d.texto;
+                modal.querySelector('#dom-fm-orden').value  = d.orden;
+                modal.querySelector('#dom-fm-dir').value    = d.dir;
+                modal.querySelector('#dom-fm-limit').value  = String(d.limit);
+            },
+        });
     }
 
     function openDomainModal(dom) {
@@ -1046,10 +1681,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('domains.php', { method: 'PUT', body: { id: dom.id, nombre, descripcion } });
+                    await api('dominios.php', { method: 'PUT', body: { id: dom.id, nombre, descripcion } });
                     toast('Dominio actualizado');
                 } else {
-                    await api('domains.php', { method: 'POST', body: { nombre, descripcion } });
+                    await api('dominios.php', { method: 'POST', body: { nombre, descripcion } });
                     toast('Dominio creado');
                 }
                 close();
@@ -1064,39 +1699,24 @@
     function openDomainViewModal(dom) {
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
+        const descValue = dom.descripcion
+            ? escape(dom.descripcion)
+            : `<span class="muted">Sin descripción</span>`;
         backdrop.innerHTML = `
-            <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
                 <div class="modal-header">
-                    <div class="modal-title">Detalle del dominio</div>
+                    <div class="modal-title">Consultar dominio</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
-                    <dl class="data-list">
-                        <div class="data-row">
-                            <dt class="data-label">ID</dt>
-                            <dd class="data-value"><code>#${dom.id}</code></dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Nombre</dt>
-                            <dd class="data-value">${escape(dom.nombre)}</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Descripción</dt>
-                            <dd class="data-value ${dom.descripcion ? '' : 'muted'}">${escape(dom.descripcion ?? 'Sin descripción')}</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Dispositivos asociados</dt>
-                            <dd class="data-value"><span class="badge badge-info">${dom.dispositivos_count}</span></dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Creado</dt>
-                            <dd class="data-value">${formatDate(dom.created_at)}</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Última actualización</dt>
-                            <dd class="data-value">${formatDate(dom.updated_at)}</dd>
-                        </div>
-                    </dl>
+                    ${viewGrid([
+                        viewCardHalf('Código',                 `<code>#${dom.id}</code>`),
+                        viewCardHalf('Nombre',                 escape(dom.nombre)),
+                        viewCardHalf('Dispositivos asociados', `<span class="badge badge-info">${dom.dispositivos_count}</span>`),
+                        viewCardHalf('Creado',                 escape(formatDate(dom.created_at))),
+                        viewCardHalf('Última actualización',   escape(formatDate(dom.updated_at))),
+                        viewCardFull('Descripción',            descValue),
+                    ])}
                 </div>
                 <div class="modal-footer">
                     <div class="action-menu action-menu-up" id="dom-view-menu" style="margin-right:auto">
@@ -1157,8 +1777,8 @@
                     openDomainModal(dom);
                 } else if (act === 'go-devices') {
                     close();
-                    pendingDevicesDomainFilter = dom.id;
-                    window.location.hash = '#/devices';
+                    pendingDispositivosDominioFilter = dom.id;
+                    window.location.hash = '#/dispositivos';
                 } else if (act === 'copy-id') {
                     copyToClipboard(String(dom.id));
                 } else if (act === 'copy-name') {
@@ -1181,7 +1801,7 @@
             `¿Eliminar el dominio "${dom.nombre}"?` + reassignNote + ' Esta acción no se puede deshacer.',
             async () => {
                 try {
-                    await api('domains.php?id=' + dom.id, { method: 'DELETE' });
+                    await api('dominios.php?id=' + dom.id, { method: 'DELETE' });
                     toast('Dominio eliminado');
                     navigate();
                 } catch (e) {
@@ -1227,12 +1847,31 @@
         { value: 'lectura',  label: 'Solo lectura',  badge: 'badge-warn'   },
     ];
 
+    const ORDEN_USUARIOS = [
+        { value: 'id',            label: 'Código'        },
+        { value: 'nombre',        label: 'Nombre'        },
+        { value: 'email',         label: 'Email'         },
+        { value: 'rol',           label: 'Rol'           },
+        { value: 'last_login_at', label: 'Último login'  },
+        { value: 'created_at',    label: 'Creado'        },
+    ];
+
+    function usuariosDefaults() {
+        return {
+            codigo: '', texto: '', rol: '', estado: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
     async function renderUsers(root) {
         try {
             const data = await api('users.php');
             const r = data.resumen;
+            const usuarios = data.usuarios;
+            const state = usuariosDefaults();
 
             root.innerHTML = `
+                ${moduleHeader('Usuarios', 'Personas con acceso a la plataforma: credenciales, rol y estado.')}
                 <div class="stats-bar">
                     <div class="stat-card">
                         <span class="stat-label">Total</span>
@@ -1247,30 +1886,15 @@
                         <span class="stat-value orange">${r.admins}</span>
                     </div>
                 </div>
-
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-wrap">
-                            <input type="search" class="search-input" id="usr-search" placeholder="Buscar por email o nombre…">
-                            <button class="search-clear" id="usr-search-clear" aria-label="Limpiar">×</button>
-                        </div>
-                        <button class="filter-chip active" data-filter="all">Todos</button>
-                        <button class="filter-chip" data-filter="admin">Admin</button>
-                        <button class="filter-chip" data-filter="operador">Operador</button>
-                        <button class="filter-chip" data-filter="lectura">Lectura</button>
-                        <button class="filter-chip" data-filter="activos">Solo activos</button>
-                    </div>
-                    <div class="toolbar-right">
-                        <button class="btn btn-primary btn-sm" id="usr-new">
-                            <i class="fa-solid fa-plus"></i> Nuevo usuario
-                        </button>
-                    </div>
-                </div>
-
-                <div class="table-card" id="usr-table">${usuariosTableBody(data.usuarios)}</div>
+                ${abmToolbar({
+                    idPrefix:         'usr',
+                    quickPlaceholder: 'Buscar nombre, email o celular…',
+                    newLabel:         'Nuevo usuario',
+                })}
+                <div class="table-card" id="usr-table"></div>
             `;
 
-            wireUsersView(data.usuarios);
+            wireUsersView(state, usuarios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
@@ -1293,10 +1917,7 @@
                     : '<span class="badge badge-danger">Inactivo</span>'}</td>
                 <td>${formatDate(u.last_login_at)}</td>
                 <td>${formatDate(u.created_at)}</td>
-                <td class="actions">
-                    <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
-                    <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
-                </td>
+                ${actionCells({ view: true, edit: true, delete: true })}
             </tr>
         `).join('');
 
@@ -1304,7 +1925,7 @@
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Código</th>
                         <th>Nombre</th>
                         <th>Email</th>
                         <th>Celular</th>
@@ -1312,7 +1933,7 @@
                         <th>Estado</th>
                         <th>Último login</th>
                         <th>Creado</th>
-                        <th></th>
+                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1325,26 +1946,34 @@
         return `<span class="badge ${r.badge}">${escape(r.label)}</span>`;
     }
 
-    function wireUsersView(allUsuarios) {
-        const tableWrap   = document.getElementById('usr-table');
-        const searchInput = document.getElementById('usr-search');
-        const searchClear = document.getElementById('usr-search-clear');
-        const btnNew      = document.getElementById('usr-new');
-        const chips       = document.querySelectorAll('.filter-chip[data-filter]');
-        let activeFilter  = 'all';
+    function wireUsersView(state, allUsuarios) {
+        const tableWrap = document.getElementById('usr-table');
+        const quick     = document.getElementById('usr-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('usr-filters');
+        const btnNew    = document.getElementById('usr-new');
 
-        function applyFilters() {
-            const q = (searchInput.value || '').trim().toLowerCase();
-            const filtered = allUsuarios.filter(u => {
-                if (activeFilter === 'activos') {
-                    if (!u.activo) return false;
-                } else if (activeFilter !== 'all' && u.rol !== activeFilter) {
-                    return false;
-                }
-                if (!q) return true;
-                return (u.email + ' ' + u.nombre + ' ' + (u.celular || '')).toLowerCase().includes(q);
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allUsuarios.filter(u => {
+                if (Number.isFinite(codigo) && u.id !== codigo) return false;
+                if (state.rol && u.rol !== state.rol) return false;
+                if (state.estado === 'activo'   && !u.activo) return false;
+                if (state.estado === 'inactivo' &&  u.activo) return false;
+                if (q && !(u.email + ' ' + u.nombre + ' ' + (u.celular || '')).toLowerCase().includes(q)) return false;
+                return true;
             });
-            tableWrap.innerHTML = usuariosTableBody(filtered);
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = usuariosTableBody(filtered.slice(0, state.limit));
             wireRowActions();
         }
 
@@ -1354,23 +1983,141 @@
                     const id = +btn.closest('tr').dataset.id;
                     const u  = allUsuarios.find(x => x.id === id);
                     if (!u) return;
+                    if (btn.dataset.act === 'view')   openUserViewModal(u);
                     if (btn.dataset.act === 'edit')   openUserModal(u);
                     if (btn.dataset.act === 'delete') confirmDeleteUser(u);
                 });
             });
         }
 
-        chips.forEach(c => c.addEventListener('click', () => {
-            chips.forEach(x => x.classList.remove('active'));
-            c.classList.add('active');
-            activeFilter = c.dataset.filter;
-            applyFilters();
-        }));
-        searchInput.addEventListener('input', applyFilters);
-        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
-        btnNew.addEventListener('click', () => openUserModal(null));
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
 
-        wireRowActions();
+        btnFilt.addEventListener('click', () => openUsersFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openUserModal(null));
+
+        applyAndRender();
+    }
+
+    function openUsersFiltersModal(state, onApply) {
+        const rolOpts = ['<option value="">Todos los roles</option>'].concat(
+            ROLES_USER.map(r =>
+                `<option value="${r.value}"${r.value === state.rol ? ' selected' : ''}>${escape(r.label)}</option>`
+            )
+        ).join('');
+        const estOpts = [
+            `<option value=""${state.estado === '' ? ' selected' : ''}>Todos</option>`,
+            `<option value="activo"${state.estado === 'activo' ? ' selected' : ''}>Activos</option>`,
+            `<option value="inactivo"${state.estado === 'inactivo' ? ' selected' : ''}>Inactivos</option>`,
+        ].join('');
+        const ordOpts = ORDEN_USUARIOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="usr-fm-codigo">Código</label>
+                    <input type="number" id="usr-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="usr-fm-texto">Buscar (nombre / email / celular)</label>
+                    <input type="search" id="usr-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="usr-fm-rol">Rol</label>
+                    <select id="usr-fm-rol">${rolOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="usr-fm-estado">Estado</label>
+                    <select id="usr-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="usr-fm-limit">Límite</label>
+                    <input type="number" id="usr-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="usr-fm-orden">Ordenar por</label>
+                    <select id="usr-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="usr-fm-dir">Dirección</label>
+                    <select id="usr-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo = modal.querySelector('#usr-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#usr-fm-texto').value.trim();
+                state.rol    = modal.querySelector('#usr-fm-rol').value;
+                state.estado = modal.querySelector('#usr-fm-estado').value;
+                state.orden  = modal.querySelector('#usr-fm-orden').value;
+                state.dir    = modal.querySelector('#usr-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#usr-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = usuariosDefaults();
+                modal.querySelector('#usr-fm-codigo').value = d.codigo;
+                modal.querySelector('#usr-fm-texto').value  = d.texto;
+                modal.querySelector('#usr-fm-rol').value    = d.rol;
+                modal.querySelector('#usr-fm-estado').value = d.estado;
+                modal.querySelector('#usr-fm-orden').value  = d.orden;
+                modal.querySelector('#usr-fm-dir').value    = d.dir;
+                modal.querySelector('#usr-fm-limit').value  = String(d.limit);
+            },
+        });
+    }
+
+    function openUserViewModal(usr) {
+        const estadoVal = usr.activo
+            ? '<span class="badge badge-success">Activo</span>'
+            : '<span class="badge badge-danger">Inactivo</span>';
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar usuario</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',        `<code>#${usr.id}</code>`),
+                        viewCardHalf('Nombre',        escape(usr.nombre)),
+                        viewCardHalf('Email',         escape(usr.email)),
+                        viewCardHalf('Celular',       usr.celular ? escape(usr.celular) : `<span class="muted">—</span>`),
+                        viewCardHalf('Rol',           rolBadge(usr.rol)),
+                        viewCardHalf('Estado',        estadoVal),
+                        viewCardHalf('Último login',  escape(formatDate(usr.last_login_at))),
+                        viewCardHalf('Creado',        escape(formatDate(usr.created_at))),
+                        viewCardHalf('Actualizado',   escape(formatDate(usr.updated_at))),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
 
     function openUserModal(usr) {
@@ -1552,16 +2299,36 @@
         { value: 'operador', label: 'Operador',      badge: 'badge-info'   },
     ];
 
+    const ORDEN_PERFILES = [
+        { value: 'id',             label: 'Código'   },
+        { value: 'usuario_nombre', label: 'Usuario'  },
+        { value: 'dominio_nombre', label: 'Dominio'  },
+        { value: 'rol',            label: 'Rol'      },
+        { value: 'created_at',     label: 'Creado'   },
+    ];
+
+    function perfilesDefaults() {
+        return {
+            codigo: '', texto: '', dominio: '', rol: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
     async function renderProfiles(root) {
         try {
             const [data, usrData, domData] = await Promise.all([
                 api('profiles.php'),
                 api('users.php'),
-                api('domains.php'),
+                api('dominios.php'),
             ]);
             const r = data.resumen;
+            const perfiles  = data.perfiles;
+            const usuarios  = usrData.usuarios;
+            const dominios  = domData.dominios;
+            const state     = perfilesDefaults();
 
             root.innerHTML = `
+                ${moduleHeader('Perfiles', 'Relación entre usuarios y dominios: qué rol tiene cada usuario sobre cada dominio.')}
                 <div class="stats-bar">
                     <div class="stat-card">
                         <span class="stat-label">Total</span>
@@ -1576,28 +2343,15 @@
                         <span class="stat-value green">${r.operador}</span>
                     </div>
                 </div>
-
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-wrap">
-                            <input type="search" class="search-input" id="prf-search" placeholder="Buscar por usuario o dominio…">
-                            <button class="search-clear" id="prf-search-clear" aria-label="Limpiar">×</button>
-                        </div>
-                        <button class="filter-chip active" data-filter="all">Todos</button>
-                        <button class="filter-chip" data-filter="admin">Admin</button>
-                        <button class="filter-chip" data-filter="operador">Operador</button>
-                    </div>
-                    <div class="toolbar-right">
-                        <button class="btn btn-primary btn-sm" id="prf-new">
-                            <i class="fa-solid fa-plus"></i> Nuevo perfil
-                        </button>
-                    </div>
-                </div>
-
-                <div class="table-card" id="prf-table">${perfilesTableBody(data.perfiles)}</div>
+                ${abmToolbar({
+                    idPrefix:         'prf',
+                    quickPlaceholder: 'Buscar usuario, email o dominio…',
+                    newLabel:         'Nuevo perfil',
+                })}
+                <div class="table-card" id="prf-table"></div>
             `;
 
-            wireProfilesView(data.perfiles, usrData.usuarios, domData.dominios);
+            wireProfilesView(state, perfiles, usuarios, dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
@@ -1618,10 +2372,7 @@
                 <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
                 <td>${perfilRolBadge(p.rol)}</td>
                 <td>${formatDate(p.created_at)}</td>
-                <td class="actions">
-                    <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
-                    <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
-                </td>
+                ${actionCells({ view: true, edit: true, delete: true })}
             </tr>
         `).join('');
 
@@ -1629,12 +2380,12 @@
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Código</th>
                         <th>Usuario</th>
                         <th>Dominio</th>
                         <th>Rol</th>
                         <th>Creado</th>
-                        <th></th>
+                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1647,23 +2398,34 @@
         return `<span class="badge ${r.badge}">${escape(r.label)}</span>`;
     }
 
-    function wireProfilesView(allPerfiles, allUsuarios, allDominios) {
-        const tableWrap   = document.getElementById('prf-table');
-        const searchInput = document.getElementById('prf-search');
-        const searchClear = document.getElementById('prf-search-clear');
-        const btnNew      = document.getElementById('prf-new');
-        const chips       = document.querySelectorAll('.filter-chip[data-filter]');
-        let activeFilter  = 'all';
+    function wireProfilesView(state, allPerfiles, allUsuarios, allDominios) {
+        const tableWrap = document.getElementById('prf-table');
+        const quick     = document.getElementById('prf-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('prf-filters');
+        const btnNew    = document.getElementById('prf-new');
 
-        function applyFilters() {
-            const q = (searchInput.value || '').trim().toLowerCase();
-            const filtered = allPerfiles.filter(p => {
-                if (activeFilter !== 'all' && p.rol !== activeFilter) return false;
-                if (!q) return true;
-                return (p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
-                    .toLowerCase().includes(q);
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allPerfiles.filter(p => {
+                if (Number.isFinite(codigo) && p.id !== codigo) return false;
+                if (state.rol     && p.rol !== state.rol) return false;
+                if (state.dominio && String(p.dominio_id) !== state.dominio) return false;
+                if (q && !(p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
+                    .toLowerCase().includes(q)) return false;
+                return true;
             });
-            tableWrap.innerHTML = perfilesTableBody(filtered);
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = perfilesTableBody(filtered.slice(0, state.limit));
             wireRowActions();
         }
 
@@ -1673,23 +2435,134 @@
                     const id = +btn.closest('tr').dataset.id;
                     const p  = allPerfiles.find(x => x.id === id);
                     if (!p) return;
+                    if (btn.dataset.act === 'view')   openProfileViewModal(p);
                     if (btn.dataset.act === 'edit')   openProfileModal(p, allUsuarios, allDominios);
                     if (btn.dataset.act === 'delete') confirmDeleteProfile(p);
                 });
             });
         }
 
-        chips.forEach(c => c.addEventListener('click', () => {
-            chips.forEach(x => x.classList.remove('active'));
-            c.classList.add('active');
-            activeFilter = c.dataset.filter;
-            applyFilters();
-        }));
-        searchInput.addEventListener('input', applyFilters);
-        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
-        btnNew.addEventListener('click', () => openProfileModal(null, allUsuarios, allDominios));
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
 
-        wireRowActions();
+        btnFilt.addEventListener('click', () => openProfilesFiltersModal(state, allDominios, applyAndRender));
+        btnNew.addEventListener('click',  () => openProfileModal(null, allUsuarios, allDominios));
+
+        applyAndRender();
+    }
+
+    function openProfilesFiltersModal(state, allDominios, onApply) {
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d => `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`)
+        ).join('');
+        const rolOpts = ['<option value="">Todos los roles</option>'].concat(
+            ROLES_PERFIL.map(r =>
+                `<option value="${r.value}"${r.value === state.rol ? ' selected' : ''}>${escape(r.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_PERFILES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="prf-fm-codigo">Código</label>
+                    <input type="number" id="prf-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="prf-fm-texto">Buscar (usuario / email / dominio)</label>
+                    <input type="search" id="prf-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="prf-fm-dominio">Dominio</label>
+                    <select id="prf-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="prf-fm-rol">Rol</label>
+                    <select id="prf-fm-rol">${rolOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="prf-fm-limit">Límite</label>
+                    <input type="number" id="prf-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="prf-fm-orden">Ordenar por</label>
+                    <select id="prf-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="prf-fm-dir">Dirección</label>
+                    <select id="prf-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo  = modal.querySelector('#prf-fm-codigo').value.trim();
+                state.texto   = modal.querySelector('#prf-fm-texto').value.trim();
+                state.dominio = modal.querySelector('#prf-fm-dominio').value;
+                state.rol     = modal.querySelector('#prf-fm-rol').value;
+                state.orden   = modal.querySelector('#prf-fm-orden').value;
+                state.dir     = modal.querySelector('#prf-fm-dir').value;
+                state.limit   = readLimit(modal.querySelector('#prf-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = perfilesDefaults();
+                modal.querySelector('#prf-fm-codigo').value  = d.codigo;
+                modal.querySelector('#prf-fm-texto').value   = d.texto;
+                modal.querySelector('#prf-fm-dominio').value = d.dominio;
+                modal.querySelector('#prf-fm-rol').value     = d.rol;
+                modal.querySelector('#prf-fm-orden').value   = d.orden;
+                modal.querySelector('#prf-fm-dir').value     = d.dir;
+                modal.querySelector('#prf-fm-limit').value   = String(d.limit);
+            },
+        });
+    }
+
+    function openProfileViewModal(prf) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar perfil</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',       `<code>#${prf.id}</code>`),
+                        viewCardHalf('Rol',          perfilRolBadge(prf.rol)),
+                        viewCardHalf('Usuario',      escape(prf.usuario_nombre)),
+                        viewCardHalf('Email',        escape(prf.usuario_email)),
+                        viewCardHalf('Dominio',      `<span class="badge badge-info">${escape(prf.dominio_nombre)}</span>`),
+                        viewCardHalf('Código dominio', `<code>#${prf.dominio_id}</code>`),
+                        viewCardHalf('Creado',       escape(formatDate(prf.created_at))),
+                        viewCardHalf('Actualizado',  escape(formatDate(prf.updated_at))),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
 
     function openProfileModal(prf, allUsuarios, allDominios) {
@@ -1828,36 +2701,66 @@
         );
     }
 
-    /* ---------- Views: Señales ---------- */
-    const TIPO_SENAL_BADGE = {
-        lectura: 'badge-info',
-        estado:  'badge-success',
-        evento:  'badge-warn',
-        error:   'badge-danger',
-    };
+    /* ---------- Views: Señales ----------
+     * Read-only: las señales las generan los dispositivos. Sigue las
+     * convenciones de listado ABM (header + KPIs + toolbar + tabla con
+     * columna `Código` primero y columna `Consultar` al final). No tiene
+     * Editar / Eliminar — los registros son inmutables, por lo que el
+     * toolbar omite el botón `+ Nuevo` (DESIGN.md §9).
+     *
+     * Tabla real: db/schema.sql -> `senales` (id, serie, fecha, sentido,
+     * transceptor, dispositivo, canal, topic, mensaje, estado). El campo
+     * `dispositivo` es FK a `dispositivos.id`.
+     */
+    const SENTIDOS_SENAL = [
+        { value: 'I', label: 'Entrante', badge: 'badge-info' },
+        { value: 'O', label: 'Saliente', badge: 'badge-warn' },
+    ];
+
+    const ORDEN_SENALES = [
+        { value: 'id',          label: 'Código'     },
+        { value: 'fecha',       label: 'Fecha'      },
+        { value: 'dispositivo', label: 'Dispositivo'},
+        { value: 'canal',       label: 'Canal'      },
+        { value: 'estado',      label: 'Estado'     },
+    ];
+
+    function signalsDefaults() {
+        return {
+            codigo: '', texto: '', dispositivo: '', dominio: '',
+            sentido: '', estado: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
 
     async function renderSignals(root) {
         try {
-            const [data, devData] = await Promise.all([
-                api('signals.php' + (pendingSignalsDeviceFilter ? `?dispositivo_id=${pendingSignalsDeviceFilter}` : '')),
-                api('devices.php'),
-            ]);
-            const dispositivos = devData.dispositivos;
             const initialDevice = pendingSignalsDeviceFilter;
             pendingSignalsDeviceFilter = null;
 
-            const devOptions = ['<option value="">Todos los dispositivos</option>']
-                .concat(dispositivos.map(d =>
-                    `<option value="${d.id}" ${initialDevice && +initialDevice === d.id ? 'selected' : ''}>${escape(d.uid)} · ${escape(d.nombre)}</option>`
-                ))
-                .join('');
+            const state = signalsDefaults();
+            if (initialDevice) state.dispositivo = String(initialDevice);
 
-            const r = data.resumen;
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
+
+            const [data, devData, domData] = await Promise.all([
+                api('signals.php?' + qs.toString()),
+                api('dispositivos.php'),
+                api('dominios.php'),
+            ]);
+
+            const r            = data.resumen;
+            const dispositivos = devData.dispositivos;
+            const dominios     = domData.dominios;
+            let senales        = data.senales;
 
             root.innerHTML = `
+                ${moduleHeader('Señales', 'Registro de señales enviadas por los dispositivos: fecha, dispositivo, canal y contenido del mensaje recibido.')}
                 <div class="stats-bar">
                     <div class="stat-card">
-                        <span class="stat-label">Total señales</span>
+                        <span class="stat-label">Total</span>
                         <span class="stat-value">${r.total}</span>
                     </div>
                     <div class="stat-card">
@@ -1869,61 +2772,61 @@
                         <span class="stat-value">${r.dispositivos_activos}</span>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-label">Errores</span>
-                        <span class="stat-value red">${r.errores}</span>
+                        <span class="stat-label">Hoy</span>
+                        <span class="stat-value orange">${r.hoy}</span>
                     </div>
                 </div>
-
-                <div class="toolbar">
-                    <div class="toolbar-left">
-                        <div class="search-wrap">
-                            <input type="search" class="search-input" id="sig-search" placeholder="Buscar por dispositivo, topic, canal o valor…">
-                            <button class="search-clear" id="sig-search-clear" aria-label="Limpiar">×</button>
-                        </div>
-                        <select id="sig-device-filter">${devOptions}</select>
-                        <button class="filter-chip active" data-filter="all">Todos</button>
-                        <button class="filter-chip" data-filter="lectura">Lectura</button>
-                        <button class="filter-chip" data-filter="estado">Estado</button>
-                        <button class="filter-chip" data-filter="evento">Evento</button>
-                        <button class="filter-chip" data-filter="error">Error</button>
-                    </div>
-                    <div class="toolbar-right">
-                        <span class="td-id">Mostrando hasta ${data.limit} señales más recientes</span>
-                    </div>
-                </div>
-
-                <div class="table-card" id="sig-table">${signalsTableBody(data.senales)}</div>
+                ${abmToolbar({
+                    idPrefix:         'sig',
+                    quickPlaceholder: 'Buscar topic, mensaje, dispositivo…',
+                    newLabel:         null,
+                })}
+                <div class="table-card" id="sig-table"></div>
             `;
 
-            wireSignalsView(data.senales, initialDevice);
+            wireSignalsView(state, senales, dispositivos, dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
     }
 
+    function sentidoBadge(s) {
+        if (!s) return `<span class="td-id">—</span>`;
+        const item = SENTIDOS_SENAL.find(x => x.value === s);
+        const label = item ? item.label : s;
+        const cls   = item ? item.badge : 'badge-info';
+        return `<span class="badge ${cls}">${escape(label)}</span>`;
+    }
+
+    // Variante compacta para el feed en vivo: sólo el ícono.
+    //   S (Salida)  → upload
+    //   E (Entrada) → download
+    function sentidoLiveIcon(s) {
+        if (s === 'S') return '<i class="fa-solid fa-upload sentido-icon sentido-out" title="Saliente" aria-label="Saliente"></i>';
+        if (s === 'E') return '<i class="fa-solid fa-download sentido-icon sentido-in" title="Entrante" aria-label="Entrante"></i>';
+        return '<span class="td-id">—</span>';
+    }
+
     function signalsTableBody(senales) {
         if (!senales.length) {
-            return `<div class="table-empty">No hay señales registradas todavía.</div>`;
+            return `<div class="table-empty">No hay señales que coincidan con los filtros.</div>`;
         }
 
         const rows = senales.map(s => `
             <tr data-id="${s.id}">
-                <td><span class="td-id">${formatDate(s.recibido_at)}</span></td>
+                <td><span class="td-id">#${s.id}</span></td>
+                <td><span class="td-id">${formatDate(s.fecha)}</span></td>
                 <td>
-                    <div class="td-nombre">${escape(s.dispositivo_nombre)}</div>
-                    <div class="td-id">${escape(s.dispositivo_uid)}</div>
+                    <div class="td-nombre">${escape(s.dispositivo_nombre ?? '—')}</div>
+                    ${s.dispositivo_uuid ? `<div class="td-id">${escape(s.dispositivo_uuid)}</div>` : ''}
                 </td>
-                <td><span class="badge badge-info">${escape(s.dominio_nombre)}</span></td>
-                <td>${s.canal_label
-                    ? `<span class="td-nombre">${escape(s.canal_label)}</span>` +
-                      (s.canal_id != null ? ` <span class="td-id">#${s.canal_id}</span>` : '')
-                    : '<span class="td-id">—</span>'}</td>
-                <td>${signalTipoBadge(s.tipo)}</td>
-                <td>${s.valor != null && s.valor !== '' ? escape(s.valor) : '<span class="td-id">—</span>'}</td>
-                <td><span class="td-id">${escape(s.topic)}</span></td>
-                <td class="actions">
-                    <button class="btn-icon-sm" data-act="view" title="Ver detalle"><i class="fa-solid fa-eye"></i></button>
-                </td>
+                <td>${s.dominio_id ? `<span class="badge badge-info">${escape(s.dominio_nombre)}</span>` : '<span class="td-id">—</span>'}</td>
+                <td>${s.canal != null ? `<span class="td-id">#${s.canal}</span>` : '<span class="td-id">—</span>'}</td>
+                <td>${sentidoBadge(s.sentido)}</td>
+                <td><span class="td-id">${escape(s.topic ?? '')}</span></td>
+                <td>${s.mensaje != null && s.mensaje !== '' ? escape(s.mensaje) : '<span class="td-id">—</span>'}</td>
+                <td>${s.estado != null ? `<span class="td-id">${s.estado}</span>` : '<span class="td-id">—</span>'}</td>
+                ${actionCells({ view: true })}
             </tr>
         `).join('');
 
@@ -1931,14 +2834,16 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Recibido</th>
+                        <th>Código</th>
+                        <th>Fecha</th>
                         <th>Dispositivo</th>
                         <th>Dominio</th>
                         <th>Canal</th>
-                        <th>Tipo</th>
-                        <th>Valor</th>
+                        <th>Sentido</th>
                         <th>Topic</th>
-                        <th></th>
+                        <th>Mensaje</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells({ view: true })}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1946,117 +2851,227 @@
         `;
     }
 
-    function signalTipoBadge(tipo) {
-        const cls = TIPO_SENAL_BADGE[tipo] || 'badge-info';
-        return `<span class="badge ${cls}">${escape(tipo)}</span>`;
-    }
+    function wireSignalsView(state, allSenales, allDispositivos, allDominios) {
+        const tableWrap = document.getElementById('sig-table');
+        const quick     = document.getElementById('sig-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('sig-filters');
 
-    function wireSignalsView(allSenales, initialDevice) {
-        const tableWrap   = document.getElementById('sig-table');
-        const searchInput = document.getElementById('sig-search');
-        const searchClear = document.getElementById('sig-search-clear');
-        const devSel      = document.getElementById('sig-device-filter');
-        const chips       = document.querySelectorAll('.filter-chip[data-filter]');
-        let activeFilter  = 'all';
+        let senales = allSenales;
 
-        if (initialDevice) devSel.value = String(initialDevice);
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
 
-        function applyFilters() {
-            const q   = (searchInput.value || '').trim().toLowerCase();
-            const dev = devSel.value;
-            const filtered = allSenales.filter(s => {
-                if (activeFilter !== 'all' && s.tipo !== activeFilter) return false;
-                if (dev && String(s.dispositivo_id) !== dev) return false;
-                if (!q) return true;
-                return (s.dispositivo_nombre + ' ' + s.dispositivo_uid + ' ' + s.topic + ' ' +
-                        (s.canal_label || '') + ' ' + (s.valor || '') + ' ' + s.tipo)
-                    .toLowerCase().includes(q);
+            let filtered = senales.filter(s => {
+                if (Number.isFinite(codigo) && s.id !== codigo) return false;
+                if (state.dispositivo && String(s.dispositivo) !== state.dispositivo) return false;
+                if (state.dominio && String(s.dominio_id ?? '') !== state.dominio) return false;
+                if (state.sentido && s.sentido !== state.sentido) return false;
+                if (state.estado !== '' && String(s.estado ?? '') !== state.estado) return false;
+                if (q && !((s.dispositivo_nombre ?? '') + ' ' +
+                           (s.dispositivo_uuid   ?? '') + ' ' +
+                           (s.topic              ?? '') + ' ' +
+                           (s.mensaje            ?? '') + ' ' +
+                           (s.transceptor_nombre ?? ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
             });
-            tableWrap.innerHTML = signalsTableBody(filtered);
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = signalsTableBody(filtered.slice(0, state.limit));
             wireRowActions();
+        }
+
+        async function refetchFromServer() {
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
+
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const data = await api('signals.php?' + qs.toString());
+                senales = data.senales;
+                applyAndRender();
+            } catch (e) {
+                tableWrap.innerHTML = errorBox(e.message);
+            }
         }
 
         function wireRowActions() {
             tableWrap.querySelectorAll('button[data-act="view"]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const id = +btn.closest('tr').dataset.id;
-                    const s  = allSenales.find(x => x.id === id);
+                    const s  = senales.find(x => x.id === id);
                     if (s) openSignalViewModal(s);
                 });
             });
         }
 
-        chips.forEach(c => c.addEventListener('click', () => {
-            chips.forEach(x => x.classList.remove('active'));
-            c.classList.add('active');
-            activeFilter = c.dataset.filter;
-            applyFilters();
-        }));
-        searchInput.addEventListener('input', applyFilters);
-        searchClear.addEventListener('click', () => { searchInput.value = ''; applyFilters(); });
-        devSel.addEventListener('change', applyFilters);
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
 
-        wireRowActions();
+        btnFilt.addEventListener('click', () =>
+            openSignalsFiltersModal(state, allDispositivos, allDominios, ({ refetch }) => {
+                if (refetch) refetchFromServer();
+                else        applyAndRender();
+            })
+        );
+
+        applyAndRender();
+    }
+
+    function openSignalsFiltersModal(state, allDispositivos, allDominios, onApply) {
+        const devOpts = ['<option value="">Todos los dispositivos</option>'].concat(
+            allDispositivos.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dispositivo ? ' selected' : ''}>${escape(d.uid)} · ${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const sentOpts = ['<option value="">Todos los sentidos</option>'].concat(
+            SENTIDOS_SENAL.map(s =>
+                `<option value="${s.value}"${s.value === state.sentido ? ' selected' : ''}>${escape(s.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_SENALES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="sig-fm-codigo">Código</label>
+                    <input type="number" id="sig-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-texto">Buscar (topic / mensaje / dispositivo)</label>
+                    <input type="search" id="sig-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-dispositivo">Dispositivo</label>
+                    <select id="sig-fm-dispositivo">${devOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-dominio">Dominio</label>
+                    <select id="sig-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-sentido">Sentido</label>
+                    <select id="sig-fm-sentido">${sentOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-estado">Estado</label>
+                    <input type="number" id="sig-fm-estado" placeholder="Valor exacto" value="${escape(state.estado)}">
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-limit">Límite</label>
+                    <input type="number" id="sig-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="sig-fm-orden">Ordenar por</label>
+                    <select id="sig-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="sig-fm-dir">Dirección</label>
+                    <select id="sig-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                const prevDispositivo = state.dispositivo;
+                const prevLimit       = state.limit;
+
+                state.codigo      = modal.querySelector('#sig-fm-codigo').value.trim();
+                state.texto       = modal.querySelector('#sig-fm-texto').value.trim();
+                state.dispositivo = modal.querySelector('#sig-fm-dispositivo').value;
+                state.dominio     = modal.querySelector('#sig-fm-dominio').value;
+                state.sentido     = modal.querySelector('#sig-fm-sentido').value;
+                state.estado      = modal.querySelector('#sig-fm-estado').value.trim();
+                state.orden       = modal.querySelector('#sig-fm-orden').value;
+                state.dir         = modal.querySelector('#sig-fm-dir').value;
+                state.limit       = readLimit(modal.querySelector('#sig-fm-limit'), 100);
+
+                // Dispositivo y límite afectan el filtrado server-side (?dispositivo=&limit=);
+                // el resto se aplica client-side sobre el set ya descargado.
+                const needsRefetch = state.dispositivo !== prevDispositivo
+                                  || state.limit       !== prevLimit;
+                onApply({ refetch: needsRefetch });
+            },
+            onClear(modal) {
+                const d = signalsDefaults();
+                modal.querySelector('#sig-fm-codigo').value      = d.codigo;
+                modal.querySelector('#sig-fm-texto').value       = d.texto;
+                modal.querySelector('#sig-fm-dispositivo').value = d.dispositivo;
+                modal.querySelector('#sig-fm-dominio').value     = d.dominio;
+                modal.querySelector('#sig-fm-sentido').value     = d.sentido;
+                modal.querySelector('#sig-fm-estado').value      = d.estado;
+                modal.querySelector('#sig-fm-orden').value       = d.orden;
+                modal.querySelector('#sig-fm-dir').value         = d.dir;
+                modal.querySelector('#sig-fm-limit').value       = String(d.limit);
+            },
+        });
     }
 
     function openSignalViewModal(s) {
-        const payloadStr = formatPayload(s.payload);
+        const dispositivoValue = s.dispositivo_nombre
+            ? `${escape(s.dispositivo_nombre)}${s.dispositivo_uuid ? ` <code>${escape(s.dispositivo_uuid)}</code>` : ''}`
+            : `<span class="muted">Sin dispositivo asociado</span>`;
+        const dominioValue = s.dominio_id
+            ? `<span class="badge badge-info">${escape(s.dominio_nombre)}</span>`
+            : `<span class="muted">—</span>`;
+        const transceptorValue = s.transceptor_nombre
+            ? `${escape(s.transceptor_nombre)} <code>#${s.transceptor}</code>`
+            : (s.transceptor != null ? `<code>#${s.transceptor}</code>` : `<span class="muted">—</span>`);
+        const canalValue   = s.canal   != null ? `<code>#${s.canal}</code>`   : `<span class="muted">—</span>`;
+        const serieValue   = s.serie   != null ? escape(String(s.serie))      : `<span class="muted">—</span>`;
+        const estadoValue  = s.estado  != null ? escape(String(s.estado))     : `<span class="muted">—</span>`;
+        const mensajeValue = (s.mensaje != null && s.mensaje !== '')
+            ? `<pre>${escape(s.mensaje)}</pre>`
+            : `<span class="muted">Sin mensaje</span>`;
+        const topicValue   = s.topic ? `<code>${escape(s.topic)}</code>` : `<span class="muted">—</span>`;
 
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
                 <div class="modal-header">
-                    <div class="modal-title">Detalle de la señal</div>
+                    <div class="modal-title">Consultar señal</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
-                    <dl class="data-list">
-                        <div class="data-row">
-                            <dt class="data-label">ID</dt>
-                            <dd class="data-value"><code>#${s.id}</code></dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Recibido</dt>
-                            <dd class="data-value">${formatDate(s.recibido_at)}</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Dispositivo</dt>
-                            <dd class="data-value">${escape(s.dispositivo_nombre)} <code>${escape(s.dispositivo_uid)}</code></dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Dominio</dt>
-                            <dd class="data-value"><span class="badge badge-info">${escape(s.dominio_nombre)}</span></dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Topic MQTT</dt>
-                            <dd class="data-value"><code>${escape(s.topic)}</code></dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Canal</dt>
-                            <dd class="data-value ${s.canal_label ? '' : 'muted'}">${s.canal_label
-                                ? escape(s.canal_label) + (s.canal_id != null ? ` <code>#${s.canal_id}</code>` : '')
-                                : 'Sin canal asociado'}</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Tipo</dt>
-                            <dd class="data-value">${signalTipoBadge(s.tipo)}</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Valor</dt>
-                            <dd class="data-value ${s.valor != null && s.valor !== '' ? '' : 'muted'}">${
-                                s.valor != null && s.valor !== '' ? escape(s.valor) : 'Sin valor'
-                            }</dd>
-                        </div>
-                        <div class="data-row">
-                            <dt class="data-label">Payload</dt>
-                            <dd class="data-value ${payloadStr ? '' : 'muted'}">${
-                                payloadStr
-                                    ? `<pre style="margin:0;font-family:monospace;font-size:.82rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;overflow-x:auto;white-space:pre-wrap">${escape(payloadStr)}</pre>`
-                                    : 'Sin payload'
-                            }</dd>
-                        </div>
-                    </dl>
+                    ${viewGrid([
+                        viewCardHalf('Código',      `<code>#${s.id}</code>`),
+                        viewCardHalf('Fecha',       escape(formatDate(s.fecha))),
+                        viewCardHalf('Dispositivo', dispositivoValue),
+                        viewCardHalf('Dominio',     dominioValue),
+                        viewCardHalf('Sentido',     sentidoBadge(s.sentido)),
+                        viewCardHalf('Estado',      estadoValue),
+                        viewCardHalf('Canal',       canalValue),
+                        viewCardHalf('Serie',       serieValue),
+                        viewCardHalf('Transceptor', transceptorValue),
+                        viewCardFull('Topic',       topicValue),
+                        viewCardFull('Mensaje',     mensajeValue),
+                    ])}
                 </div>
                 <div class="modal-footer">
                     <div class="action-menu action-menu-up" id="sig-view-menu" style="margin-right:auto">
@@ -2070,8 +3085,8 @@
                             <button class="action-menu-item" data-act="copy-topic" role="menuitem">
                                 <i class="fa-regular fa-copy"></i> Copiar topic
                             </button>
-                            <button class="action-menu-item" data-act="copy-payload" role="menuitem">
-                                <i class="fa-regular fa-copy"></i> Copiar payload
+                            <button class="action-menu-item" data-act="copy-mensaje" role="menuitem">
+                                <i class="fa-regular fa-copy"></i> Copiar mensaje
                             </button>
                         </div>
                     </div>
@@ -2106,36 +3121,391 @@
                 menu.classList.remove('open');
                 const act = item.dataset.act;
                 if (act === 'go-device') {
-                    close();
-                    window.location.hash = '#/devices';
+                    if (s.dispositivo) {
+                        close();
+                        window.location.hash = '#/dispositivos';
+                    }
                 } else if (act === 'copy-topic') {
-                    copyToClipboard(s.topic);
-                } else if (act === 'copy-payload') {
-                    copyToClipboard(payloadStr || '');
+                    copyToClipboard(s.topic || '');
+                } else if (act === 'copy-mensaje') {
+                    copyToClipboard(s.mensaje || '');
                 }
             });
         });
     }
 
-    function formatPayload(p) {
-        if (p == null || p === '') return '';
-        if (typeof p === 'object') return JSON.stringify(p, null, 2);
-        try { return JSON.stringify(JSON.parse(p), null, 2); } catch (_) { return String(p); }
+    /* ---------- Views: Registros ----------
+     * Read-only: los registros los genera el sistema. Sigue las
+     * convenciones de listado ABM (header + KPIs + toolbar + tabla con
+     * columna `Código` primero y columna `Consultar` al final). No tiene
+     * Editar / Eliminar — los registros son inmutables, por lo que el
+     * toolbar omite el botón `+ Nuevo` (DESIGN.md §9).
+     *
+     * Tabla real: db/schema.sql -> `registros` (id, fecha, sentido,
+     * usuario, dominio, dispositivo, canal, estado). Las FKs se
+     * resuelven en el backend con LEFT JOIN sobre `dispositivos`,
+     * `dominios` y `usuarios`.
+     */
+    const ORDEN_REGISTROS = [
+        { value: 'id',          label: 'Código'      },
+        { value: 'fecha',       label: 'Fecha'       },
+        { value: 'dispositivo', label: 'Dispositivo' },
+        { value: 'usuario',     label: 'Usuario'     },
+        { value: 'canal',       label: 'Canal'       },
+        { value: 'estado',      label: 'Estado'      },
+    ];
+
+    function registrosDefaults() {
+        return {
+            codigo: '', texto: '', dispositivo: '', dominio: '',
+            sentido: '', estado: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderRegistros(root) {
+        try {
+            const state = registrosDefaults();
+
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
+
+            const [data, devData, domData] = await Promise.all([
+                api('registros.php?' + qs.toString()),
+                api('dispositivos.php'),
+                api('dominios.php'),
+            ]);
+
+            const r            = data.resumen;
+            const dispositivos = devData.dispositivos;
+            const dominios     = domData.dominios;
+            let registros      = data.registros;
+
+            root.innerHTML = `
+                ${moduleHeader('Historial de registros', 'Bitácora del sistema: eventos asociados a dispositivos, dominios y usuarios, con fecha, sentido, canal y estado.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Últimas 24 h</span>
+                        <span class="stat-value green">${r.ultimas_24h}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Dispositivos activos (24 h)</span>
+                        <span class="stat-value">${r.dispositivos_activos}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Hoy</span>
+                        <span class="stat-value orange">${r.hoy}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'reg',
+                    quickPlaceholder: 'Buscar dispositivo, usuario, estado…',
+                    newLabel:         null,
+                })}
+                <div class="table-card" id="reg-table"></div>
+            `;
+
+            wireRegistrosView(state, registros, dispositivos, dominios);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function registrosTableBody(registros) {
+        if (!registros.length) {
+            return `<div class="table-empty">No hay registros que coincidan con los filtros.</div>`;
+        }
+
+        const rows = registros.map(r => `
+            <tr data-id="${r.id}">
+                <td><span class="td-id">#${r.id}</span></td>
+                <td><span class="td-id">${formatDate(r.fecha)}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(r.dispositivo_nombre ?? '—')}</div>
+                    ${r.dispositivo_uuid ? `<div class="td-id">${escape(r.dispositivo_uuid)}</div>` : ''}
+                </td>
+                <td>${r.dominio ? `<span class="badge badge-info">${escape(r.dominio_nombre)}</span>` : '<span class="td-id">—</span>'}</td>
+                <td>${r.canal != null ? `<span class="td-id">#${r.canal}</span>` : '<span class="td-id">—</span>'}</td>
+                <td>${sentidoBadge(r.sentido)}</td>
+                <td>
+                    ${r.usuario_nombre ? `<div class="td-nombre">${escape(r.usuario_nombre)}</div>` : ''}
+                    ${r.usuario_login
+                        ? `<div class="td-id">${escape(r.usuario_login)}</div>`
+                        : (!r.usuario_nombre ? '<span class="td-id">—</span>' : '')}
+                </td>
+                <td>${r.estado != null && r.estado !== '' ? escape(r.estado) : '<span class="td-id">—</span>'}</td>
+                ${actionCells({ view: true })}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Fecha</th>
+                        <th>Dispositivo</th>
+                        <th>Dominio</th>
+                        <th>Canal</th>
+                        <th>Sentido</th>
+                        <th>Usuario</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells({ view: true })}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireRegistrosView(state, allRegistros, allDispositivos, allDominios) {
+        const tableWrap = document.getElementById('reg-table');
+        const quick     = document.getElementById('reg-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('reg-filters');
+
+        let registros = allRegistros;
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+            const estadoQ = state.estado.toLowerCase();
+
+            let filtered = registros.filter(r => {
+                if (Number.isFinite(codigo) && r.id !== codigo) return false;
+                if (state.dispositivo && String(r.dispositivo) !== state.dispositivo) return false;
+                if (state.dominio && String(r.dominio ?? '') !== state.dominio) return false;
+                if (state.sentido && r.sentido !== state.sentido) return false;
+                if (estadoQ && !String(r.estado ?? '').toLowerCase().includes(estadoQ)) return false;
+                if (q && !((r.dispositivo_nombre ?? '') + ' ' +
+                           (r.dispositivo_uuid   ?? '') + ' ' +
+                           (r.usuario_nombre     ?? '') + ' ' +
+                           (r.usuario_login      ?? '') + ' ' +
+                           (r.estado             ?? ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = registrosTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        async function refetchFromServer() {
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
+
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const data = await api('registros.php?' + qs.toString());
+                registros = data.registros;
+                applyAndRender();
+            } catch (e) {
+                tableWrap.innerHTML = errorBox(e.message);
+            }
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act="view"]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const r  = registros.find(x => x.id === id);
+                    if (r) openRegistroViewModal(r);
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () =>
+            openRegistrosFiltersModal(state, allDispositivos, allDominios, ({ refetch }) => {
+                if (refetch) refetchFromServer();
+                else        applyAndRender();
+            })
+        );
+
+        applyAndRender();
+    }
+
+    function openRegistrosFiltersModal(state, allDispositivos, allDominios, onApply) {
+        const devOpts = ['<option value="">Todos los dispositivos</option>'].concat(
+            allDispositivos.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dispositivo ? ' selected' : ''}>${escape(d.uid)} · ${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const sentOpts = ['<option value="">Todos los sentidos</option>'].concat(
+            SENTIDOS_SENAL.map(s =>
+                `<option value="${s.value}"${s.value === state.sentido ? ' selected' : ''}>${escape(s.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_REGISTROS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="reg-fm-codigo">Código</label>
+                    <input type="number" id="reg-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-texto">Buscar (dispositivo / usuario / estado)</label>
+                    <input type="search" id="reg-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-dispositivo">Dispositivo</label>
+                    <select id="reg-fm-dispositivo">${devOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-dominio">Dominio</label>
+                    <select id="reg-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-sentido">Sentido</label>
+                    <select id="reg-fm-sentido">${sentOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-estado">Estado</label>
+                    <input type="text" id="reg-fm-estado" placeholder="Coincidencia parcial" value="${escape(state.estado)}">
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-limit">Límite</label>
+                    <input type="number" id="reg-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="reg-fm-orden">Ordenar por</label>
+                    <select id="reg-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="reg-fm-dir">Dirección</label>
+                    <select id="reg-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                const prevDispositivo = state.dispositivo;
+                const prevLimit       = state.limit;
+
+                state.codigo      = modal.querySelector('#reg-fm-codigo').value.trim();
+                state.texto       = modal.querySelector('#reg-fm-texto').value.trim();
+                state.dispositivo = modal.querySelector('#reg-fm-dispositivo').value;
+                state.dominio     = modal.querySelector('#reg-fm-dominio').value;
+                state.sentido     = modal.querySelector('#reg-fm-sentido').value;
+                state.estado      = modal.querySelector('#reg-fm-estado').value.trim();
+                state.orden       = modal.querySelector('#reg-fm-orden').value;
+                state.dir         = modal.querySelector('#reg-fm-dir').value;
+                state.limit       = readLimit(modal.querySelector('#reg-fm-limit'), 100);
+
+                // Dispositivo y límite viajan al backend (?dispositivo=&limit=);
+                // el resto se aplica client-side sobre el set ya descargado.
+                const needsRefetch = state.dispositivo !== prevDispositivo
+                                  || state.limit       !== prevLimit;
+                onApply({ refetch: needsRefetch });
+            },
+            onClear(modal) {
+                const d = registrosDefaults();
+                modal.querySelector('#reg-fm-codigo').value      = d.codigo;
+                modal.querySelector('#reg-fm-texto').value       = d.texto;
+                modal.querySelector('#reg-fm-dispositivo').value = d.dispositivo;
+                modal.querySelector('#reg-fm-dominio').value     = d.dominio;
+                modal.querySelector('#reg-fm-sentido').value     = d.sentido;
+                modal.querySelector('#reg-fm-estado').value      = d.estado;
+                modal.querySelector('#reg-fm-orden').value       = d.orden;
+                modal.querySelector('#reg-fm-dir').value         = d.dir;
+                modal.querySelector('#reg-fm-limit').value       = String(d.limit);
+            },
+        });
+    }
+
+    function openRegistroViewModal(r) {
+        const dispositivoValue = r.dispositivo_nombre
+            ? `${escape(r.dispositivo_nombre)}${r.dispositivo_uuid ? ` <code>${escape(r.dispositivo_uuid)}</code>` : ''}`
+            : (r.dispositivo != null ? `<code>#${r.dispositivo}</code>` : `<span class="muted">Sin dispositivo asociado</span>`);
+        const dominioValue = r.dominio
+            ? `<span class="badge badge-info">${escape(r.dominio_nombre)}</span>`
+            : `<span class="muted">—</span>`;
+        const usuarioValue = r.usuario_nombre
+            ? `${escape(r.usuario_nombre)}${r.usuario_login ? ` <code>${escape(r.usuario_login)}</code>` : ''}`
+            : (r.usuario != null ? `<code>#${r.usuario}</code>` : `<span class="muted">—</span>`);
+        const canalValue  = r.canal  != null ? `<code>#${r.canal}</code>` : `<span class="muted">—</span>`;
+        const estadoValue = (r.estado != null && r.estado !== '')
+            ? escape(String(r.estado))
+            : `<span class="muted">—</span>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar registro</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',      `<code>#${r.id}</code>`),
+                        viewCardHalf('Fecha',       escape(formatDate(r.fecha))),
+                        viewCardHalf('Dispositivo', dispositivoValue),
+                        viewCardHalf('Dominio',     dominioValue),
+                        viewCardHalf('Sentido',     sentidoBadge(r.sentido)),
+                        viewCardHalf('Canal',       canalValue),
+                        viewCardHalf('Usuario',     usuarioValue),
+                        viewCardHalf('Estado',      estadoValue),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
 
     /* ---------- Views: Herramientas ---------- */
     const toolsCatalog = [
-        { icon: '🛰️', title: 'Simulador de señales',  desc: 'Genera y envía señales sintéticas para probar la ingesta.' },
-        { icon: '🔔', title: 'Disparador de alertas',  desc: 'Activa alertas de prueba para validar notificaciones.' },
-        { icon: '📤', title: 'Test de webhooks',       desc: 'Envía payloads JSON a un endpoint externo.' },
-        { icon: '🧪', title: 'Sandbox de payloads',    desc: 'Editor JSON para probar configuraciones de dispositivos.' },
+        { icon: '⚙️', title: 'Parámetros', desc: 'Administra las variables de configuración del sistema.', action: openParametrosManager },
     ];
 
     function renderTools(root) {
         root.innerHTML = `
             <div class="tile-grid">
-                ${toolsCatalog.map(t => `
-                    <button type="button" class="tile-card" data-tool="${escape(t.title)}">
+                ${toolsCatalog.map((t, i) => `
+                    <button type="button" class="tile-card" data-tool-idx="${i}">
                         <span class="tile-icon">${t.icon}</span>
                         <span class="tile-title">${escape(t.title)}</span>
                         <span class="tile-desc">${escape(t.desc)}</span>
@@ -2146,9 +3516,262 @@
 
         root.querySelectorAll('.tile-card').forEach(btn => {
             btn.addEventListener('click', () => {
-                toast(`${btn.dataset.tool}: próximamente`);
+                const tool = toolsCatalog[+btn.dataset.toolIdx];
+                if (typeof tool?.action === 'function') {
+                    tool.action();
+                } else {
+                    toast(`${tool.title}: próximamente`);
+                }
             });
         });
+    }
+
+    /* ---------- Herramientas: Parámetros ---------- */
+    // Tabla `parametros` (db/schema.sql): id, variable, valor, comentario.
+    // A diferencia de los ABM regulares, vive 100% dentro de un modal lanzado
+    // desde el tile-grid de Herramientas. La lista se mantiene en memoria
+    // dentro del modal y se re-fetchea tras cada alta/edición/borrado.
+
+    async function openParametrosManager() {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="params-title">
+                <div class="modal-header">
+                    <div class="modal-title" id="params-title">
+                        Parámetros
+                        <span class="modal-subtitle">Variables de configuración del sistema</span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="toolbar" style="margin-bottom:14px">
+                        <div class="toolbar-left">
+                            <div class="search-wrap">
+                                <input type="search" id="params-quick" class="search-input"
+                                       placeholder="Buscar variable, valor o comentario…">
+                                <button type="button" class="search-clear"
+                                        data-act="quick-clear" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">×</button>
+                            </div>
+                        </div>
+                        <div class="toolbar-right">
+                            <button type="button" class="btn btn-primary btn-sm" data-act="new">
+                                <i class="fa-solid fa-plus"></i> Nuevo parámetro
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-card" id="params-table">
+                        <div class="table-empty"><div class="spin"></div></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const tableWrap = backdrop.querySelector('#params-table');
+        const quick     = backdrop.querySelector('#params-quick');
+        const quickClr  = backdrop.querySelector('[data-act="quick-clear"]');
+        const btnNew    = backdrop.querySelector('[data-act="new"]');
+
+        const state = { texto: '', items: [] };
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const filtered = q
+                ? state.items.filter(p =>
+                    ((p.variable   ?? '') + ' ' +
+                     (p.valor      ?? '') + ' ' +
+                     (p.comentario ?? '')).toLowerCase().includes(q))
+                : state.items;
+            tableWrap.innerHTML = parametrosTableBody(filtered);
+            wireRowActions();
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const p  = state.items.find(x => x.id === id);
+                    if (!p) return;
+                    if (btn.dataset.act === 'edit')   openParametroForm(p, reload);
+                    if (btn.dataset.act === 'delete') confirmDeleteParametro(p, reload);
+                });
+            });
+        }
+
+        async function reload() {
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const data = await api('parametros.php');
+                state.items = data.parametros || [];
+                applyAndRender();
+            } catch (e) {
+                tableWrap.innerHTML = `<div class="table-empty" style="color:var(--danger)">Error: ${escape(e.message)}</div>`;
+            }
+        }
+
+        quick.addEventListener('input', () => {
+            state.texto = quick.value.trim();
+            applyAndRender();
+        });
+        quickClr.addEventListener('click', () => {
+            quick.value = '';
+            state.texto = '';
+            applyAndRender();
+            quick.focus();
+        });
+        btnNew.addEventListener('click', () => openParametroForm(null, reload));
+
+        reload();
+    }
+
+    function parametrosTableBody(items) {
+        if (!items.length) {
+            return `<div class="table-empty">No hay parámetros para mostrar.</div>`;
+        }
+        const rows = items.map(p => `
+            <tr data-id="${p.id}">
+                <td><span class="td-id">#${p.id}</span></td>
+                <td class="td-nombre">${escape(p.variable ?? '')}</td>
+                <td>${p.valor != null && p.valor !== '' ? escape(p.valor) : '<span style="color:var(--muted)">—</span>'}</td>
+                <td>${p.comentario != null && p.comentario !== '' ? escape(p.comentario) : '<span style="color:var(--muted)">—</span>'}</td>
+                ${actionCells({ edit: true, delete: true })}
+            </tr>
+        `).join('');
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Variable</th>
+                        <th>Valor</th>
+                        <th>Comentario</th>
+                        ${actionHeaderCells({ edit: true, delete: true })}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function openParametroForm(param, onSaved) {
+        const isEdit = !!param;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">${isEdit ? 'Editar parámetro' : 'Nuevo parámetro'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="param-variable">Variable</label>
+                        <input type="text" id="param-variable" maxlength="255"
+                               value="${escape(param?.variable ?? '')}"
+                               placeholder="ej.: smtp_host" required>
+                        <div class="field-error" id="param-variable-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="param-valor">Valor</label>
+                        <input type="text" id="param-valor" maxlength="255"
+                               value="${escape(param?.valor ?? '')}"
+                               placeholder="Opcional">
+                        <div class="field-error" id="param-valor-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="param-comentario">Comentario</label>
+                        <textarea id="param-comentario" maxlength="1024" placeholder="Opcional">${escape(param?.comentario ?? '')}</textarea>
+                        <div class="field-error" id="param-comentario-err" style="display:none"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
+                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear parámetro'}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const varInput = backdrop.querySelector('#param-variable');
+        const valInput = backdrop.querySelector('#param-valor');
+        const comInput = backdrop.querySelector('#param-comentario');
+        const varErr   = backdrop.querySelector('#param-variable-err');
+        const saveBtn  = backdrop.querySelector('[data-act="save"]');
+
+        varInput.focus();
+        varInput.select();
+
+        saveBtn.addEventListener('click', async () => {
+            const variable   = varInput.value.trim();
+            const valor      = valInput.value.trim();
+            const comentario = comInput.value.trim();
+
+            varErr.style.display = 'none';
+            varInput.classList.remove('input-invalid');
+
+            if (!variable) {
+                varErr.textContent = 'La variable es obligatoria';
+                varErr.style.display = 'block';
+                varInput.classList.add('input-invalid');
+                varInput.focus();
+                return;
+            }
+
+            const payload = { variable, valor, comentario };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('parametros.php', { method: 'PUT', body: { id: param.id, ...payload } });
+                    toast('Parámetro actualizado');
+                } else {
+                    await api('parametros.php', { method: 'POST', body: payload });
+                    toast('Parámetro creado');
+                }
+                close();
+                if (typeof onSaved === 'function') onSaved();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    function confirmDeleteParametro(param, onDeleted) {
+        confirmDialog(
+            'Eliminar parámetro',
+            `¿Eliminar el parámetro "${param.variable}"? Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('parametros.php?id=' + param.id, { method: 'DELETE' });
+                    toast('Parámetro eliminado');
+                    if (typeof onDeleted === 'function') onDeleted();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
     }
 
     /* ---------- Views: Stub ---------- */
@@ -2190,6 +3813,22 @@
         const d = new Date(String(s).replace(' ', 'T'));
         if (isNaN(d)) return escape(s);
         return d.toLocaleString('es-AR');
+    }
+
+    // Variante compacta para el feed en vivo del dashboard: sólo HH:MM:SS.
+    function formatTime(s) {
+        if (!s) return '—';
+        const d = new Date(String(s).replace(' ', 'T'));
+        if (isNaN(d)) return String(s);
+        return d.toLocaleTimeString('es-AR', { hour12: false });
+    }
+
+    // Sólo la fecha (dd/MM/aaaa) — usado en el feed en vivo arriba de la hora.
+    function formatDateOnly(s) {
+        if (!s) return '—';
+        const d = new Date(String(s).replace(' ', 'T'));
+        if (isNaN(d)) return String(s);
+        return d.toLocaleDateString('es-AR');
     }
 
     function escape(s) {

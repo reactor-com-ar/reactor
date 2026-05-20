@@ -161,7 +161,7 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
       <span class="nav-group-arrow">+</span>
     </button>
     <div class="nav-sub">
-      <a href="#/devices" class="nav-item nav-sub-item">
+      <a href="#/dispositivos" class="nav-item nav-sub-item">
         <span class="nav-icon">🛰️</span> Dispositivos
       </a>
     </div>
@@ -272,22 +272,29 @@ textarea { resize: vertical; min-height: 60px; }
 
 ## 9. Toolbar (filtros + búsqueda + acciones)
 
-Patrón para encabezado de cualquier pantalla con tabla.
+Patrón normativo para el encabezado de cualquier listado ABM (ver `ABM.md` §2).
+
+- **Zona izquierda**: input de búsqueda rápida (`.search-wrap > .search-input`) + botón `Filtros` (`btn-secondary` con `fa-filter`). El botón abre el Modal de Filtros (§23-bis), que es la fuente completa de filtros del módulo. La búsqueda rápida es sólo un atajo.
+- **Zona derecha**: una sola acción primaria `+ Nuevo <entidad>` (`btn-primary`).
+
+No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como utilitario legacy).
 
 ```html
 <div class="toolbar">
   <div class="toolbar-left">
     <div class="search-wrap">
-      <input type="search" class="search-input" placeholder="Buscar…">
-      <button class="search-clear">×</button>
+      <input type="search" id="dev-quick" class="search-input"
+             placeholder="Buscar UID, nombre, tipo, ubicación…">
+      <button type="button" class="search-clear" data-act="quick-clear" title="Limpiar búsqueda">×</button>
     </div>
-    <button class="filter-chip active">Todos</button>
-    <button class="filter-chip">Activos</button>
-    <button class="filter-chip">Inactivos</button>
+    <button type="button" class="btn btn-secondary btn-sm" id="dev-filters">
+      <i class="fa-solid fa-filter"></i> Filtros
+    </button>
   </div>
   <div class="toolbar-right">
-    <button class="btn btn-ghost">Exportar</button>
-    <button class="btn btn-primary">+ Nuevo</button>
+    <button type="button" class="btn btn-primary btn-sm" id="dev-new">
+      <i class="fa-solid fa-plus"></i> Nuevo dispositivo
+    </button>
   </div>
 </div>
 ```
@@ -305,15 +312,14 @@ Patrón para encabezado de cualquier pantalla con tabla.
                       cursor: pointer; color: var(--muted); font-size: 1.1rem;
                       padding: 2px 4px; border-radius: 50%; transition: color .15s; }
 .search-clear:hover { color: var(--text); }
-
-.filter-chip        { padding: 6px 12px; border-radius: 20px;
-                      border: 1.5px solid var(--border);
-                      font-size: .8rem; font-weight: 600; cursor: pointer;
-                      white-space: nowrap; background: var(--surface);
-                      color: var(--muted); transition: all .15s; }
-.filter-chip:hover  { border-color: var(--primary); color: var(--primary); }
-.filter-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 ```
+
+**Reglas:**
+- El `placeholder` del input de búsqueda rápida lista los campos sobre los que opera la búsqueda (UID / nombre / tipo / ubicación, operador / nº / ICCID / notas, etc.).
+- El filtrado en vivo se aplica al `input`/`change` event sin re-fetch (filtrado client-side por defecto). Señales y Registros son casos mixtos: filtran client-side sobre la última página descargada, pero re-fetchean cuando cambian los parámetros `?dispositivo=` o `?limit=` server-side.
+- El botón `Filtros` es secundario, no primario — la acción primaria del listado es siempre `+ Nuevo <entidad>`, una sola por pantalla (ver §6).
+- Si el módulo es read-only (señales, alertas), se omite el botón `+ Nuevo` y la toolbar colapsa a sólo búsqueda rápida + Filtros. El helper `abmToolbar` lo soporta nativamente pasando `newLabel: null`.
+- `.filter-chip` queda en CSS como utilitario suelto, pero **no se usa en listados ABM nuevos**.
 
 ## 10. Tablas
 
@@ -410,6 +416,81 @@ Si la stat-card es clickeable, agregale `.dash-link`:
                      border-bottom: 1px solid var(--border);
                      display: flex; align-items: center; justify-content: space-between; }
 .dash-ver-mas      { font-size: .78rem; font-weight: 500; color: var(--primary); }
+```
+
+### 13.1 Feed "Señales en vivo" (dashboard)
+
+Card ubicada **dentro** del `.dash-grid` de 2 columnas, en la columna
+izquierda (a la derecha vive "Con problemas"). Polling al endpoint liviano
+`api/signals_live.php?since_id=…&limit=5` cada **500 ms**, manteniendo un
+buffer rotativo de las últimas 5 señales (las nuevas entran arriba y las
+viejas caen al pasar 5).
+
+Estructura:
+
+```html
+<div class="table-card dash-live-card" id="live-feed-card">
+  <div class="dash-table-header">
+    <span>📡 Señales en vivo</span>
+    <div class="dash-live-controls">
+      <span class="dash-live-status" id="live-feed-status">
+        <span class="live-dot"></span> En vivo · 500 ms
+      </span>
+      <button class="btn-icon-sm" id="live-feed-toggle" title="Pausar">
+        <i class="fa-solid fa-pause"></i>
+      </button>
+      <a href="#/signals" class="dash-ver-mas">Ver todas →</a>
+    </div>
+  </div>
+  <div id="live-feed-body">…tabla compacta de 6 columnas…</div>
+</div>
+```
+
+Columnas de la tabla (compacta, sin acciones): **Hora · Dispositivo · Canal
+· Sentido · Topic · Mensaje**. La columna *Hora* se muestra en dos líneas:
+la fecha (`dd/MM/aaaa`) arriba y la hora (`HH:MM:SS`) debajo, ambas en
+estilo `td-id` (muted/compacto) para no robar peso visual al feed. La
+columna *Sentido* en este feed se renderiza sólo como ícono (en vez del
+badge usado en `#/signals`): `fa-upload` en `var(--success)` (verde) para
+`S` (saliente) y `fa-download` en `var(--info)` (azul) para `E`
+(entrante), con `title` accesible.
+
+Reglas de interacción:
+
+- **Pausa por hover**: al pasar el mouse sobre la card, el polling se
+  congela (para poder leer una señal sin que el feed la desplace) y se
+  reanuda al salir.
+- **Pausa manual**: el botón pausa/play (`#live-feed-toggle`) congela el
+  feed de forma persistente. El estado se refleja en `#live-feed-status`
+  (texto + apagado del punto verde mediante `.live-paused`).
+- **Cleanup al navegar**: el timer se registra en `activeViewCleanup`
+  global y se limpia automáticamente al cambiar de ruta. Si la card sale
+  del DOM por cualquier motivo, el `tick()` también se autodescarta.
+- **Errores transitorios**: silenciados. Polling de 500 ms recupera
+  rápido; sólo se marcaría si el fallo pasara a ser persistente.
+
+```css
+.dash-live-controls { display: flex; align-items: center; gap: 12px; }
+.dash-live-status   { display: inline-flex; align-items: center; gap: 6px;
+                      font-size: .72rem; color: var(--muted);
+                      text-transform: uppercase; letter-spacing: .04em;
+                      font-weight: 500; }
+.live-dot           { width: 8px; height: 8px; border-radius: 50%;
+                      background: var(--success);
+                      animation: live-pulse 1.4s infinite; }
+.live-paused .live-dot { background: var(--muted); animation: none; box-shadow: none; }
+
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(34,197,94,.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(34,197,94,0);   }
+  100% { box-shadow: 0 0 0 0   rgba(34,197,94,0);   }
+}
+
+.live-feed-table tbody tr.is-new { animation: live-row-flash 1s ease-out; }
+@keyframes live-row-flash {
+  0%   { background-color: rgba(34,197,94,.18); }
+  100% { background-color: transparent; }
+}
 ```
 
 ## 14. Modales
@@ -642,7 +723,207 @@ Para modales de "ver detalle" donde se muestran pares label/valor de solo lectur
 - Identificadores (IDs, UIDs, hashes cortos) van envueltos en `<code>` para diferenciarse del texto libre.
 - Si la lista crece más de 8 pares, dividirla en secciones con subtítulos pequeños (`<h4>` `.form-group label`-equivalentes) en lugar de hacer scroll largo.
 
-## 23. Editor JSON (textarea monoespaciado)
+## 23. ABM: header del módulo
+
+Todo listado ABM arranca con un header obligatorio (ver `ABM.md` §1.1): **título** de la entidad en plural + **subtítulo** descriptivo en una sola frase. Va antes de KPIs (si los hay) y de la toolbar.
+
+```html
+<div class="module-header">
+  <h1 class="module-title">Dispositivos</h1>
+  <p class="module-subtitle">Inventario de dispositivos conectados a la plataforma, su dominio asignado y su última actividad.</p>
+</div>
+```
+
+```css
+.module-header   { margin-bottom: 18px; }
+.module-title    { font-size: 1.35rem; font-weight: 700; color: var(--text);
+                   margin: 0 0 4px; line-height: 1.2; }
+.module-subtitle { font-size: .88rem; color: var(--muted); margin: 0; line-height: 1.4; }
+```
+
+**Reglas:**
+- El título usa la entidad en plural (`Dispositivos`, `Chips`, `Dominios`, `Usuarios`, `Perfiles`).
+- El subtítulo es una sola frase explicando qué muestra el módulo. No reemplaza al título — lo complementa.
+- El bloque se renderiza **antes** de los KPI cards (§12) y la toolbar (§9). El topbar (§5) sigue mostrando el nombre de la pantalla; el header del módulo aporta contexto adicional sobre el área de contenido.
+
+## 23-bis. ABM: Modal de Filtros
+
+Form completo de filtros del listado (ver `ABM.md` §3). Se abre desde el botón `Filtros` de la toolbar (§9) y centraliza todos los filtros del módulo: la búsqueda rápida del toolbar es un atajo, este modal es la fuente completa.
+
+```html
+<div class="modal-backdrop open">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Filtros</div>
+      <button class="btn-icon-sm" data-act="close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="filters-grid">
+        <div class="form-group">
+          <label for="dev-fm-codigo">Código</label>
+          <input type="number" id="dev-fm-codigo" min="1" placeholder="ID exacto">
+        </div>
+        <div class="form-group">
+          <label for="dev-fm-texto">Buscar (UID / nombre / tipo / ubicación)</label>
+          <input type="search" id="dev-fm-texto" placeholder="Texto libre">
+        </div>
+        <div class="form-group">
+          <label for="dev-fm-dominio">Dominio</label>
+          <select id="dev-fm-dominio">…</select>
+        </div>
+        <div class="form-group">
+          <label for="dev-fm-estado">Estado</label>
+          <select id="dev-fm-estado">…</select>
+        </div>
+        <div class="form-group">
+          <label for="dev-fm-limit">Límite</label>
+          <input type="number" id="dev-fm-limit" min="1" max="1000" value="100">
+        </div>
+        <div class="form-group"></div>
+        <div class="form-group">
+          <label for="dev-fm-orden">Ordenar por</label>
+          <select id="dev-fm-orden">…</select>
+        </div>
+        <div class="form-group">
+          <label for="dev-fm-dir">Dirección</label>
+          <select id="dev-fm-dir">
+            <option value="desc">Descendente</option>
+            <option value="asc">Ascendente</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost"     data-act="clear">Limpiar</button>
+      <button class="btn btn-secondary" data-act="close">Cancelar</button>
+      <button class="btn btn-primary"   data-act="apply">Aplicar</button>
+    </div>
+  </div>
+</div>
+```
+
+```css
+.filters-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+@media (max-width: 640px) { .filters-grid { grid-template-columns: 1fr; } }
+```
+
+**Reglas (ver `ABM.md` §3 para la versión normativa):**
+- **Primer campo `Código`** (`type="number"`, label `Código`). Es el ID exacto de la entidad.
+- En el medio, los **filtros propios del recurso** (selects de estado / rol / dominio, texto libre, etc.). Las ids llevan el prefijo del módulo + `-fm-` (filter modal) para evitar choques con los inputs de los modales de edición.
+- **Antepenúltimo bloque `Límite`** (`type="number"`, default `100`). Modifica cuántas filas se muestran en el listado.
+- **Últimos campos `Ordenar por` + `Dirección`** (`desc` por default). La grilla los pone uno al lado del otro. El select de `Ordenar por` debe incluir al menos la opción `Código` (`value="id"`).
+- Footer en orden **Limpiar → Cancelar → Aplicar**: ghost / secondary / primary. `Limpiar` solo resetea los campos del modal a sus defaults (no aplica ni cierra). `Cancelar` cierra sin aplicar. `Aplicar` lee los valores, actualiza el estado del listado y cierra el modal.
+- Filtrado **client-side por defecto** (un único array en memoria por módulo): el cambio de filtros re-renderiza la tabla sin re-fetch.
+- La búsqueda rápida del toolbar (§9) escribe en la misma propiedad `state.texto` que el campo `Buscar` del modal — abrir el modal pre-rellena el input con lo que haya tipeado el usuario.
+- **Caso mixto (señales, registros):** los filtros `Dispositivo` y `Límite` viajan al backend en la query string (`?dispositivo=&limit=`); cambiar cualquiera de los dos dispara un re-fetch. El resto de los filtros (texto, dominio, sentido, estado, usuario, código) se aplican client-side sobre el array ya descargado.
+
+## 24. ABM: columnas de acción del listado
+
+Cada ícono va en **su propia columna** al final de la tabla, en el orden fijo **Consultar → Editar → Eliminar**. Las columnas son angostas (ancho automático) y centradas.
+
+```html
+<table>
+  <thead>
+    <tr>
+      <th>Código</th>
+      <th>Nombre</th>
+      <th>…</th>
+      <th class="action-col"></th>
+      <th class="action-col"></th>
+      <th class="action-col"></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="td-id">#42</span></td>
+      <td class="td-nombre">Planta Norte</td>
+      <td>…</td>
+      <td class="action-col">
+        <button class="btn-icon-sm" data-act="view"   title="Consultar"><i class="fa-solid fa-eye"></i></button>
+      </td>
+      <td class="action-col">
+        <button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button>
+      </td>
+      <td class="action-col">
+        <button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>
+  </tbody>
+</table>
+```
+
+```css
+th.action-col, td.action-col { width: 1%; white-space: nowrap; text-align: center;
+                               padding-left: 4px; padding-right: 4px; }
+```
+
+**Reglas:**
+- **Primera columna del listado siempre `Código`** (título `Código`, no `ID`). Renderiza el ID prefijado con `#` en `.td-id`.
+- **Tres columnas de acción al final, una por icono**, siempre en este orden: Consultar (`fa-eye`), Editar (`fa-pencil`), Eliminar (`fa-trash`). Los `<th>` correspondientes van vacíos. No reemplazar por un dropdown de "Acciones".
+- Cada `<td>` de acción tiene la clase `action-col` para forzar ancho mínimo y centrado.
+- Los módulos **read-only** (eventos, logs, señales) usan solo la columna **Consultar**; no incluyen Editar / Eliminar.
+- Tooltip exacto (`title="Consultar" / "Editar" / "Eliminar"`) para que el ícono sea legible sin contexto.
+
+## 25. ABM: tarjetas de consulta (read-only)
+
+El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-only — no como `dl.data-list` (ese patrón es para listas internas, ver §22). Cada campo es un `<div class="view-card">` con esquinas redondeadas y **fondo exactamente 10% más oscuro** que `--surface`. Este valor está fijado por `ABM.md` y no se varía por módulo.
+
+```html
+<div class="modal modal-wide">
+  <div class="modal-header">
+    <div class="modal-title">Consultar dispositivo</div>
+    <button class="btn-icon-sm">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="view-grid">
+      <div class="view-card view-card-half">
+        <div class="view-card-label">Código</div>
+        <div class="view-card-value"><code>#42</code></div>
+      </div>
+      <div class="view-card view-card-half">
+        <div class="view-card-label">Estado</div>
+        <div class="view-card-value"><span class="badge badge-success">Online</span></div>
+      </div>
+      <div class="view-card view-card-full">
+        <div class="view-card-label">Configuración (JSON)</div>
+        <div class="view-card-value"><pre>{ "channels": [ … ] }</pre></div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-ghost">Cerrar</button>
+  </div>
+</div>
+```
+
+```css
+.view-grid    { display: flex; flex-wrap: wrap; gap: 12px; }
+.view-card    { background: color-mix(in srgb, var(--surface) 90%, #000);
+                border-radius: var(--radius); padding: 12px 14px;
+                display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.view-card-half { flex: 1 1 calc(50% - 6px); }
+.view-card-full { flex: 1 1 100%; }
+.view-card-label { font-size: .75rem; font-weight: 600;
+                   text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.view-card-value { font-size: .9rem; color: var(--text);
+                   word-break: break-word; white-space: pre-wrap; }
+.view-card-value pre { margin: 0; font-family: monospace; font-size: .82rem;
+                       background: var(--bg); border: 1px solid var(--border);
+                       border-radius: 6px; padding: 10px 12px;
+                       overflow-x: auto; white-space: pre-wrap; }
+@media (max-width: 640px) { .view-card-half { flex: 1 1 100%; } }
+```
+
+**Reglas (ver `ABM.md`):**
+- Va dentro de un **`.modal.modal-wide`** (760 px) — las tarjetas necesitan respirar a lo ancho.
+- **Fondo de la tarjeta fijo**: `color-mix(in srgb, var(--surface) 90%, #000)`. No se sustituye por `--bg`, ni por otra mezcla — la regla del 10% más oscuro está en `ABM.md`.
+- **50% de ancho** (`view-card-half`) para valores cortos: códigos, números, fechas, estados, booleanos, IDs.
+- **100% de ancho** (`view-card-full`) para valores largos: descripciones, observaciones, direcciones completas, JSON, payloads MQTT.
+- El modal de Consultar muestra **todos los campos** de la entidad (no solo los del listado). Es la única vista donde el usuario ve la fila completa sin pasar al modo edición.
+- Valores nulos / vacíos van como `<span class="muted">—</span>` o `<span class="muted">Sin descripción</span>` dentro del `view-card-value`.
+- JSON / payloads dentro de `<pre>`; no usar `.json-editor` (es para edición, no para read-only).
+
+## 26. Editor JSON (textarea monoespaciado)
 
 Para pantallas que necesitan editar un blob JSON crudo (configuración de dispositivos, payloads, plantillas). No es un editor con syntax-highlighting — es un `<textarea>` con fuente monoespaciada, sin envoltura de línea y con utilidades de formateo + validación al guardar.
 
@@ -698,7 +979,7 @@ Va siempre dentro de un `.modal.modal-wide` (ver §14) para que el JSON respire 
 - No usar resaltado de sintaxis ni librerías tipo Monaco/CodeMirror: contradice §1 del STACK (sin build step, sin librerías UI pesadas).
 - El editor JSON puede convivir con `.form-group` de campos normales dentro del mismo `.modal-wide` (ej.: "Editar dispositivo" combina dominio / estado / UID / tipo / nombre / ubicación + `Configuración` JSON). En ese caso el JSON va como **último `.form-group`** del cuerpo, después del resto de los inputs, y el botón **Formatear** sigue alineado a la izquierda del footer con `margin-right:auto`.
 
-## 24. Tile grid (menú de navegación / lanzadores)
+## 27. Tile grid (menú de navegación / lanzadores)
 
 Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterrizaje (por ejemplo Herramientas, donde cada tile lanza una utilidad de testing o navega a una sub-pantalla). No es para datos numéricos: para eso está `.stat-card` (§12).
 
@@ -740,6 +1021,56 @@ Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterriz
 - Hover marca el borde en `--primary` para reforzar que es clickeable. El tile vive en zona gris, no se pinta de rojo sólido — el rojo entra solo como acento (§1).
 - Columna mínima 220px con `auto-fill`: el grid se acomoda solo desde una sola tarjeta hasta varias por fila.
 - No anidar `tile-grid`s ni mezclar `tile-card` con `stat-card` en el mismo contenedor: cada uno tiene su semántica.
+
+## 28. Herramientas: CRUD dentro de modal
+
+Algunas utilidades de **Herramientas** (§27) administran tablas de configuración pequeñas que **no merecen una entrada propia en el sidebar**: la lista es corta, la edita un puñado de usuarios y solo se accede de forma esporádica. En esos casos el tile abre directamente un **modal-gestor** que concentra el ABM completo (listar / buscar / alta / edición / eliminación) sin crear una ruta nueva.
+
+El primer caso vivo es **Parámetros** (tabla `parametros`: `id`, `variable`, `valor`, `comentario`). El tile vive en el `tile-grid` de Herramientas y abre el modal-gestor; éste contiene su propia `toolbar` interna y su `table-card`, y delega alta/edición a un **sub-modal de formulario** y eliminación al `confirm-backdrop` estándar (§15).
+
+```html
+<div class="modal-backdrop open">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title">
+        Parámetros
+        <span class="modal-subtitle">Variables de configuración del sistema</span>
+      </div>
+      <button class="btn-icon-sm" data-act="close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="toolbar" style="margin-bottom:14px">
+        <div class="toolbar-left">
+          <div class="search-wrap">
+            <input type="search" class="search-input" placeholder="Buscar variable, valor o comentario…">
+            <button type="button" class="search-clear">×</button>
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-primary btn-sm" data-act="new">
+            <i class="fa-solid fa-plus"></i> Nuevo parámetro
+          </button>
+        </div>
+      </div>
+      <div class="table-card"> … tabla con Código / Variable / Valor / Comentario + ✏️ 🗑️ … </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-act="close">Cerrar</button>
+    </div>
+  </div>
+</div>
+```
+
+**Reglas:**
+- **Modal `.modal-wide`** (760px): la tabla interna necesita espacio para 4 columnas + acciones sin envolver.
+- **Toolbar interna reutilizada**: el mismo bloque `.toolbar` / `.toolbar-left` / `.toolbar-right` / `.search-wrap` que un listado ABM normal (§9), pero embebido en `.modal-body`. Búsqueda rápida client-side a la izquierda + botón primario `+ Nuevo <entidad>` a la derecha. El `margin-bottom` reducido (`14px`) compensa el padding propio del modal.
+- **Sin botón `Filtros`**: el dataset es chico (decenas de filas) y la búsqueda rápida sobre los campos visibles alcanza. Si en algún caso el volumen creciera, vale promover la herramienta a un módulo ABM real (con ruta + filtros completos) en lugar de complicar el modal.
+- **Columnas de acción reducidas a Editar + Eliminar** (`actionCells({ edit: true, delete: true })`): se omite **Consultar** porque en este patrón todos los campos de la fila ya están visibles en la tabla — abrir un modal solo para releerlos sería ruido. Es la única excepción explícita a la regla de §24 de "tres iconos siempre", justificada porque la entidad tiene ≤4 campos cortos.
+- **Alta y edición** abren un **segundo modal** estándar (`.modal`, 520px) por encima del gestor, con los campos del registro y footer `Cancelar` / `Guardar`. Al guardar, se cierra solo el formulario y el gestor refresca su lista.
+- **Eliminación** usa `confirm-backdrop` (§15) sobre el gestor, igual que cualquier otro ABM.
+- **Footer del gestor**: un único botón `Cerrar` (ghost) — no hay acción primaria, porque el ABM se ejerce desde la tabla y el botón `+ Nuevo` de la toolbar interna.
+- **Subtítulo en el header** (`.modal-subtitle`) para explicar de qué tabla hablamos en una frase; reemplaza al `module-subtitle` (§23) que aquí no aplica porque no hay header de módulo.
+- **Cuándo NO usar este patrón**: si la tabla necesita filtros (estado, dominio, fechas), si crece a cientos de filas, si interactúa con otras entidades, o si justifica métricas en `stat-card`. Esos casos van como módulo ABM regular en el sidebar.
 
 ---
 

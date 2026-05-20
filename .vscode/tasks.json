@@ -2,30 +2,28 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Rebuild Local",
-            "detail": "Recrea el stack docker (reactor + reactor-db) eligiendo puertos libres.",
-            "type": "shell",
+            "label": "instalar",
+            "type": "process",
             "windows": {
-                "command": "powershell.exe",
+                "command": "C:\\Program Files\\Git\\bin\\bash.exe",
                 "args": [
-                    "-NoProfile",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", "${workspaceFolder}\\scripts\\rebuild-local.ps1"
+                    "scripts/instalar.sh"
                 ]
             },
             "linux": {
-                "command": "pwsh",
+                "command": "bash",
                 "args": [
-                    "-NoProfile",
-                    "-File", "${workspaceFolder}/scripts/rebuild-local.ps1"
+                    "scripts/instalar.sh"
                 ]
             },
             "osx": {
-                "command": "pwsh",
+                "command": "bash",
                 "args": [
-                    "-NoProfile",
-                    "-File", "${workspaceFolder}/scripts/rebuild-local.ps1"
+                    "scripts/instalar.sh"
                 ]
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
             },
             "problemMatcher": [],
             "presentation": {
@@ -37,6 +35,70 @@
             "group": {
                 "kind": "build",
                 "isDefault": true
+            }
+        },
+        {
+            "label": "aprovisionar",
+            "type": "process",
+            "windows": {
+                "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+                "args": [
+                    "scripts/aprovisionar.sh"
+                ]
+            },
+            "linux": {
+                "command": "bash",
+                "args": [
+                    "scripts/aprovisionar.sh"
+                ]
+            },
+            "osx": {
+                "command": "bash",
+                "args": [
+                    "scripts/aprovisionar.sh"
+                ]
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
+            "label": "deploy",
+            "type": "process",
+            "windows": {
+                "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+                "args": [
+                    "scripts/deploy.sh"
+                ]
+            },
+            "linux": {
+                "command": "bash",
+                "args": [
+                    "scripts/deploy.sh"
+                ]
+            },
+            "osx": {
+                "command": "bash",
+                "args": [
+                    "scripts/deploy.sh"
+                ]
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
             }
         }
     ]

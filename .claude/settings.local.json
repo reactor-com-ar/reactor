@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"new Function\\(require\\('fs'\\).readFileSync\\('cloud/assets/js/app.js','utf8'\\)\\)\")",
+      "Bash(echo \"exit=$?\")"
+    ]
+  }
+}

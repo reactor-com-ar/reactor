@@ -43,7 +43,7 @@ cloud/
 ├── index.php          ← SPA shell: layout + contenedor de vistas
 ├── api/               ← endpoints PHP propios de cloud
 │   ├── bootstrap.php  ← arranque común (config, conexión, helpers)
-│   ├── devices.php    ← endpoints de dispositivos IoT
+│   ├── dispositivos.php ← endpoints de dispositivos IoT
 │   └── … (un archivo por recurso)
 ├── assets/
 │   ├── css/style.css  ← un único CSS para toda la aplicación
@@ -75,7 +75,7 @@ framework y sin build step:
 
 - En `assets/js/app.js` se intercepta la navegación del sidebar y se
   reemplaza el contenido del contenedor `#view` según la ruta pedida
-  (hash routing: `#/dashboard`, `#/devices`, etc.).
+  (hash routing: `#/dashboard`, `#/dispositivos`, etc.).
 
 - Cada vista carga sus datos vía `fetch('api/<recurso>.php')` cuando
   se la muestra por primera vez (lazy load).

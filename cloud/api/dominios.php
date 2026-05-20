@@ -21,12 +21,19 @@ try {
 
 function handleList(): void
 {
+    // Esquema real (db/schema.sql -> tabla `dominios`): no existen `descripcion`,
+    // `created_at` ni `updated_at`. La FK en `dispositivos` es la columna `dominio`
+    // (no `dominio_id`). Se aliasan los campos faltantes a NULL para no tocar el JS.
     $stmt = db()->query(
-        'SELECT d.id, d.nombre, d.descripcion, d.created_at, d.updated_at,
+        'SELECT d.id,
+                d.nombre,
+                NULL          AS descripcion,
+                NULL          AS created_at,
+                NULL          AS updated_at,
                 COUNT(dev.id) AS dispositivos_count
          FROM dominios d
-         LEFT JOIN dispositivos dev ON dev.dominio_id = d.id
-         GROUP BY d.id
+         LEFT JOIN dispositivos dev ON dev.dominio = d.id
+         GROUP BY d.id, d.nombre
          ORDER BY d.nombre ASC'
     );
 

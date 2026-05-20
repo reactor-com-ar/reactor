@@ -30,6 +30,11 @@ function handleList(): void
     $limit       = isset($_GET['limit']) ? (int) $_GET['limit'] : 100;
     if ($limit <= 0 || $limit > 2000) $limit = 100;
 
+    // Filtro opcional por sentido: 'S' (Salida) / 'E' (Entrada). Lo usa la
+    // card "Últimos registros" del dashboard para mostrar sólo salientes.
+    $sentido = isset($_GET['sentido']) ? strtoupper(trim((string) $_GET['sentido'])) : '';
+    if ($sentido !== 'S' && $sentido !== 'E') $sentido = '';
+
     $sql = 'SELECT r.id, r.fecha, r.sentido, r.usuario, r.dominio,
                    r.dispositivo, r.canal, r.estado,
                    d.uuid                    AS dispositivo_uuid,
@@ -42,11 +47,17 @@ function handleList(): void
             LEFT JOIN dominios     dom ON dom.id = r.dominio
             LEFT JOIN usuarios     u   ON u.id   = r.usuario';
 
+    $where  = [];
     $params = [];
     if ($dispositivo > 0) {
-        $sql .= ' WHERE r.dispositivo = :did';
+        $where[]        = 'r.dispositivo = :did';
         $params[':did'] = $dispositivo;
     }
+    if ($sentido !== '') {
+        $where[]        = 'r.sentido = :sent';
+        $params[':sent'] = $sentido;
+    }
+    if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
     $sql .= ' ORDER BY r.id DESC LIMIT ' . $limit;
 
     $stmt = db()->prepare($sql);

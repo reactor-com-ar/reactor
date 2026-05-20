@@ -418,10 +418,10 @@ Si la stat-card es clickeable, agregale `.dash-link`:
 .dash-ver-mas      { font-size: .78rem; font-weight: 500; color: var(--primary); }
 ```
 
-### 13.1 Feed "Señales en vivo" (dashboard)
+### 13.1 Feed "Últimas señales" (dashboard)
 
 Card ubicada **dentro** del `.dash-grid` de 2 columnas, en la columna
-izquierda (a la derecha vive "Con problemas"). Polling al endpoint liviano
+derecha (a la izquierda vive "Últimos registros"). Polling al endpoint liviano
 `api/signals_live.php?since_id=…&limit=5` cada **500 ms**, manteniendo un
 buffer rotativo de las últimas 5 señales (las nuevas entran arriba y las
 viejas caen al pasar 5).
@@ -431,7 +431,7 @@ Estructura:
 ```html
 <div class="table-card dash-live-card" id="live-feed-card">
   <div class="dash-table-header">
-    <span>📡 Señales en vivo</span>
+    <span>📡 Últimas señales</span>
     <div class="dash-live-controls">
       <span class="dash-live-status" id="live-feed-status">
         <span class="live-dot"></span> En vivo · 500 ms
@@ -442,14 +442,15 @@ Estructura:
       <a href="#/signals" class="dash-ver-mas">Ver todas →</a>
     </div>
   </div>
-  <div id="live-feed-body">…tabla compacta de 6 columnas…</div>
+  <div id="live-feed-body">…tabla compacta de 4 columnas…</div>
 </div>
 ```
 
-Columnas de la tabla (compacta, sin acciones): **Hora · Dispositivo · Canal
-· Sentido · Topic · Mensaje**. La columna *Hora* se muestra en dos líneas:
-la fecha (`dd/MM/aaaa`) arriba y la hora (`HH:MM:SS`) debajo, ambas en
-estilo `td-id` (muted/compacto) para no robar peso visual al feed. La
+Columnas de la tabla (compacta, sin acciones): **Hora · Dispositivo ·
+Sentido · Mensaje**. La columna *Hora* se muestra en dos líneas: la fecha
+(`dd/MM/aaaa`) arriba y la hora (`HH:MM:SS`) debajo, ambas en estilo
+`td-id` (muted/compacto) para no robar peso visual al feed. La columna
+*Dispositivo* muestra sólo el nombre (sin el UUID debajo) por espacio. La
 columna *Sentido* en este feed se renderiza sólo como ícono (en vez del
 badge usado en `#/signals`): `fa-upload` en `var(--success)` (verde) para
 `S` (saliente) y `fa-download` en `var(--info)` (azul) para `E`

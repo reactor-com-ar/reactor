@@ -262,12 +262,14 @@
     /* ---------- Views: Dashboard ---------- */
     async function renderDashboard(root) {
         try {
-            const data = await api('dispositivos.php');
+            // Dispositivos alimenta las stat-cards de arriba; registros, la card
+            // "Últimos registros" del grid. Fetch en paralelo para no encadenar.
+            const [data, regData] = await Promise.all([
+                api('dispositivos.php'),
+                api('registros.php?sentido=S&limit=5'),
+            ]);
             const s = data.resumen;
-            // Las tarjetas y los listados del dashboard cuentan solo dispositivos
-            // habilitados. Los deshabilitados (estado 'error' en el mapeo de la API)
-            // no representan una falla, asi que quedan fuera de la vista resumen.
-            const activos = data.dispositivos.filter(d => d.estado !== 'error');
+            const ultimosRegistros = (regData.registros || []).slice(0, 5);
 
             root.innerHTML = `
                 <div class="stats-bar">
@@ -286,9 +288,23 @@
                 </div>
 
                 <div class="dash-grid">
+                    <div class="table-card">
+                        <div class="dash-table-header">
+                            <span>📋 Últimos registros</span>
+                            <div class="dash-live-controls">
+                                <button type="button" class="btn-icon-sm" id="reg-card-refresh"
+                                        title="Refrescar" aria-label="Refrescar registros">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                </button>
+                                <a href="#/registros" class="dash-ver-mas">Ver todos →</a>
+                            </div>
+                        </div>
+                        <div id="reg-card-body">${registrosDashboardTableBody(ultimosRegistros)}</div>
+                    </div>
+
                     <div class="table-card dash-live-card" id="live-feed-card">
                         <div class="dash-table-header">
-                            <span>📡 Señales en vivo</span>
+                            <span>📡 Últimas señales</span>
                             <div class="dash-live-controls">
                                 <span class="dash-live-status" id="live-feed-status">
                                     <span class="live-dot"></span> En vivo · 500 ms
@@ -302,14 +318,6 @@
                         </div>
                         <div id="live-feed-body"><div class="table-empty">Esperando señales…</div></div>
                     </div>
-
-                    <div class="table-card">
-                        <div class="dash-table-header">
-                            <span>⚠️ Con problemas</span>
-                            <a href="#/alerts" class="dash-ver-mas">Ver alertas →</a>
-                        </div>
-                        ${dispositivosTableBody(activos.filter(d => d.estado !== 'online').slice(0, 5))}
-                    </div>
                 </div>
             `;
 
@@ -317,7 +325,40 @@
                 el.addEventListener('click', () => { window.location.hash = '#/' + el.dataset.go; });
             });
 
-            activeViewCleanup = startDashboardLiveFeed();
+            // Refresh local de la card "Últimos registros": re-fetch sólo de
+            // ese endpoint y re-render del body, sin tocar el resto del
+            // dashboard ni cortar el feed en vivo. Auto-refresca cada 15 s
+            // y también responde al click manual del botón.
+            const btnRegRefresh = document.getElementById('reg-card-refresh');
+            const regCardBody   = document.getElementById('reg-card-body');
+            let regRefreshTimer = null;
+            if (btnRegRefresh && regCardBody) {
+                const refreshRegistrosCard = async () => {
+                    if (btnRegRefresh.disabled) return;
+                    const icon = btnRegRefresh.querySelector('i');
+                    btnRegRefresh.disabled = true;
+                    icon?.classList.add('fa-spin');
+                    try {
+                        const fresh = await api('registros.php?sentido=S&limit=5');
+                        regCardBody.innerHTML = registrosDashboardTableBody(
+                            (fresh.registros || []).slice(0, 5)
+                        );
+                    } catch (err) {
+                        toast('No se pudo refrescar registros: ' + err.message, 'error');
+                    } finally {
+                        icon?.classList.remove('fa-spin');
+                        btnRegRefresh.disabled = false;
+                    }
+                };
+                btnRegRefresh.addEventListener('click', refreshRegistrosCard);
+                regRefreshTimer = setInterval(refreshRegistrosCard, 15_000);
+            }
+
+            const liveCleanup = startDashboardLiveFeed();
+            activeViewCleanup = () => {
+                if (regRefreshTimer) clearInterval(regRefreshTimer);
+                liveCleanup();
+            };
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
@@ -377,11 +418,8 @@
                     </td>
                     <td>
                         <div class="td-nombre">${escape(s.dispositivo_nombre ?? '—')}</div>
-                        ${s.dispositivo_uuid ? `<div class="td-id">${escape(s.dispositivo_uuid)}</div>` : ''}
                     </td>
-                    <td>${s.canal != null ? `<span class="td-id">#${s.canal}</span>` : '<span class="td-id">—</span>'}</td>
                     <td>${sentidoLiveIcon(s.sentido)}</td>
-                    <td><span class="td-id">${escape(s.topic ?? '')}</span></td>
                     <td>${s.mensaje != null && s.mensaje !== '' ? escape(s.mensaje) : '<span class="td-id">—</span>'}</td>
                 </tr>
             `).join('');
@@ -391,9 +429,7 @@
                         <tr>
                             <th>Hora</th>
                             <th>Dispositivo</th>
-                            <th>Canal</th>
                             <th>Sentido</th>
-                            <th>Topic</th>
                             <th>Mensaje</th>
                         </tr>
                     </thead>
@@ -3214,6 +3250,48 @@
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
+    }
+
+    // Variante compacta para la card "Últimos registros" del dashboard.
+    // Diferencias vs. registrosTableBody: oculta Código, Canal, Sentido,
+    // Estado y la columna de acciones (ojo); el header de Fecha pasa a
+    // llamarse "Hora". El filtro por sentido='S' lo aplica el endpoint.
+    function registrosDashboardTableBody(registros) {
+        if (!registros.length) {
+            return `<div class="table-empty">No hay registros que coincidan con los filtros.</div>`;
+        }
+
+        const rows = registros.map(r => `
+            <tr data-id="${r.id}">
+                <td>
+                    <div class="td-id">${escape(formatDateOnly(r.fecha))}</div>
+                    <div class="td-id">${escape(formatTime(r.fecha))}</div>
+                </td>
+                <td>${r.dominio ? `<span class="badge badge-info">${escape(r.dominio_nombre)}</span>` : '<span class="td-id">—</span>'}</td>
+                <td>
+                    <div class="td-nombre">${escape(r.dispositivo_nombre ?? '—')}</div>
+                </td>
+                <td>
+                    ${r.usuario_nombre
+                        ? `<div class="td-nombre">${escape(r.usuario_nombre)}</div>`
+                        : '<span class="td-id">—</span>'}
+                </td>
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Hora</th>
+                        <th>Dominio</th>
+                        <th>Dispositivo</th>
+                        <th>Usuario</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
     }
 
     function registrosTableBody(registros) {

@@ -421,6 +421,9 @@ tbody tr:hover { background: var(--row-hover); }
 .sentido-icon.sentido-out { color: var(--success); }   /* S — upload (verde) */
 .sentido-icon.sentido-in  { color: var(--info); }      /* E — download (azul) */
 
+/* Mensaje (última columna) en tamaño reducido para no robar peso visual al feed. */
+.live-feed-table td:last-child { font-size: .8rem; }
+
 /* ---------- 14. Modales ---------- */
 .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.45);

@@ -105,9 +105,10 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
 .sidebar       { background: var(--primary);             /* rojo institucional */
                  border-right: 1px solid rgba(0,0,0,.25); }
 
-.sidebar-logo  { padding: 18px 20px; border-bottom: 1px solid rgba(0,0,0,.2);
-                 display: flex; align-items: center; justify-content: center; }
-.sidebar-logo-mark  { display: block; width: auto; height: 36px;
+.sidebar-logo  { height: 60px;                /* coincide con la altura de .topbar */
+                 padding: 0 20px; border-bottom: 1px solid rgba(0,0,0,.2);
+                 display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sidebar-logo-mark  { display: block; width: auto; height: 32px;
                       max-width: 100%; object-fit: contain; }   /* <img src="assets/img/reactor_white.png"> */
 
 .sidebar-nav   { padding: 8px 0 12px; flex: 1; }
@@ -146,7 +147,7 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
 .nav-sub-item.active                  { background: rgba(0,0,0,.32); }
 ```
 
-**Patrón:** la cabecera del sidebar contiene **solo el logo** centrado — `<img src="assets/img/reactor_white.png" class="sidebar-logo-mark">` a 36 px de alto, sin texto "REACTOR / cloud" adjunto. Debajo, los items de primer nivel pueden ser navegación directa (`<a class="nav-item">`) o **grupos colapsables** (`.nav-group-wrap` con un `<button class="nav-group-toggle">` que aloja un `.nav-sub` con uno o más `.nav-sub-item`). El glifo `+` del toggle rota 45° al abrir (queda como `×`). Cuando el JS navega a una sub-ruta debe agregar la clase `open` al grupo correspondiente para que el sub-menú permanezca visible. Footer con versión en monospace. **No** introducir tokens grises ni `--text` / `--muted` / `--border` dentro del sidebar (tampoco del topbar — ver §5): textos en `#fff` u opacidades de blanco; bandas internas y estados en negros translúcidos.
+**Patrón:** la cabecera del sidebar contiene **solo el logo** centrado — `<img src="assets/img/reactor_white.png" class="sidebar-logo-mark">` a 32 px de alto, sin texto "REACTOR / cloud" adjunto. La celda completa (`.sidebar-logo`) mide **60 px de alto** para empatar exactamente con la altura del topbar (§5), de manera que el corte horizontal entre chrome y contenido sea una línea continua entre sidebar y main. Debajo, los items de primer nivel pueden ser navegación directa (`<a class="nav-item">`) o **grupos colapsables** (`.nav-group-wrap` con un `<button class="nav-group-toggle">` que aloja un `.nav-sub` con uno o más `.nav-sub-item`). El glifo `+` del toggle rota 45° al abrir (queda como `×`). Cuando el JS navega a una sub-ruta debe agregar la clase `open` al grupo correspondiente para que el sub-menú permanezca visible. Footer con versión en monospace. **No** introducir tokens grises ni `--text` / `--muted` / `--border` dentro del sidebar (tampoco del topbar — ver §5): textos en `#fff` u opacidades de blanco; bandas internas y estados en negros translúcidos.
 
 ```html
 <nav class="sidebar-nav">
@@ -743,7 +744,7 @@ Todo listado ABM arranca con un header obligatorio (ver `ABM.md` §1.1): **títu
 ```
 
 **Reglas:**
-- El título usa la entidad en plural (`Dispositivos`, `Chips`, `Dominios`, `Usuarios`, `Perfiles`).
+- El título usa la entidad en plural (`Dispositivos`, `Chips`, `Transceptores`, `Dominios`, `Usuarios`, `Perfiles`).
 - El subtítulo es una sola frase explicando qué muestra el módulo. No reemplaza al título — lo complementa.
 - El bloque se renderiza **antes** de los KPI cards (§12) y la toolbar (§9). El topbar (§5) sigue mostrando el nombre de la pantalla; el header del módulo aporta contexto adicional sobre el área de contenido.
 

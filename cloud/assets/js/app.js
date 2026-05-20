@@ -28,6 +28,7 @@
         dominios:     { title: 'Dominios',      render: renderDominios,     group: 'propiedad'  },
         dispositivos: { title: 'Dispositivos',  render: renderDispositivos, group: 'inventario' },
         chips:        { title: 'Chips',         render: renderChips,        group: 'inventario' },
+        transceptores: { title: 'Transceptores', render: renderTransceptores, group: 'inventario' },
         signals:   { title: 'Señales',              render: renderSignals,   group: 'registros'  },
         registros: { title: 'Historial de registros', render: renderRegistros, group: 'registros'  },
         alerts:    { title: 'Alertas',              render: renderStub,      group: 'registros'  },
@@ -1469,6 +1470,409 @@
                 try {
                     await api('chips.php?id=' + chip.id, { method: 'DELETE' });
                     toast('Chip eliminado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
+    }
+
+    /* ---------- Views: Transceptores ---------- */
+    const ORDEN_TRANSCEPTORES = [
+        { value: 'id',     label: 'Código'  },
+        { value: 'nombre', label: 'Nombre'  },
+        { value: 'host',   label: 'Host'    },
+        { value: 'puerto', label: 'Puerto'  },
+    ];
+
+    function transceptoresDefaults() {
+        return {
+            codigo: '', texto: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderTransceptores(root) {
+        try {
+            const data = await api('transceptores.php');
+            const r = data.resumen;
+            const transceptores = data.transceptores;
+            const state = transceptoresDefaults();
+
+            root.innerHTML = `
+                ${moduleHeader('Transceptores', 'Gateways de mensajería (host, puerto y credenciales) que reciben y entregan señales hacia los dispositivos.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con credenciales</span>
+                        <span class="stat-value green">${r.con_credenciales}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con señales</span>
+                        <span class="stat-value">${r.con_senales}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'trx',
+                    quickPlaceholder: 'Buscar nombre, host, usuario, entrada…',
+                    newLabel:         'Nuevo transceptor',
+                })}
+                <div class="table-card" id="trx-table"></div>
+            `;
+
+            wireTransceptoresView(state, transceptores);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function transceptoresTableBody(transceptores) {
+        if (!transceptores.length) {
+            return `<div class="table-empty">Todavía no hay transceptores cargados. Creá el primero con "Nuevo transceptor".</div>`;
+        }
+
+        const rows = transceptores.map(t => `
+            <tr data-id="${t.id}">
+                <td><span class="td-id">#${t.id}</span></td>
+                <td class="td-nombre">${escape(t.nombre ?? '—')}</td>
+                <td>${escape(t.host ?? '—')}</td>
+                <td>${escape(t.puerto ?? '—')}</td>
+                <td>${t.usuario ? escape(t.usuario) : '<span class="td-id">—</span>'}</td>
+                <td>${t.entrada ? `<code>${escape(t.entrada)}</code>` : '<span class="td-id">—</span>'}</td>
+                <td><span class="badge badge-info">${t.senales_count}</span></td>
+                ${actionCells({ view: true, edit: true, delete: true })}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Host</th>
+                        <th>Puerto</th>
+                        <th>Usuario</th>
+                        <th>Entrada</th>
+                        <th>Señales</th>
+                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireTransceptoresView(state, allTransceptores) {
+        const tableWrap = document.getElementById('trx-table');
+        const quick     = document.getElementById('trx-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('trx-filters');
+        const btnNew    = document.getElementById('trx-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allTransceptores.filter(t => {
+                if (Number.isFinite(codigo) && t.id !== codigo) return false;
+                if (q && !((t.nombre || '') + ' ' + (t.host || '') + ' ' +
+                           (t.usuario || '') + ' ' + (t.entrada || ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = transceptoresTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = +btn.closest('tr').dataset.id;
+                    const t  = allTransceptores.find(x => x.id === id);
+                    if (!t) return;
+                    if (btn.dataset.act === 'view')   openTransceptorViewModal(t);
+                    if (btn.dataset.act === 'edit')   openTransceptorModal(t);
+                    if (btn.dataset.act === 'delete') confirmDeleteTransceptor(t);
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openTransceptoresFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openTransceptorModal(null));
+
+        applyAndRender();
+    }
+
+    function openTransceptoresFiltersModal(state, onApply) {
+        const ordOpts = ORDEN_TRANSCEPTORES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="trx-fm-codigo">Código</label>
+                    <input type="number" id="trx-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="trx-fm-texto">Buscar (nombre / host / usuario / entrada)</label>
+                    <input type="search" id="trx-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="trx-fm-limit">Límite</label>
+                    <input type="number" id="trx-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="trx-fm-orden">Ordenar por</label>
+                    <select id="trx-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="trx-fm-dir">Dirección</label>
+                    <select id="trx-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo = modal.querySelector('#trx-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#trx-fm-texto').value.trim();
+                state.orden  = modal.querySelector('#trx-fm-orden').value;
+                state.dir    = modal.querySelector('#trx-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#trx-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = transceptoresDefaults();
+                modal.querySelector('#trx-fm-codigo').value = d.codigo;
+                modal.querySelector('#trx-fm-texto').value  = d.texto;
+                modal.querySelector('#trx-fm-orden').value  = d.orden;
+                modal.querySelector('#trx-fm-dir').value    = d.dir;
+                modal.querySelector('#trx-fm-limit').value  = String(d.limit);
+            },
+        });
+    }
+
+    function openTransceptorViewModal(t) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        const usuarioVal = t.usuario
+            ? escape(t.usuario)
+            : `<span class="muted">Sin usuario</span>`;
+        const entradaVal = t.entrada
+            ? `<code>${escape(t.entrada)}</code>`
+            : `<span class="muted">Sin entrada</span>`;
+        const passVal = t.tiene_contrasena
+            ? `<code>••••••••</code> <span class="muted">(oculta)</span>`
+            : `<span class="muted">Sin contraseña</span>`;
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar transceptor</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',      `<code>#${t.id}</code>`),
+                        viewCardHalf('Nombre',      escape(t.nombre ?? '—')),
+                        viewCardHalf('Host',        escape(t.host ?? '—')),
+                        viewCardHalf('Puerto',      escape(t.puerto ?? '—')),
+                        viewCardHalf('Usuario',     usuarioVal),
+                        viewCardHalf('Contraseña',  passVal),
+                        viewCardHalf('Entrada',     entradaVal),
+                        viewCardHalf('Señales asociadas', `<span class="badge badge-info">${t.senales_count}</span>`),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+    }
+
+    function openTransceptorModal(t) {
+        const isEdit = !!t;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">${isEdit ? 'Editar transceptor' : 'Nuevo transceptor'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="trx-nombre">Nombre</label>
+                        <input type="text" id="trx-nombre" maxlength="255"
+                               value="${escape(t?.nombre ?? '')}"
+                               placeholder="Gateway principal" required>
+                        <div class="field-error" id="trx-nombre-err" style="display:none"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="trx-host">Host</label>
+                            <input type="text" id="trx-host" maxlength="255"
+                                   value="${escape(t?.host ?? '')}"
+                                   placeholder="mqtt.reactor.local" required>
+                            <div class="field-error" id="trx-host-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="trx-puerto">Puerto</label>
+                            <input type="number" id="trx-puerto" min="1" max="65535"
+                                   value="${escape(t?.puerto ?? '')}"
+                                   placeholder="1883" required>
+                            <div class="field-error" id="trx-puerto-err" style="display:none"></div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="trx-usuario">Usuario</label>
+                            <input type="text" id="trx-usuario" maxlength="255"
+                                   value="${escape(t?.usuario ?? '')}"
+                                   placeholder="Opcional">
+                        </div>
+                        <div class="form-group">
+                            <label for="trx-contrasena">Contraseña ${isEdit && t.tiene_contrasena ? '<span class="muted" style="font-weight:400">(dejar vacío para no cambiar)</span>' : ''}</label>
+                            <input type="password" id="trx-contrasena" maxlength="255"
+                                   value=""
+                                   placeholder="${isEdit && t.tiene_contrasena ? '••••••••' : 'Opcional'}"
+                                   autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="trx-entrada">Entrada</label>
+                        <input type="text" id="trx-entrada" maxlength="255"
+                               value="${escape(t?.entrada ?? '')}"
+                               placeholder="Topic / cola de entrada (opcional)">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
+                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear transceptor'}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const nombreInput     = backdrop.querySelector('#trx-nombre');
+        const hostInput       = backdrop.querySelector('#trx-host');
+        const puertoInput     = backdrop.querySelector('#trx-puerto');
+        const usuarioInput    = backdrop.querySelector('#trx-usuario');
+        const contrasenaInput = backdrop.querySelector('#trx-contrasena');
+        const entradaInput    = backdrop.querySelector('#trx-entrada');
+        const nombreErr       = backdrop.querySelector('#trx-nombre-err');
+        const hostErr         = backdrop.querySelector('#trx-host-err');
+        const puertoErr       = backdrop.querySelector('#trx-puerto-err');
+        const saveBtn         = backdrop.querySelector('[data-act="save"]');
+
+        nombreInput.focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const nombre     = nombreInput.value.trim();
+            const host       = hostInput.value.trim();
+            const puerto     = puertoInput.value.trim();
+            const usuario    = usuarioInput.value.trim();
+            const contrasena = contrasenaInput.value;
+            const entrada    = entradaInput.value.trim();
+
+            [nombreErr, hostErr, puertoErr].forEach(el => el.style.display = 'none');
+            [nombreInput, hostInput, puertoInput].forEach(el => el.classList.remove('input-invalid'));
+
+            let firstInvalid = null;
+            if (!nombre) {
+                nombreErr.textContent = 'El nombre es obligatorio';
+                nombreErr.style.display = 'block';
+                nombreInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || nombreInput;
+            }
+            if (!host) {
+                hostErr.textContent = 'El host es obligatorio';
+                hostErr.style.display = 'block';
+                hostInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || hostInput;
+            }
+            const puertoNum = parseInt(puerto, 10);
+            if (!puerto || !Number.isFinite(puertoNum) || puertoNum < 1 || puertoNum > 65535) {
+                puertoErr.textContent = 'El puerto debe ser un número entre 1 y 65535';
+                puertoErr.style.display = 'block';
+                puertoInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || puertoInput;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = { nombre, host, puerto, usuario, contrasena, entrada };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('transceptores.php', { method: 'PUT', body: { id: t.id, ...payload } });
+                    toast('Transceptor actualizado');
+                } else {
+                    await api('transceptores.php', { method: 'POST', body: payload });
+                    toast('Transceptor creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    function confirmDeleteTransceptor(t) {
+        const refNote = t.senales_count > 0
+            ? ` No se podrá eliminar mientras tenga ${t.senales_count} señal(es) asociada(s).`
+            : '';
+        confirmDialog(
+            'Eliminar transceptor',
+            `¿Eliminar el transceptor "${t.nombre ?? '#' + t.id}" (${t.host ?? '—'}:${t.puerto ?? '—'})?${refNote} Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('transceptores.php?id=' + t.id, { method: 'DELETE' });
+                    toast('Transceptor eliminado');
                     navigate();
                 } catch (e) {
                     toast(e.message, 'error');

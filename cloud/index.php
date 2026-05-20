@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-$appName = 'cloud';
+$appName = 'Reactor Cloud';
 $versionFile = __DIR__ . '/version.txt';
 $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : (string) time();
 ?>
@@ -10,7 +10,7 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Reactor · <?= htmlspecialchars($appName) ?></title>
+    <title><?= htmlspecialchars($appName) ?></title>
 
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -66,6 +66,9 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                     </a>
                     <a href="#/chips" data-route="chips" class="nav-item nav-sub-item">
                         <span class="nav-icon">📶</span> Chips
+                    </a>
+                    <a href="#/transceptores" data-route="transceptores" class="nav-item nav-sub-item">
+                        <span class="nav-icon">📻</span> Transceptores
                     </a>
                 </div>
             </div>

@@ -60,6 +60,10 @@ o `.env.production` de la raiz del repo, inyectado al contenedor por
 | PUT    | `/api/profiles.php`    | Actualiza rol del perfil. Body JSON: `{id, rol}`           |
 | DELETE | `/api/profiles.php?id=N` | Elimina perfil                                          |
 | GET    | `/api/signals.php`     | Listado de `senales` enviadas por los dispositivos + resumen (total, últimas 24 h, hoy, dispositivos activos). Query opcional: `dispositivo` (FK a `dispositivos.id`), `limit` (default 100, max 2000) |
+| GET    | `/api/transceptores.php` | Listado de `transceptores` + resumen (total, con credenciales, con señales). `contrasena` nunca se expone; se devuelve solo el booleano `tiene_contrasena` |
+| POST   | `/api/transceptores.php` | Crea transceptor. Body JSON: `{nombre, host, puerto, usuario?, contrasena?, entrada?}` |
+| PUT    | `/api/transceptores.php` | Actualiza transceptor. Body JSON: `{id, nombre, host, puerto, usuario?, contrasena?, entrada?}`. Si `contrasena` viene vacía/ausente se mantiene la actual |
+| DELETE | `/api/transceptores.php?id=N` | Elimina transceptor (falla si hay `senales` que lo referencian) |
 
 ## Tablas
 
@@ -75,6 +79,7 @@ ingles por convencion).
 | `usuarios`     | `id`, `email`, `nombre`, `password_hash`, `rol`, `activo`, `last_login_at`            |
 | `perfiles`     | `id`, `usuario_id` (FK), `dominio_id` (FK), `rol` (`admin`/`operador`) — UNIQUE `(usuario_id, dominio_id)` |
 | `senales`      | `id`, `serie`, `fecha`, `sentido` (`I`/`O`), `transceptor` (FK), `dispositivo` (FK a `dispositivos.id`), `canal`, `topic`, `mensaje`, `estado` — historial inmutable de mensajes generados por los dispositivos (ver `db/schema.sql`) |
+| `transceptores`| `id`, `nombre`, `host`, `puerto`, `usuario`, `contrasena`, `entrada` — gateways (MQTT / SMS / etc.) que reciben y entregan señales hacia los dispositivos. `senales.transceptor` es FK lógica a esta tabla |
 
 ## Proximos pasos sugeridos
 

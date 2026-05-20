@@ -210,7 +210,9 @@
     //   - Zona derecha:   botón primario "+ Nuevo <entidad>".
     // `idPrefix` se usa para los ids: `${idPrefix}-quick`, `${idPrefix}-filters`,
     // `${idPrefix}-new`. `quickPlaceholder` lista los campos sobre los que opera.
-    function abmToolbar({ idPrefix, quickPlaceholder, newLabel }) {
+    // `extraRight` (opcional) inyecta botones secundarios antes de "+ Nuevo"
+    // en la zona derecha (ej.: "Monitor en tiempo real" en Señales).
+    function abmToolbar({ idPrefix, quickPlaceholder, newLabel, extraRight }) {
         // newLabel = null|false ⇒ módulo read-only (señales, alertas): se omite
         // el botón `+ Nuevo` (ver DESIGN.md §9). El resto del toolbar (búsqueda
         // rápida + Filtros) se mantiene igual.
@@ -219,6 +221,7 @@
                    <i class="fa-solid fa-plus"></i> ${escape(newLabel)}
                </button>`
             : '';
+        const extra = extraRight || '';
         return `
             <div class="toolbar">
                 <div class="toolbar-left">
@@ -232,7 +235,7 @@
                         <i class="fa-solid fa-filter"></i> Filtros
                     </button>
                 </div>
-                <div class="toolbar-right">${newBtn}</div>
+                <div class="toolbar-right">${extra}${newBtn}</div>
             </div>
         `;
     }
@@ -3243,10 +3246,17 @@
                     idPrefix:         'sig',
                     quickPlaceholder: 'Buscar topic, mensaje, dispositivo…',
                     newLabel:         null,
+                    extraRight: `
+                        <button type="button" class="btn btn-secondary btn-sm" id="sig-monitor"
+                                title="Monitor en tiempo real de señales entrantes">
+                            <i class="fa-solid fa-tower-broadcast"></i> Monitor en tiempo real
+                        </button>
+                    `,
                 })}
                 <div class="table-card" id="sig-table"></div>
             `;
 
+            document.getElementById('sig-monitor').addEventListener('click', openSignalsLiveMonitorModal);
             wireSignalsView(state, senales, dispositivos, dominios);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
@@ -3268,6 +3278,232 @@
         if (s === 'S') return '<i class="fa-solid fa-upload sentido-icon sentido-out" title="Saliente" aria-label="Saliente"></i>';
         if (s === 'E') return '<i class="fa-solid fa-download sentido-icon sentido-in" title="Entrante" aria-label="Entrante"></i>';
         return '<span class="td-id">—</span>';
+    }
+
+    /* Modal "Monitor en tiempo real" (Señales).
+     *
+     * Modal tipo log de consola/terminal que muestra las señales que van
+     * ingresando en vivo, poll-eando `signals_live.php` cada 100 ms (muy
+     * agresivo vs. la card del dashboard, que va a 500 ms — el monitor
+     * está pensado para sentirse "en tiempo real"). Cada señal es una
+     * línea monoespaciada en un panel oscuro tipo terminal; las nuevas se
+     * appendean al final con auto-scroll hasta el fondo.
+     *
+     * Diferencias vs. card del dashboard:
+     *   - vive en un modal `signals-monitor-modal` (≈1650px de ancho).
+     *   - estética terminal: fondo `#0a0a0a`, font monoespaciada, ANSI-ish.
+     *   - orden cronológico ascendente (nuevas abajo, auto-scroll).
+     *   - click en una línea abre el modal de detalle existente.
+     *   - el timer se limpia al cerrar el modal. */
+    function openSignalsLiveMonitorModal() {
+        const MAX_ROWS = 250;
+        const TICK_MS  = 100;   // tiempo real agresivo — 10 req/s por cliente (limitado además por el guard `fetching`).
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal signals-monitor-modal" role="dialog" aria-modal="true" aria-labelledby="sig-monitor-title">
+                <div class="modal-header">
+                    <div class="modal-title" id="sig-monitor-title">
+                        Monitor en tiempo real
+                        <span class="dash-live-status" id="sig-monitor-status">
+                            <span class="live-dot"></span> En vivo · 100 ms
+                        </span>
+                    </div>
+                    <div class="signals-monitor-controls">
+                        <button type="button" class="btn-icon-sm" id="sig-monitor-toggle"
+                                title="Pausar" aria-label="Pausar feed">
+                            <i class="fa-solid fa-pause"></i>
+                        </button>
+                        <button type="button" class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                    </div>
+                </div>
+                <div class="modal-body signals-monitor-body">
+                    <div class="signals-monitor-console" id="sig-monitor-console">
+                        <div class="signals-monitor-empty">$ esperando señales…<span class="signals-monitor-caret"></span></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="signals-monitor-footer-info">
+                        <i class="fa-solid fa-terminal"></i>
+                        <strong id="sig-monitor-count">0</strong> de <strong>${MAX_ROWS}</strong> líneas · click sobre una línea para ver detalle
+                    </span>
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const modal       = backdrop.querySelector('.modal');
+        const console_    = backdrop.querySelector('#sig-monitor-console');
+        const status      = backdrop.querySelector('#sig-monitor-status');
+        const toggle      = backdrop.querySelector('#sig-monitor-toggle');
+        const countLabel  = backdrop.querySelector('#sig-monitor-count');
+
+        // Buffer cronológico ascendente: índice 0 = más vieja, último = más nueva.
+        let buffer      = [];
+        let maxId       = 0;
+        let userPaused  = false;
+        let hoverPaused = false;
+        let fetching    = false;
+        let firstTick   = true;
+
+        const isPaused = () => userPaused || hoverPaused;
+
+        function updateStatus() {
+            if (userPaused) {
+                status.innerHTML = '<span class="live-dot"></span> Pausado';
+                modal.classList.add('live-paused');
+            } else if (hoverPaused) {
+                status.innerHTML = '<span class="live-dot"></span> En pausa (hover)';
+                modal.classList.add('live-paused');
+            } else {
+                status.innerHTML = '<span class="live-dot"></span> En vivo · 100 ms';
+                modal.classList.remove('live-paused');
+            }
+        }
+
+        // Render de una línea estilo log:
+        //   2026-05-20 14:32:01.000 │ #1234 │  IN │ uid-abc Nombre │ topic/foo │ {"k":"v"}
+        function renderLine(s, isNew) {
+            const sentidoCls   = s.sentido === 'E' ? 'log-in'
+                              : s.sentido === 'S' ? 'log-out'
+                              : 'log-muted';
+            const sentidoLabel = s.sentido === 'E' ? ' IN'
+                              : s.sentido === 'S' ? 'OUT'
+                              : ' --';
+            const dispLabel = s.dispositivo_uuid
+                ? `${escape(s.dispositivo_uuid)} ${escape(s.dispositivo_nombre ?? '')}`
+                : escape(s.dispositivo_nombre ?? '—');
+            const msg = (s.mensaje != null && s.mensaje !== '')
+                ? escape(String(s.mensaje).replace(/\s+/g, ' ').trim())
+                : '—';
+            const topic = s.topic ? escape(s.topic) : '—';
+
+            return `
+                <div class="log-line${isNew ? ' is-new' : ''}" data-id="${s.id}">
+                    <span class="log-ts">${escape(formatDateOnly(s.fecha))} ${escape(formatTime(s.fecha))}</span>
+                    <span class="log-sep">│</span>
+                    <span class="log-id">#${s.id}</span>
+                    <span class="log-sep">│</span>
+                    <span class="log-arrow ${sentidoCls}">${sentidoLabel}</span>
+                    <span class="log-sep">│</span>
+                    <span class="log-device">${dispLabel}</span>
+                    <span class="log-sep">│</span>
+                    <span class="log-topic">${topic}</span>
+                    <span class="log-sep">│</span>
+                    <span class="log-msg">${msg}</span>
+                </div>
+            `;
+        }
+
+        function bindLineClicks() {
+            console_.querySelectorAll('.log-line').forEach(line => {
+                if (line.dataset.bound === '1') return;
+                line.dataset.bound = '1';
+                line.addEventListener('click', () => {
+                    const id = +line.dataset.id;
+                    const s  = buffer.find(x => x.id === id);
+                    if (s) openSignalViewModal(s);
+                });
+            });
+        }
+
+        function scrollToBottom() {
+            console_.scrollTop = console_.scrollHeight;
+        }
+
+        function repaintAll() {
+            countLabel.textContent = String(buffer.length);
+            if (!buffer.length) {
+                console_.innerHTML = `<div class="signals-monitor-empty">$ esperando señales…<span class="signals-monitor-caret"></span></div>`;
+                return;
+            }
+            console_.innerHTML = buffer.map(s => renderLine(s, false)).join('');
+            bindLineClicks();
+        }
+
+        function appendNew(newSenalesAsc) {
+            // Quitar empty placeholder si está.
+            const empty = console_.querySelector('.signals-monitor-empty');
+            if (empty) empty.remove();
+
+            // Añadir nuevas líneas al final.
+            const html = newSenalesAsc.map(s => renderLine(s, true)).join('');
+            console_.insertAdjacentHTML('beforeend', html);
+
+            // Trim del DOM si el buffer ya cortó el principio.
+            const lines = console_.querySelectorAll('.log-line');
+            const overflow = lines.length - buffer.length;
+            for (let i = 0; i < overflow; i++) lines[i].remove();
+
+            countLabel.textContent = String(buffer.length);
+            bindLineClicks();
+            // Auto-scroll incondicional al pie (la pausa por hover ya da tiempo
+            // para leer una línea sin que se mueva — cuando llegan nuevas
+            // siempre seguimos al fondo).
+            scrollToBottom();
+        }
+
+        async function tick() {
+            if (!document.body.contains(backdrop)) return;
+            if (fetching || isPaused()) return;
+            fetching = true;
+            try {
+                const qs = new URLSearchParams();
+                qs.set('since_id', String(maxId));
+                qs.set('limit',    String(MAX_ROWS));
+                const data = await api('signals_live.php?' + qs.toString());
+
+                if (data.last_id > maxId) maxId = data.last_id;
+
+                // signals_live.php devuelve DESC (nuevas primero); para el log
+                // las invertimos a orden cronológico ascendente.
+                const incoming = (data.senales || []).slice().reverse();
+                if (!incoming.length) return;
+
+                if (firstTick) {
+                    firstTick = false;
+                    buffer = incoming.slice(-MAX_ROWS);
+                    repaintAll();
+                    scrollToBottom();
+                } else {
+                    buffer = buffer.concat(incoming).slice(-MAX_ROWS);
+                    appendNew(incoming);
+                }
+            } catch (_) {
+                // Silencioso (mismo criterio que el feed del dashboard, §13.1).
+            } finally {
+                fetching = false;
+            }
+        }
+
+        toggle.addEventListener('click', () => {
+            userPaused = !userPaused;
+            toggle.innerHTML = userPaused
+                ? '<i class="fa-solid fa-play"></i>'
+                : '<i class="fa-solid fa-pause"></i>';
+            toggle.title = userPaused ? 'Reanudar' : 'Pausar';
+            toggle.setAttribute('aria-label', toggle.title + ' feed');
+            updateStatus();
+        });
+        // Pausa por hover sólo sobre el body (la cabecera tiene el botón de
+        // pausa, no queremos que el hover de ese botón también pause).
+        console_.addEventListener('mouseenter', () => { hoverPaused = true;  updateStatus(); });
+        console_.addEventListener('mouseleave', () => { hoverPaused = false; updateStatus(); });
+
+        updateStatus();
+        tick();
+        const intervalId = setInterval(tick, TICK_MS);
+
+        function close() {
+            clearInterval(intervalId);
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        }
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
 
     function signalsTableBody(senales) {

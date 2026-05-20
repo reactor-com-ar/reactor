@@ -495,6 +495,121 @@ Reglas de interacción:
 }
 ```
 
+### 13.2 Monitor en tiempo real (modal de Señales)
+
+Modal accesible desde el listado `#/signals` mediante el botón **Monitor en
+tiempo real** (`#sig-monitor`) anclado en la zona derecha del toolbar
+(usando el slot `extraRight` de `abmToolbar`, ver §9). Es un **log tipo
+consola / terminal** para mirar las señales que van ingresando.
+
+Comparte el endpoint (`signals_live.php`) y las reglas de **pausa por
+hover** + **botón pausa/play** con el feed del dashboard (§13.1), pero el
+**polling es mucho más agresivo: 100 ms** (vs. 500 ms del dashboard) para
+que se sienta "en tiempo real". A 100 ms el ojo humano no percibe latencia
+y el guard `fetching` evita que se encolen requests si el server tarda más
+que el tick. La estética y el layout también son distintos: no es una
+tabla, es un panel oscuro monoespaciado al estilo `tail -f`.
+
+**Ancho.** El modal usa una variante propia más ancha que `modal-wide`
+(`max-width: 1000px`) porque cada línea contiene timestamp + ID + sentido
++ dispositivo + topic + mensaje en una sola fila sin envolver.
+**Importante:** la regla CSS se declara como `.modal.signals-monitor-modal`
+(compound, especificidad 20) — el selector simple `.signals-monitor-modal`
+no le gana al `.modal { max-width: 520px }` de §14 porque éste está más
+abajo en el archivo y tienen la misma especificidad.
+
+**Layout y colores (tipo consola).**
+
+- Body del modal con `background: #0a0a0a` y `padding: 0` (el log ocupa
+  todo).
+- `.signals-monitor-console`: contenedor scrollable de `height: 65vh`,
+  font monoespaciada (`ui-monospace, SFMono-Regular, Menlo, Consolas`),
+  `font-size: .8rem`, color base `#d4d4d4` sobre `#0a0a0a`. Scrollbar
+  custom oscura (track `#0a0a0a`, thumb `#2a2a2a`).
+- Empty state: `$ esperando señales…` con un cursor parpadeante
+  (`.signals-monitor-caret`, bloque blanco que blinkea cada 1 s).
+- Cada señal es una `.log-line` (flex, `white-space: nowrap`) con spans
+  pintados al estilo ANSI:
+  - `.log-ts`     `#6b7280` (gris muteado) — `YYYY-MM-DD HH:MM:SS`
+  - `.log-id`     `#60a5fa` bold (azul) — `#1234`
+  - `.log-arrow.log-in`   `#34d399` (verde) — ` IN` (sentido E)
+  - `.log-arrow.log-out`  `#fbbf24` (ámbar) — `OUT` (sentido S)
+  - `.log-device` `#e5e7eb` (claro)
+  - `.log-topic`  `#67e8f9` (cian)
+  - `.log-msg`    `#d4d4d4` con `flex:1` + `text-overflow: ellipsis`
+  - `.log-sep`    `#3a3a3a` (separadores `│`)
+- Hover sobre una línea: fondo `#1a1a1a`, cursor pointer.
+- Nuevas líneas: animación `.is-new` con flash verde (`monitor-line-flash`).
+
+**Orden y scroll.**
+
+- Buffer cronológico ascendente: las **nuevas señales se appendean al
+  fondo** (como en una terminal real), no al tope.
+- **Auto-scroll incondicional al pie**: cuando llegan nuevas líneas el
+  scroll siempre baja al fondo. La pausa por hover ya cubre el caso
+  "quiero leer sin que se mueva": al pasar el mouse sobre la consola el
+  polling se congela, así que mientras estés sobre una línea no aparecen
+  nuevas y no se te mueve la vista.
+- Buffer rotativo de **250 líneas**; el primer tick semilla la consola con
+  el histórico para que arranque llena en vez de con "Esperando señales…".
+
+**Interacción.**
+
+- Click sobre cualquier línea abre el modal de detalle existente
+  (`openSignalViewModal`), reutilizando el Consultar del listado.
+- **Pausa por hover** sólo sobre `.signals-monitor-console`, no sobre el
+  header — hover sobre el botón de pausa no debe pausar el feed.
+- **Cleanup al cerrar el modal** (no usa `activeViewCleanup`: el modal se
+  monta sobre la misma vista, no hay navegación).
+
+Estructura:
+
+```html
+<div class="modal-backdrop open">
+  <div class="modal signals-monitor-modal">
+    <div class="modal-header">
+      <div class="modal-title">
+        Monitor en tiempo real
+        <span class="dash-live-status" id="sig-monitor-status">
+          <span class="live-dot"></span> En vivo · 100 ms
+        </span>
+      </div>
+      <div class="signals-monitor-controls">
+        <button class="btn-icon-sm" id="sig-monitor-toggle" title="Pausar">
+          <i class="fa-solid fa-pause"></i>
+        </button>
+        <button class="btn-icon-sm" data-act="close">×</button>
+      </div>
+    </div>
+    <div class="modal-body signals-monitor-body">
+      <div class="signals-monitor-console">
+        <div class="log-line is-new" data-id="1234">
+          <span class="log-ts">2026-05-20 14:32:01</span>
+          <span class="log-sep">│</span>
+          <span class="log-id">#1234</span>
+          <span class="log-sep">│</span>
+          <span class="log-arrow log-in"> IN</span>
+          <span class="log-sep">│</span>
+          <span class="log-device">uid-abc Nombre dispositivo</span>
+          <span class="log-sep">│</span>
+          <span class="log-topic">topic/foo</span>
+          <span class="log-sep">│</span>
+          <span class="log-msg">{"k":"v"}</span>
+        </div>
+        …
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="signals-monitor-footer-info">
+        <i class="fa-solid fa-terminal"></i>
+        <strong>N</strong> de <strong>200</strong> líneas · click sobre una línea para ver detalle
+      </span>
+      <button class="btn btn-ghost" data-act="close">Cerrar</button>
+    </div>
+  </div>
+</div>
+```
+
 ## 14. Modales
 
 ```html

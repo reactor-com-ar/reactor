@@ -144,3 +144,18 @@ SELECT d.id, CONCAT('reactor/', d.uid, '/error'), NULL, NULL, 'error', 'sensor_d
        JSON_OBJECT('mensaje', 'No hay respuesta del sensor durante 5 ciclos', 'codigo', 'E_NO_RESPONSE'),
        NOW() - INTERVAL 15 MINUTE
 FROM dispositivos d WHERE d.uid = 'RX-0005';
+
+-- Ledger de la herramienta de Migraciones (cloud > Herramientas > Migraciones).
+-- Registra cada archivo de cloud/sql/migrations/ que ya fue aplicado; el
+-- runner saltea los archivos con success=1 para garantizar idempotencia.
+CREATE TABLE IF NOT EXISTS migraciones (
+    id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    archivo      VARCHAR(255) NOT NULL,
+    hash_sha256  CHAR(64)     NOT NULL,
+    ejecutado_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    duracion_ms  INT UNSIGNED NOT NULL DEFAULT 0,
+    success      TINYINT(1)   NOT NULL DEFAULT 1,
+    error        TEXT         DEFAULT NULL,
+    UNIQUE KEY uq_archivo (archivo),
+    INDEX idx_ejecutado_at (ejecutado_at)
+) ENGINE=InnoDB;

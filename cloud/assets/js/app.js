@@ -314,6 +314,38 @@
                     </div>
                 </div>
 
+                <div class="table-card dash-chart-card" id="signals-chart-card">
+                    <div class="dash-table-header">
+                        <span>📈 Señales por minuto · últimas 24 h</span>
+                        <div class="dash-live-controls">
+                            <span class="dash-chart-summary" id="signals-chart-summary">
+                                <span class="dash-chart-metric">
+                                    <span class="dash-chart-metric-label">Total</span>
+                                    <strong id="signals-chart-total">—</strong>
+                                </span>
+                                <span class="dash-chart-metric">
+                                    <span class="dash-chart-metric-label">Pico</span>
+                                    <strong id="signals-chart-max">—</strong>
+                                </span>
+                                <span class="dash-chart-metric">
+                                    <span class="dash-chart-metric-label">Prom</span>
+                                    <strong id="signals-chart-avg">—</strong>
+                                </span>
+                            </span>
+                            <span class="dash-live-status" id="signals-chart-status">
+                                <span class="live-dot"></span> En vivo · 1 min
+                            </span>
+                            <button type="button" class="btn-icon-sm" id="signals-chart-refresh"
+                                    title="Refrescar" aria-label="Refrescar gráfico">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="dash-chart-body" id="signals-chart-body">
+                        <div class="dash-chart-empty">Cargando…</div>
+                    </div>
+                </div>
+
                 <div class="dash-grid">
                     <div class="table-card">
                         <div class="dash-table-header">
@@ -381,14 +413,179 @@
                 regRefreshTimer = setInterval(refreshRegistrosCard, 15_000);
             }
 
-            const liveCleanup = startDashboardLiveFeed();
+            const liveCleanup  = startDashboardLiveFeed();
+            const chartCleanup = startDashboardSignalsChart();
             activeViewCleanup = () => {
                 if (regRefreshTimer) clearInterval(regRefreshTimer);
                 liveCleanup();
+                chartCleanup();
             };
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
+    }
+
+    /* Gráfico "Señales por minuto · últimas 24 h" (dashboard).
+     *
+     * Polling a `signals_stats.php` cada 1 min. La ventana es móvil: el
+     * servidor devuelve 1440 buckets de 1 minuto anclados al minuto en
+     * curso, así que basta con re-render completo del SVG sin lógica
+     * incremental. SVG inline (no librería) — una polilínea fluida + área
+     * bajo la curva, con grid, eje Y dinámico y ticks X cada 4 h. A esta
+     * densidad no se renderizan puntos individuales ni hit-area per
+     * minuto: la línea actúa como sparkline y el header concentra las
+     * métricas (Total/Pico/Prom).
+     *
+     * Devuelve cleanup() que apaga el timer; lo consume `activeViewCleanup`
+     * al navegar a otra ruta. */
+    function startDashboardSignalsChart() {
+        const card = document.getElementById('signals-chart-card');
+        if (!card) return () => {};
+
+        const body    = card.querySelector('#signals-chart-body');
+        const status  = card.querySelector('#signals-chart-status');
+        const btnReload = card.querySelector('#signals-chart-refresh');
+        const elTotal = card.querySelector('#signals-chart-total');
+        const elMax   = card.querySelector('#signals-chart-max');
+        const elAvg   = card.querySelector('#signals-chart-avg');
+
+        const TICK_MS = 60_000;
+        let fetching  = false;
+        let lastError = false;
+
+        function setStatus(text, paused) {
+            status.innerHTML = `<span class="live-dot"></span> ${escape(text)}`;
+            card.classList.toggle('live-paused', !!paused);
+        }
+
+        function renderChart(data) {
+            const buckets = data.buckets || [];
+            if (!buckets.length) {
+                body.innerHTML = `<div class="dash-chart-empty">Sin datos</div>`;
+                return;
+            }
+
+            elTotal.textContent = String(data.total ?? 0);
+            elMax.textContent   = String(data.max   ?? 0);
+            elAvg.textContent   = (data.avg ?? 0).toString().replace('.', ',');
+
+            // SVG con viewBox: escala fluido al ancho del contenedor.
+            const W = 1200, H = 220;
+            const padL = 36, padR = 12, padT = 14, padB = 26;
+            const innerW = W - padL - padR;
+            const innerH = H - padT - padB;
+            const n = buckets.length;          // 1440
+            const slot   = innerW / n;
+
+            // Escala Y: redondear el max hacia arriba a un "lindo" tope.
+            const rawMax = Math.max(1, data.max ?? 0);
+            const yMax   = niceCeil(rawMax);
+
+            // 4 líneas horizontales de grid (0, 1/3, 2/3, max).
+            const gridYs = [0, 1/3, 2/3, 1].map(f => ({
+                v: Math.round(yMax * f),
+                y: padT + innerH - innerH * f,
+            }));
+
+            const gridLines = gridYs.map(g => `
+                <line class="dash-chart-grid" x1="${padL}" x2="${W - padR}"
+                      y1="${g.y}" y2="${g.y}"></line>
+                <text class="dash-chart-axis-label" x="${padL - 6}" y="${g.y + 3}"
+                      text-anchor="end">${g.v}</text>
+            `).join('');
+
+            // Puntos: un vértice por bucket, centrado en su slot. A 1440
+            // puntos sobre ~1150 px de ancho los círculos individuales
+            // (y la hit-area por minuto) saturan el render — sólo se
+            // dibuja la polilínea y el área.
+            const pts = buckets.map((b, i) => {
+                const c = b.count || 0;
+                const x = padL + i * slot + slot / 2;
+                const y = padT + innerH - (c / yMax) * innerH;
+                return { x, y };
+            });
+
+            const lineD = pts.map((p, i) =>
+                `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`
+            ).join(' ');
+
+            // Área bajo la línea: misma trayectoria + cierre al eje X.
+            const baseY = padT + innerH;
+            const areaD = `${lineD} L ${pts[n-1].x.toFixed(2)} ${baseY} `
+                        + `L ${pts[0].x.toFixed(2)} ${baseY} Z`;
+
+            // Eje X: ticks en los minutos cerrados que caen en
+            // 00:00 / 04:00 / 08:00 / 12:00 / 16:00 / 20:00 dentro de la
+            // ventana de 24 h. Los índices exactos dependen de qué
+            // minuto sea ahora, así que se descubren escaneando los
+            // buckets.
+            const tickHours = new Set([0, 4, 8, 12, 16, 20]);
+            const xAxis = buckets.map((b, i) => {
+                const colonIdx = b.minuto.indexOf(':');
+                if (colonIdx < 0) return '';
+                const mm = b.minuto.slice(colonIdx + 1);
+                if (mm !== '00') return '';
+                const hh = parseInt(b.minuto.slice(0, colonIdx), 10);
+                if (!tickHours.has(hh)) return '';
+                const cx = padL + i * slot + slot / 2;
+                return `<text class="dash-chart-axis-label" x="${cx.toFixed(2)}"
+                              y="${H - 8}" text-anchor="middle">${escape(b.minuto)}</text>`;
+            }).join('');
+
+            body.innerHTML = `
+                <svg class="dash-chart-svg" viewBox="0 0 ${W} ${H}"
+                     preserveAspectRatio="none" role="img"
+                     aria-label="Señales por minuto en las últimas 24 horas">
+                    ${gridLines}
+                    <path class="dash-chart-area" d="${areaD}"></path>
+                    <path class="dash-chart-line" d="${lineD}"></path>
+                    ${xAxis}
+                </svg>
+            `;
+        }
+
+        function niceCeil(v) {
+            if (v <= 1)  return 1;
+            if (v <= 5)  return 5;
+            if (v <= 10) return 10;
+            const pow = Math.pow(10, Math.floor(Math.log10(v)));
+            const n   = v / pow;
+            let nice;
+            if      (n <= 1.5) nice = 1.5;
+            else if (n <= 2)   nice = 2;
+            else if (n <= 3)   nice = 3;
+            else if (n <= 5)   nice = 5;
+            else               nice = 10;
+            return Math.ceil(nice * pow);
+        }
+
+        async function tick(manual) {
+            if (!document.body.contains(card)) return;
+            if (fetching) return;
+            fetching = true;
+            const icon = btnReload?.querySelector('i');
+            if (manual && icon) icon.classList.add('fa-spin');
+            try {
+                const data = await api('signals_stats.php');
+                renderChart(data);
+                if (lastError) { setStatus('En vivo · 1 min', false); lastError = false; }
+            } catch (err) {
+                lastError = true;
+                setStatus('Error · reintentando', true);
+            } finally {
+                fetching = false;
+                if (manual && icon) icon.classList.remove('fa-spin');
+            }
+        }
+
+        btnReload?.addEventListener('click', () => tick(true));
+
+        tick(false);
+        const intervalId = setInterval(() => tick(false), TICK_MS);
+
+        return function cleanup() {
+            clearInterval(intervalId);
+        };
     }
 
     /* Feed en vivo del dashboard (cada 500 ms).
@@ -4239,7 +4436,8 @@
 
     /* ---------- Views: Herramientas ---------- */
     const toolsCatalog = [
-        { icon: '⚙️', title: 'Parámetros', desc: 'Administra las variables de configuración del sistema.', action: openParametrosManager },
+        { icon: '⚙️', title: 'Parámetros',  desc: 'Administra las variables de configuración del sistema.', action: openParametrosManager },
+        { icon: '🛠️', title: 'Migraciones', desc: 'Ejecuta migraciones de base de datos con log en vivo. Idempotente.', action: openMigracionesConsole },
     ];
 
     function renderTools(root) {
@@ -4513,6 +4711,242 @@
                 }
             }
         );
+    }
+
+    /* ---------- Herramientas: Migraciones ---------- */
+    // Tile de Herramientas que abre un modal con pinta de terminal y un
+    // botón "Ejecutar". El cuerpo es una consola monoespaciada (estilo
+    // `signals-monitor-console`) donde aparece el progreso en vivo.
+    //
+    // El listado inicial (GET api/migraciones.php) marca cada archivo
+    // como aplicado/pendiente. El "Ejecutar" abre un POST que devuelve
+    // Server-Sent Events: cada `event: log` pinta una línea en la
+    // consola; `event: file` actualiza el contador; `event: done` cierra
+    // el run y libera el botón. La operación es idempotente — los
+    // archivos ya aplicados se saltean en el server.
+
+    async function openMigracionesConsole() {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal migraciones-modal" role="dialog" aria-modal="true" aria-labelledby="mig-title">
+                <div class="modal-header">
+                    <div class="modal-title" id="mig-title">
+                        <i class="fa-solid fa-terminal"></i> Migraciones
+                        <span class="modal-subtitle">Aplica las migraciones pendientes de <code>cloud/sql/migrations/</code>. Operación idempotente.</span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body migraciones-body">
+                    <div class="migraciones-toolbar">
+                        <div class="migraciones-status" id="mig-status">
+                            <span class="spin-sm" id="mig-spin"></span>
+                            <span id="mig-status-text">Cargando estado…</span>
+                        </div>
+                        <div class="migraciones-actions">
+                            <button type="button" class="btn btn-ghost btn-sm" data-act="clear" title="Limpiar consola">
+                                <i class="fa-solid fa-eraser"></i> Limpiar
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm" data-act="run" disabled>
+                                <i class="fa-solid fa-play"></i> Ejecutar pendientes
+                            </button>
+                        </div>
+                    </div>
+                    <div class="migraciones-console" id="mig-console">
+                        <div class="mig-line mig-muted">$ esperando comando…<span class="signals-monitor-caret"></span></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <span class="migraciones-footer-info">
+                        <i class="fa-solid fa-database"></i>
+                        Idempotente · Los archivos con éxito previo se saltean
+                    </span>
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const consoleEl  = backdrop.querySelector('#mig-console');
+        const statusText = backdrop.querySelector('#mig-status-text');
+        const spin       = backdrop.querySelector('#mig-spin');
+        const btnRun     = backdrop.querySelector('[data-act="run"]');
+        const btnClear   = backdrop.querySelector('[data-act="clear"]');
+
+        let activeAbort = null;
+        let running     = false;
+
+        const close = () => {
+            if (activeAbort) activeAbort.abort();
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop && !running) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', () => {
+            if (running) { toast('Hay una migración en curso', 'error'); return; }
+            close();
+        }));
+
+        function appendLine(level, msg) {
+            const cls = ({
+                info: 'mig-info', ok: 'mig-ok', warn: 'mig-warn',
+                err:  'mig-err',  skip: 'mig-skip',
+            })[level] || 'mig-muted';
+            // Prefijo tipo prompt para info, [OK]/[ERR]/etc. para el resto.
+            const prefix = ({
+                ok:   '[OK]  ',
+                err:  '[ERR] ',
+                warn: '[WRN] ',
+                skip: '[--]  ',
+                info: '',
+            })[level] ?? '';
+            const div = document.createElement('div');
+            div.className = 'mig-line ' + cls;
+            div.textContent = prefix + (msg ?? '');
+            consoleEl.appendChild(div);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function setStatus(text, busy) {
+            statusText.textContent = text;
+            spin.style.visibility = busy ? '' : 'hidden';
+        }
+
+        btnClear.addEventListener('click', () => {
+            if (running) return;
+            consoleEl.innerHTML = '<div class="mig-line mig-muted">$ consola limpia</div>';
+        });
+
+        async function refreshList() {
+            setStatus('Cargando estado…', true);
+            btnRun.disabled = true;
+            try {
+                const data = await api('migraciones.php');
+                const total = data.total ?? 0;
+                const pend  = data.pendientes ?? 0;
+                if (total === 0) {
+                    setStatus('No se encontraron archivos de migración.', false);
+                    btnRun.disabled = true;
+                } else if (pend === 0) {
+                    setStatus(`Todas al día (${total}/${total} aplicadas).`, false);
+                    btnRun.disabled = false; // permitir re-run (será no-op).
+                } else {
+                    setStatus(`${pend} pendiente(s) de ${total} total.`, false);
+                    btnRun.disabled = false;
+                }
+                appendLine('info', `Estado: ${total - pend}/${total} aplicadas, ${pend} pendiente(s).`);
+                (data.migraciones || []).forEach(m => {
+                    if (m.aplicada) {
+                        appendLine('skip', `${m.archivo}  (aplicada ${m.ejecutado_at ?? ''}, ${m.duracion_ms ?? 0} ms)`);
+                    } else if (m.success === 0) {
+                        appendLine('warn', `${m.archivo}  (último intento falló: ${m.error ?? 'sin detalle'})`);
+                    } else {
+                        appendLine('info', `${m.archivo}  (pendiente)`);
+                    }
+                });
+            } catch (e) {
+                setStatus('Error al cargar estado.', false);
+                appendLine('err', 'No se pudo obtener el estado: ' + e.message);
+            }
+        }
+
+        btnRun.addEventListener('click', async () => {
+            if (running) return;
+            running = true;
+            btnRun.disabled = true;
+            btnClear.disabled = true;
+            setStatus('Ejecutando…', true);
+            appendLine('info', '');
+            appendLine('info', '$ POST api/migraciones.php?run=1');
+
+            activeAbort = new AbortController();
+            try {
+                await streamMigracionesRun(activeAbort.signal, (event, payload) => {
+                    if (event === 'log') {
+                        appendLine(payload.level || 'info', payload.msg ?? '');
+                    } else if (event === 'file') {
+                        // Ya quedó loggeado en el evento `log` paralelo; este es
+                        // estructurado por si en el futuro queremos un contador.
+                    } else if (event === 'done') {
+                        const { aplicadas, salteadas, fallidas } = payload;
+                        if (fallidas > 0) {
+                            setStatus(`Terminado con errores: ${aplicadas} aplicadas, ${fallidas} fallidas.`, false);
+                            toast('Migraciones: ' + fallidas + ' fallida(s)', 'error');
+                        } else if (aplicadas > 0) {
+                            setStatus(`Listo. ${aplicadas} aplicada(s), ${salteadas} salteada(s).`, false);
+                            toast(`Migraciones: ${aplicadas} aplicada(s)`);
+                        } else {
+                            setStatus(`Sin cambios. ${salteadas} salteada(s).`, false);
+                            toast('Sin migraciones pendientes');
+                        }
+                    }
+                });
+            } catch (e) {
+                if (e.name === 'AbortError') {
+                    appendLine('warn', 'Operación cancelada.');
+                } else {
+                    appendLine('err', 'Error de stream: ' + e.message);
+                    setStatus('Error de stream.', false);
+                }
+            } finally {
+                running = false;
+                activeAbort = null;
+                btnClear.disabled = false;
+                btnRun.disabled = false;
+            }
+        });
+
+        refreshList();
+    }
+
+    /**
+     * Hace POST a api/migraciones.php?run=1 y parsea la respuesta como
+     * stream Server-Sent Events, llamando `onEvent(eventName, dataObj)`
+     * por cada mensaje. Resuelve cuando el servidor cierra el stream.
+     */
+    async function streamMigracionesRun(signal, onEvent) {
+        const res = await fetch('api/migraciones.php?run=1', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'text/event-stream' },
+            signal,
+        });
+        if (res.status === 401) {
+            window.location.href = 'login.php';
+            throw new Error('No autenticado');
+        }
+        if (!res.ok || !res.body) {
+            throw new Error('HTTP ' + res.status);
+        }
+
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE separa mensajes por línea en blanco (\n\n).
+            let sep;
+            while ((sep = buffer.indexOf('\n\n')) !== -1) {
+                const raw = buffer.slice(0, sep);
+                buffer = buffer.slice(sep + 2);
+
+                let evt = 'message';
+                let dataLines = [];
+                raw.split('\n').forEach(line => {
+                    if (line.startsWith('event:')) evt = line.slice(6).trim();
+                    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+                });
+                if (!dataLines.length) continue;
+                let payload = null;
+                try { payload = JSON.parse(dataLines.join('\n')); } catch (_) { payload = { raw: dataLines.join('\n') }; }
+                onEvent(evt, payload);
+            }
+        }
     }
 
     /* ---------- Views: Stub ---------- */

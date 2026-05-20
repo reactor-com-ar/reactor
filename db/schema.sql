@@ -1218,6 +1218,23 @@ CREATE TABLE `menus`  (
 ) ENGINE = MyISAM AUTO_INCREMENT = 369 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_general_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for migraciones
+-- ----------------------------
+DROP TABLE IF EXISTS `migraciones`;
+CREATE TABLE `migraciones`  (
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `archivo` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `hash_sha256` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ejecutado_at` datetime(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+  `duracion_ms` int(10) UNSIGNED NOT NULL DEFAULT 0,
+  `success` tinyint(1) NOT NULL DEFAULT 1,
+  `error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_archivo` (`archivo`) USING BTREE,
+  INDEX `idx_ejecutado_at` (`ejecutado_at`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for microservicios
 -- ----------------------------
 DROP TABLE IF EXISTS `microservicios`;
@@ -1555,6 +1572,24 @@ CREATE TABLE `senales`  (
   `estado` smallint(0) NULL DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = MyISAM AUTO_INCREMENT = 35861611 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_general_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for senales_por_minuto
+-- ----------------------------
+-- Agregado materializado de `senales`: una fila por minuto cerrado con la
+-- cantidad de senales recibidas en ese minuto. Como las senales son
+-- inmutables (solo se insertan), el count de un minuto pasado nunca
+-- cambia y se cachea de por vida. Lo alimenta cloud/api/signals_stats.php
+-- de forma incremental: bootstrap unico de 60 min y luego 1 fila por
+-- minuto nuevo. Evita full scan sobre los ~35M registros de `senales`.
+DROP TABLE IF EXISTS `senales_por_minuto`;
+CREATE TABLE `senales_por_minuto` (
+  `minuto`      datetime    NOT NULL,
+  `cantidad`    int(10) UNSIGNED NOT NULL DEFAULT 0,
+  `generado_at` timestamp   NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`minuto`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- ----------------------------
 -- Table structure for sesiones

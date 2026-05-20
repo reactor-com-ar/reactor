@@ -426,6 +426,70 @@ tbody tr:hover { background: var(--row-hover); }
 /* Mensaje (última columna) en tamaño reducido para no robar peso visual al feed. */
 .live-feed-table td:last-child { font-size: .8rem; }
 
+/* ---------- 13.1-bis Gráfico "Señales por minuto" (dashboard) ---------- */
+/* Card de ancho completo que vive por encima del .dash-grid de 2 columnas.
+   Render SVG inline (sin librería), polling cada 10 s a signals_stats.php.
+   Comparte .live-dot / .live-paused con §13.1 para reusar el indicador. */
+.dash-chart-card  { margin-bottom: 20px; }
+.dash-chart-body  { padding: 14px 18px 8px; }
+.dash-chart-empty {
+    color: var(--muted);
+    font-style: italic;
+    text-align: center;
+    padding: 40px 0;
+}
+
+.dash-chart-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+}
+.dash-chart-metric {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: .78rem;
+    color: var(--muted);
+}
+.dash-chart-metric-label {
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-weight: 500;
+    font-size: .68rem;
+}
+.dash-chart-metric strong { color: var(--text); font-weight: 600; font-size: .9rem; }
+
+.dash-chart-svg {
+    width: 100%;
+    height: 220px;
+    display: block;
+}
+
+.dash-chart-grid {
+    stroke: var(--border);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+    opacity: .7;
+}
+.dash-chart-axis-label {
+    fill: var(--muted);
+    font-size: 10px;
+    font-family: inherit;
+}
+
+.dash-chart-line {
+    fill: none;
+    stroke: var(--primary);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+.dash-chart-area {
+    fill: var(--primary);
+    fill-opacity: .15;
+    stroke: none;
+}
+
 /* ---------- 13.2 Monitor en tiempo real (modal de Señales) ---------- */
 /* Modal accesible desde la toolbar del listado `#/signals`. El cuerpo es
    un panel tipo terminal/consola: fondo negro, font monoespaciada, una
@@ -522,6 +586,90 @@ tbody tr:hover { background: var(--row-hover); }
 }
 
 .signals-monitor-footer-info {
+    margin-right: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .8rem;
+    color: var(--muted);
+}
+
+/* ---------- 13.3 Migraciones (modal de Herramientas) ---------- */
+/* Modal lanzado desde el tile "Migraciones" de Herramientas. Comparte la
+   estética tipo terminal con `signals-monitor-modal` (fondo negro,
+   monoespaciada), pero arriba tiene una toolbar interna con estado +
+   botón "Ejecutar pendientes" + "Limpiar". Cada línea del log se
+   colorea por nivel: info (gris), ok (verde), warn (ámbar), err (rojo)
+   y skip (azul muted). */
+.modal.migraciones-modal { max-width: 900px; }
+.migraciones-modal .modal-body {
+    padding: 0;
+    background: #0a0a0a;
+    gap: 0;
+}
+
+.migraciones-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 18px;
+    background: #141414;
+    border-bottom: 1px solid #1f1f1f;
+    flex-wrap: wrap;
+}
+.migraciones-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .82rem;
+    color: #d4d4d4;
+}
+.migraciones-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Spinner chico para el header de estado del modal, alineado a baseline. */
+.spin-sm {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #2a2a2a;
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: -2px;
+}
+
+.migraciones-console {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .8rem;
+    line-height: 1.55;
+    color: #d4d4d4;
+    background: #0a0a0a;
+    padding: 14px 18px;
+    height: 60vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    scroll-behavior: smooth;
+    white-space: pre;
+}
+.migraciones-console::-webkit-scrollbar      { width: 10px; height: 10px; }
+.migraciones-console::-webkit-scrollbar-track { background: #0a0a0a; }
+.migraciones-console::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 5px; }
+.migraciones-console::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+.mig-line { padding: 1px 0; }
+.mig-info  { color: #d4d4d4; }
+.mig-muted { color: #6b7280; font-style: italic; }
+.mig-ok    { color: #34d399; }
+.mig-warn  { color: #fbbf24; }
+.mig-err   { color: #f87171; }
+.mig-skip  { color: #60a5fa; }
+
+.migraciones-footer-info {
     margin-right: auto;
     display: inline-flex;
     align-items: center;

@@ -17,6 +17,17 @@ if (!defined('CLOUD_API_PUBLIC')) {
     reactor_require_auth_json();
 }
 
+// Liberar el lock exclusivo sobre el archivo de sesion apenas validamos
+// auth. PHP por default mantiene un flock desde session_start() hasta el
+// fin del script, lo que serializa todas las requests concurrentes que
+// comparten cookie (mismo tab del dashboard => 4 polls en paralelo a
+// signals_stats / signals_live / registros / dispositivos). Si un poll
+// pesado tarda, los demas se encolan y la UI queda "cargando" para
+// siempre. Como ningun endpoint protegido escribe $_SESSION (los unicos
+// writers, login y logout, optan fuera con CLOUD_API_PUBLIC), cerrar la
+// sesion en escritura aca es seguro y deja el lock libre.
+session_write_close();
+
 function env(string $key, ?string $default = null): string
 {
     $v = getenv($key);

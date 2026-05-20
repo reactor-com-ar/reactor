@@ -495,6 +495,156 @@ Reglas de interacción:
 }
 ```
 
+### 13.1-bis Gráfico "Señales por minuto · últimas 24 h" (dashboard)
+
+Card de **ancho completo** ubicada **por encima** del `.dash-grid` de 2
+columnas (entre la `.stats-bar` y la grid de "Últimos registros" / "Últimas
+señales"). Muestra un gráfico de línea con la cantidad de señales recibidas
+por minuto en las últimas **24 horas** (1440 buckets de 1 minuto). Polling
+al endpoint `api/signals_stats.php` cada **1 min**.
+
+**Endpoint.** `GET /api/signals_stats.php` devuelve siempre **1440 buckets
+de 1 minuto** en orden cronológico ascendente (más viejo → más nuevo),
+anclados al **minuto en curso** (ventana móvil `[now-1439min, now]`). Los
+minutos sin señales se devuelven con `count: 0` — el front no rellena
+huecos. Cada bucket trae `{ minuto: "HH:MM", fecha: "YYYY-MM-DD HH:MM:00",
+count: N }`. La respuesta también incluye `total`, `max` y `avg` (señales
+por minuto promediadas sobre la ventana de 24 h) ya calculados para
+alimentar las métricas del header sin sumar en el cliente.
+
+**Cache materializado** (tabla `senales_por_minuto`, ver migración
+`2026-05-20_senales_por_minuto.sql`). `senales` tiene ~35M filas en MyISAM
+y sólo índice de PK; un GROUP BY por minuto sobre las últimas 24 h haría
+full scan en cada poll. Como las señales son **inmutables** (sólo se
+insertan), el count de cualquier minuto pasado es estable de por vida,
+así que se materializa en una tabla aparte (`PRIMARY KEY (minuto)`). Flujo
+por poll:
+
+1. Leer `MAX(minuto)` del cache.
+2. Si faltan minutos cerrados entre ese máximo y el minuto anterior al
+   actual, calcularlos con un GROUP BY acotado por `id > MAX(id) -
+   LOOKBACK` sobre `senales` e insertarlos con `INSERT IGNORE` (zero-fill
+   incluido para que un minuto vacío no se recompute en el próximo poll).
+   El `LOOKBACK` se dimensiona en proporción al gap a fillear
+   (`gapMinutes × 3500 ids/min`, piso 200k), así el bootstrap inicial de
+   24 h escanea ~5M IDs en un único PK-range scan y los polls tibios
+   sólo escanean unos pocos miles.
+3. Leer los 1439 minutos cerrados del cache por rango de PK (instantáneo).
+4. Contar **en vivo** el minuto en curso (es volátil, nunca se cachea)
+   con un pivot por PK fijo (lookback chico, 200k).
+5. Ensamblar los 1440 buckets.
+
+Tras el bootstrap inicial (una única corrida que recorre 24 h de
+`senales`), cada poll sólo cuenta el minuto en curso + agrega 0 o 1 fila
+nueva al cache. El histórico nunca más se re-escanea.
+
+**Render.** SVG inline **sin librería externa** (mantiene el bundle limpio
+y la curva de carga inmediata). Un `viewBox="0 0 1200 220"` con
+`preserveAspectRatio="none"` para que el SVG escale fluido al ancho del
+contenedor. Un `<path>` (`.dash-chart-line`) une 1440 vértices — uno por
+minuto — centrados en su slot; debajo, un segundo `<path>`
+(`.dash-chart-area`) con el mismo recorrido cerrado contra el eje X
+rellena el área con la primaria al 15 % de opacidad.
+
+A esta densidad (1440 puntos sobre ~1150 px de ancho) **no se renderizan
+círculos individuales ni hit-area por minuto**: cada slot mide ~0,8 px y
+los marcadores saturarían el render sin aportar información. La línea
+funciona como sparkline y el resumen del header (Total · Pico · Prom)
+concentra las métricas del período.
+
+- **Color**: línea y área en `var(--primary)` (rojo institucional
+  `#C11313`, consistente con el tema único oscuro/rojo).
+- **Eje Y**: 4 líneas horizontales dashed (`stroke-dasharray: 2 3`) con
+  labels a la izquierda. El tope se calcula con `niceCeil()` (1, 5, 10, o
+  el "lindo" siguiente — 1.5/2/3/5 × 10ⁿ) para que el máximo no quede en
+  un número raro como 47.
+- **Eje X**: ticks en los minutos cerrados que caen en
+  `00:00 / 04:00 / 08:00 / 12:00 / 16:00 / 20:00` (hasta 6 ticks dentro de
+  la ventana de 24 h, con sus índices descubiertos escaneando los
+  buckets). Si la card es muy angosta el SVG sigue escalando porque está
+  bajo `preserveAspectRatio="none"`.
+
+**Header.** Reutiliza `.dash-table-header` con tres bloques en
+`.dash-live-controls`:
+
+- `.dash-chart-summary` con tres métricas (**Total · Pico · Prom**),
+  calculadas server-side y refrescadas en cada tick.
+- `.dash-live-status` con el indicador `.live-dot` + texto `En vivo · 1 min`
+  (mismo componente que §13.1, comparte `.live-paused` para el estado de
+  error).
+- Botón `#signals-chart-refresh` para forzar un fetch manual (el ícono
+  gira mientras está fetching).
+
+**Polling.**
+
+- Tick cada **1 min** (`TICK_MS = 60_000`). Los buckets del endpoint son
+  de 1 minuto anclados al minuto en curso, así que tickear más rápido no
+  aporta resolución; no se justifica polling más agresivo como el feed
+  (500 ms) ni el monitor (100 ms).
+- Re-render completo del SVG en cada tick (no lógica incremental).
+- Guard `fetching` evita requests encolados si el server tarda más que el
+  tick (improbable, pero defensivo).
+- **Cleanup al navegar**: el timer se registra en `activeViewCleanup` y
+  se limpia al cambiar de ruta. Si la card sale del DOM, el `tick()`
+  también se autodescarta.
+- **Errores**: el status pasa a `Error · reintentando` + se aplica
+  `.live-paused` (apaga el punto pulsante). Al primer tick exitoso vuelve
+  a `En vivo · 1 min`.
+
+Estructura:
+
+```html
+<div class="table-card dash-chart-card" id="signals-chart-card">
+  <div class="dash-table-header">
+    <span>📈 Señales por minuto · últimas 24 h</span>
+    <div class="dash-live-controls">
+      <span class="dash-chart-summary" id="signals-chart-summary">
+        <span class="dash-chart-metric">
+          <span class="dash-chart-metric-label">Total</span>
+          <strong id="signals-chart-total">123</strong>
+        </span>
+        <span class="dash-chart-metric">
+          <span class="dash-chart-metric-label">Pico</span>
+          <strong id="signals-chart-max">12</strong>
+        </span>
+        <span class="dash-chart-metric">
+          <span class="dash-chart-metric-label">Prom</span>
+          <strong id="signals-chart-avg">2,05</strong>
+        </span>
+      </span>
+      <span class="dash-live-status" id="signals-chart-status">
+        <span class="live-dot"></span> En vivo · 1 min
+      </span>
+      <button class="btn-icon-sm" id="signals-chart-refresh" title="Refrescar">
+        <i class="fa-solid fa-arrows-rotate"></i>
+      </button>
+    </div>
+  </div>
+  <div class="dash-chart-body" id="signals-chart-body">
+    <svg class="dash-chart-svg" viewBox="0 0 1200 220" preserveAspectRatio="none">
+      …grid + 60 barras + ticks X…
+    </svg>
+  </div>
+</div>
+```
+
+```css
+.dash-chart-card  { margin-bottom: 20px; }
+.dash-chart-body  { padding: 14px 18px 8px; }
+.dash-chart-svg   { width: 100%; height: 220px; display: block; }
+
+.dash-chart-grid       { stroke: var(--border); stroke-width: 1;
+                         stroke-dasharray: 2 3; opacity: .7; }
+.dash-chart-axis-label { fill: var(--muted); font-size: 10px; }
+
+.dash-chart-bar      { fill: var(--primary); transition: fill .15s ease; }
+.dash-chart-bar-zero { fill: var(--border); opacity: .55; }
+
+.dash-chart-bar-hit  { fill: transparent; }            /* hit-area por slot */
+.dash-chart-bar-g:hover .dash-chart-bar      { fill: var(--primary-h); }
+.dash-chart-bar-g:hover .dash-chart-bar-zero { fill: var(--muted); opacity: .9; }
+```
+
 ### 13.2 Monitor en tiempo real (modal de Señales)
 
 Modal accesible desde el listado `#/signals` mediante el botón **Monitor en
@@ -1278,6 +1428,65 @@ El primer caso vivo es **Parámetros** (tabla `parametros`: `id`, `variable`, `v
 - **Footer del gestor**: un único botón `Cerrar` (ghost) — no hay acción primaria, porque el ABM se ejerce desde la tabla y el botón `+ Nuevo` de la toolbar interna.
 - **Subtítulo en el header** (`.modal-subtitle`) para explicar de qué tabla hablamos en una frase; reemplaza al `module-subtitle` (§23) que aquí no aplica porque no hay header de módulo.
 - **Cuándo NO usar este patrón**: si la tabla necesita filtros (estado, dominio, fechas), si crece a cientos de filas, si interactúa con otras entidades, o si justifica métricas en `stat-card`. Esos casos van como módulo ABM regular en el sidebar.
+
+## 29. Herramientas: consola tipo terminal
+
+Algunas utilidades de **Herramientas** (§27) ejecutan tareas largas que producen progreso (migraciones, importadores, regeneración de caches). En esos casos el tile abre un **modal-consola** con un panel monoespaciado tipo terminal Linux donde se va volcando el log en vivo, una toolbar interna con un único botón primario que dispara la acción, y una línea de estado a la izquierda.
+
+El primer caso vivo es **Migraciones** (`cloud/api/migraciones.php` + ledger `migraciones`). El tile vive en el `tile-grid` de Herramientas; abre el modal-consola; el botón **Ejecutar pendientes** dispara un POST que devuelve **Server-Sent Events** y cada `event: log` se renderiza como una línea coloreada por nivel (info / ok / warn / err / skip).
+
+```html
+<div class="modal-backdrop open">
+  <div class="modal migraciones-modal">
+    <div class="modal-header">
+      <div class="modal-title">
+        <i class="fa-solid fa-terminal"></i> Migraciones
+        <span class="modal-subtitle">Aplica las migraciones pendientes de <code>cloud/sql/migrations/</code>. Operación idempotente.</span>
+      </div>
+      <button class="btn-icon-sm" data-act="close">×</button>
+    </div>
+    <div class="modal-body migraciones-body">
+      <div class="migraciones-toolbar">
+        <div class="migraciones-status">
+          <span class="spin-sm"></span><span>Cargando estado…</span>
+        </div>
+        <div class="migraciones-actions">
+          <button class="btn btn-ghost btn-sm" data-act="clear">
+            <i class="fa-solid fa-eraser"></i> Limpiar
+          </button>
+          <button class="btn btn-primary btn-sm" data-act="run">
+            <i class="fa-solid fa-play"></i> Ejecutar pendientes
+          </button>
+        </div>
+      </div>
+      <div class="migraciones-console">
+        <div class="mig-line mig-info">…</div>
+        <div class="mig-line mig-ok">[OK]  2026-05-16_domains.sql (12 ms)</div>
+        <div class="mig-line mig-skip">[--]  2026-05-17_chips.sql  (aplicada 2026-05-19 18:00, 8 ms)</div>
+        <div class="mig-line mig-err">[ERR] 2026-05-17_perfiles.sql (32 ms): ...</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="migraciones-footer-info">
+        <i class="fa-solid fa-database"></i> Idempotente · Los archivos con éxito previo se saltean
+      </span>
+      <button class="btn btn-ghost" data-act="close">Cerrar</button>
+    </div>
+  </div>
+</div>
+```
+
+**Reglas:**
+- **Modal `.migraciones-modal`** (max-width 900px): la consola necesita ancho para que las líneas de log no se envuelvan.
+- **`.modal-body` sin padding y con fondo `#0a0a0a`**: el contenido es la consola misma; el body actúa de contenedor full-bleed. Toolbar interna y consola viven dentro sin huecos.
+- **Toolbar interna** (`.migraciones-toolbar`): banda gris oscura `#141414` con borde inferior `#1f1f1f`. A la izquierda, `.migraciones-status` con `.spin-sm` + texto monoespaciado describiendo el estado actual. A la derecha, una sola acción primaria (`.btn-primary` con `Play`) más utilidades ghost (`Limpiar`). Es la única acción primaria del modal — el botón **Cerrar** del footer es ghost.
+- **Consola** (`.migraciones-console`): panel `#0a0a0a`, `font-family` monoespaciada, `font-size: .8rem`, `line-height: 1.55`, `height: 60vh`, scroll vertical y horizontal, scrollbar oscuro, `white-space: pre`. Cada línea es un `<div class="mig-line mig-<nivel>">`. Auto-scroll al pie cuando llega contenido nuevo.
+- **Niveles y colores** (no son tokens de `:root` porque viven solo dentro de la consola): info gris `#d4d4d4`, ok verde `#34d399`, warn ámbar `#fbbf24`, err rojo `#f87171`, skip azul `#60a5fa`, muted gris itálico `#6b7280`. Prefijos textuales `[OK]`, `[ERR]`, `[WRN]`, `[--]` para legibilidad en copy/paste.
+- **Streaming server → UI**: el endpoint devuelve `text/event-stream`. El cliente lee la respuesta con `fetch().body.getReader()` y un parser SSE simple (busca `\n\n`, parsea `event:` y `data:` JSON). No usar `EventSource` porque queremos POST + `AbortController` para cancelar al cerrar el modal.
+- **Idempotencia**: la operación se garantiza en el server (ledger `migraciones` con `UNIQUE archivo`). La UI no necesita confirmar antes de ejecutar — re-correr es seguro.
+- **Cierre del modal durante run**: bloqueado. Click en el backdrop o en `Cerrar` durante una corrida muestra un toast y no cierra. Esto evita huérfanos en el ledger por cancelaciones a medio aplicar.
+- **Footer**: ghost `Cerrar` + `.migraciones-footer-info` a la izquierda con icono + leyenda corta sobre la idempotencia. Mismo patrón que `.signals-monitor-footer-info` (§13.2).
+- **Cuándo NO usar este patrón**: si la acción es instantánea (un solo POST sin progreso visible). En ese caso un confirm-backdrop (§15) + toast alcanza. La consola se justifica cuando hay >3 pasos discretos que el usuario quiere ver caer en orden.
 
 ---
 

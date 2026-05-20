@@ -50,7 +50,7 @@ done
 # NO subimos docker-compose.yml: en el servidor vive docker-compose.prod.yml,
 # generado por aprovisionar_server.sh (sin servicio reactor-db).
 # .env.production se sube en cada deploy para mantener prod en sync.
-echo "  Subiendo cloud/, docker/, db/ y .env.production..."
+echo "  Subiendo cloud/, docker/, db/ y .env.production (mirror con --delete)..."
 cd "$BASE_LOCAL"
 
 # db/ se incluye porque CLAUDE.md lo declara como schema de referencia.
@@ -59,6 +59,18 @@ INCLUDE_DB=""
 if [ -d "$BASE_LOCAL/db" ]; then
     INCLUDE_DB="db"
 fi
+
+# Sync con borrado: si un archivo (o carpeta) no esta en local, tampoco
+# debe quedar en el server. `tar -xzf` solo extrae encima (aditivo), por
+# eso el flujo es:
+#   (1) tar local -> stdin del ssh
+#   (2) en remoto: extraer a un staging temporal
+#   (3) en remoto: rsync -a --delete de staging hacia BASE_REMOTE por
+#       carpeta (acota el alcance, evita tocar otras carpetas del server)
+#   (4) en remoto: limpiar staging
+# rsync vive en el server (Amazon Linux lo trae por default); no hace
+# falta tenerlo instalado en local.
+STAGING="/tmp/reactor-deploy-$(date +%s)"
 
 tar \
     --exclude='./cloud/.git' \
@@ -69,8 +81,20 @@ tar \
     --exclude='*.key' \
     -czf - cloud docker $INCLUDE_DB .env.production | \
 ssh -i "$KEY" -o StrictHostKeyChecking=no \
-    "$USER@$HOST" \
-    "tar -xzf - -C '$BASE_REMOTE/'"
+    "$USER@$HOST" "
+        set -e
+        mkdir -p '$STAGING'
+        tar -xzf - -C '$STAGING/'
+        for dir in cloud docker $INCLUDE_DB; do
+            if [ -d \"$STAGING/\$dir\" ]; then
+                rsync -a --delete \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\"
+            fi
+        done
+        if [ -f '$STAGING/.env.production' ]; then
+            cp -f '$STAGING/.env.production' '$BASE_REMOTE/.env.production'
+        fi
+        rm -rf '$STAGING'
+    "
 echo "  OK"
 echo ""
 

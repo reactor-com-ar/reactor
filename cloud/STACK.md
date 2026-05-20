@@ -90,18 +90,17 @@ dentro de `app.js`.
 
 ## 5. Autenticación
 
-- JWT firmado en `lib/jwt.php`.
-- Token persistido en la cookie `reactor_token` (path `/`, HttpOnly en prod).
-- Cada endpoint protegido empieza con:
-  ```php
-  require_once __DIR__ . '/../lib/auth_check.php';
-  requireAuth();
-  ```
-- `requireAuth()` devuelve **401 JSON** si la petición pide JSON;
-  redirige a `login.php` si pide HTML.
-- `authUser()` devuelve el payload del token o `null`.
-- `setup.php` crea el primer usuario admin y **debe borrarse después
-  de usarlo** (verifica que la tabla `usuarios` esté vacía).
+- **Sesiones PHP nativas** (cookie `REACTOR_CLOUD_SID`, HttpOnly, SameSite=Lax, `Secure` cuando hay HTTPS). No usamos JWT: no hay Composer ni `lib/jwt.php`, y la sesión nativa cumple sin agregar dependencias.
+- Los helpers viven en `api/auth.php`:
+  - `reactor_session_start()` arranca la sesión con los cookie params correctos. Es idempotente.
+  - `reactor_current_user(): ?array` devuelve el payload del usuario (`id`, `usuario`, `nombre`, `correo`) o `null`.
+  - `reactor_login_user($row)` abre sesión y **regenera el ID** para evitar fixation.
+  - `reactor_logout_user()` borra `$_SESSION`, expira la cookie y llama a `session_destroy()`.
+  - `reactor_require_auth_json()` corta el request con **401 JSON** si no hay sesión activa.
+- **Gating automático**: `api/bootstrap.php` llama a `reactor_require_auth_json()` por defecto. Los endpoints públicos optan fuera con `define('CLOUD_API_PUBLIC', true);` **antes** del require — hoy solo `api/login.php` y `api/logout.php`.
+- **Gating de la SPA**: `index.php` incluye `api/auth.php`, valida sesión y redirige a `login.php` si no hay usuario. `login.php` es la única vista fuera de la SPA (HTML estándar, sin chrome) y hace `POST api/login.php` con `{ usuario, contrasena }`.
+- **Cifrado de contraseña**: la tabla `usuarios` guarda `contrasena` con el **cifrado histórico** de Reactor (XOR sumativa contra una clave rotada en 1 char + base64, clave por defecto `'0123456789'`). La réplica PHP exacta vive en `api/legacy_crypto.php` (`reactor_legacy_encriptar` / `reactor_legacy_desencriptar`) y **no se cambia** sin migrar todos los registros existentes.
+- **Permisos / autorización**: aún no aplicados. Por ahora el login solo bloquea el acceso; cuando se sumen permisos, se leerán de los campos `roles` / `perfil` / `dominio` de la tabla `usuarios` (ver `db/schema.sql`).
 
 ## 6. Variables de entorno
 

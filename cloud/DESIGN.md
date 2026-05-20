@@ -981,6 +981,96 @@ Va siempre dentro de un `.modal.modal-wide` (ver §14) para que el JSON respire 
 - No usar resaltado de sintaxis ni librerías tipo Monaco/CodeMirror: contradice §1 del STACK (sin build step, sin librerías UI pesadas).
 - El editor JSON puede convivir con `.form-group` de campos normales dentro del mismo `.modal-wide` (ej.: "Editar dispositivo" combina dominio / estado / UID / tipo / nombre / ubicación + `Configuración` JSON). En ese caso el JSON va como **último `.form-group`** del cuerpo, después del resto de los inputs, y el botón **Formatear** sigue alineado a la izquierda del footer con `margin-right:auto`.
 
+## 27-bis. Pantalla de login
+
+`login.php` es la **única vista de cloud que vive fuera de la SPA** y no tiene chrome (no hay sidebar ni topbar). El usuario aterriza acá cuando no hay sesión, ingresa credenciales y, si el login es correcto, el backend abre la sesión y el navegador es redirigido a `index.php`.
+
+Esta pantalla es la **única excepción** a la regla "el rojo solo aparece como acento" (§1). El card del login va **pintado completo en `var(--primary)`** — mismo rojo institucional que sidebar y topbar — porque la pantalla *es* la marca: lo primero que ve el usuario antes de entrar a la app. La regla del rojo como acento aplica solo cuando hay zona gris alrededor (cards / modales sobre `--bg`). Acá no hay zona gris dentro del card, así que el card sigue las reglas de §4-§5 (chrome rojo) en lugar de las de §14 (modales).
+
+Reglas visuales:
+
+- **Card pintada en rojo institucional**: `background: var(--primary)`, `border: 1px solid rgba(0,0,0,.25)`, `border-radius: 14px` (mismo radio que `.modal` §14), `box-shadow: var(--shadow-lg)`. Ancho `max-width: 360px`.
+- **Fondo de la pantalla** sobre `var(--bg)` (gris). El rojo se concentra en la card; el fondo permanece neutro para que el card "flote" sin sangrar contra el viewport.
+- **Tipografía**: dentro del card se usan `#fff` y opacidades de blanco (`.78-.88`) — **no** `--text` / `--muted` / `--border` (esos tokens son para zona gris). El logo va centrado arriba sin banner interno (la card entera ya es roja).
+- **Inputs sobre rojo**: fondo `rgba(0,0,0,.22)`, borde `rgba(0,0,0,.35)`, texto `#fff`, placeholder `rgba(255,255,255,.55)`. `focus` ring en blanco (`border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.22)`) en lugar del rojo habitual (que sería invisible sobre rojo).
+- **Botón primario invertido**: dentro de `.login-page` el `.btn-primary` se invierte a `background: #fff; color: var(--primary)`. Sobre fondo rojo, un botón rojo desaparecería; el blanco con texto rojo es el patrón de máximo contraste y queda visualmente como el CTA esperado.
+- **Error de credenciales**: banda blanca sobre fondo negro translúcido (`rgba(0,0,0,.28)` con borde `rgba(0,0,0,.35)`), no `.field-error` por defecto (que es rojo `--danger` y se pierde sobre el rojo de fondo).
+- **Sin footer**: la pantalla de login no muestra versión ni leyendas — el card queda minimal (logo + título + subtítulo + form). La versión solo se muestra en la SPA (sidebar-footer §4).
+
+```html
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card">
+      <div class="login-brand">
+        <img src="assets/img/reactor_white.png" alt="Reactor" class="login-logo">
+      </div>
+      <h1 class="login-title">Reactor Cloud</h1>
+      <p class="login-subtitle">Ingresá con tu usuario para continuar.</p>
+      <form class="login-form" id="login-form">
+        <div class="form-group">
+          <label for="login-usuario">Usuario</label>
+          <input type="text" id="login-usuario" name="usuario" autocomplete="username" autofocus required>
+        </div>
+        <div class="form-group">
+          <label for="login-contrasena">Contraseña</label>
+          <input type="password" id="login-contrasena" name="contrasena" autocomplete="current-password" required>
+        </div>
+        <div class="field-error login-error" id="login-error" hidden></div>
+        <button type="submit" class="btn btn-primary login-submit">
+          <i class="fa-solid fa-right-to-bracket"></i> <span>Ingresar</span>
+        </button>
+      </form>
+    </section>
+  </main>
+</body>
+```
+
+```css
+body.login-page { background: var(--bg); }
+
+.login-shell    { min-height: 100vh; display: flex;
+                  align-items: center; justify-content: center; padding: 24px; }
+.login-card     { width: 100%; max-width: 360px;
+                  background: var(--primary); border: 1px solid rgba(0,0,0,.25);
+                  border-radius: 14px; box-shadow: var(--shadow-lg);
+                  padding: 28px 28px 24px;
+                  display: flex; flex-direction: column; gap: 16px;
+                  color: #fff; }
+.login-brand    { display: flex; align-items: center; justify-content: center; padding: 4px 0 0; }
+.login-logo     { display: block; height: 44px; max-width: 80%; object-fit: contain; }
+.login-title    { font-size: 1.2rem; font-weight: 700; text-align: center; color: #fff; }
+.login-subtitle { font-size: .85rem; color: rgba(255,255,255,.78); text-align: center; margin-top: -8px; }
+
+.login-form .form-group label { color: rgba(255,255,255,.88); }
+.login-form input[type=text],
+.login-form input[type=password] {
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(0,0,0,.35);
+    color: #fff;
+}
+.login-form input::placeholder { color: rgba(255,255,255,.55); }
+.login-form input:focus {
+    border-color: #fff;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.22);
+}
+
+.login-error {
+    color: #fff;
+    background: rgba(0,0,0,.28);
+    border: 1px solid rgba(0,0,0,.35);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: .82rem;
+}
+
+.login-page .btn-primary       { background: #fff; color: var(--primary); }
+.login-page .btn-primary:hover { background: rgba(255,255,255,.9); color: var(--primary-h); }
+
+.login-submit { justify-content: center; padding: 10px 16px; margin-top: 4px; }
+```
+
+**Cuándo NO usar este patrón**: cualquier flujo que requiera más de un par de campos (registro, recuperación de contraseña, MFA) deja de ser un card chico — pasa a ser un modal con su propio header (§14) o un módulo con `module-header` (§23). En esos casos vale la regla habitual (card gris sobre `--bg`, rojo solo como acento), no esta excepción.
+
 ## 27. Tile grid (menú de navegación / lanzadores)
 
 Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterrizaje (por ejemplo Herramientas, donde cada tile lanza una utilidad de testing o navega a una sub-pantalla). No es para datos numéricos: para eso está `.stat-card` (§12).

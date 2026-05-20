@@ -1,9 +1,20 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/api/auth.php';
+reactor_session_start();
+
+$currentUser = reactor_current_user();
+if ($currentUser === null) {
+    header('Location: login.php');
+    exit;
+}
+
 $appName = 'Reactor Cloud';
 $versionFile = __DIR__ . '/version.txt';
 $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFile)) : (string) time();
+
+$userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $currentUser['usuario'];
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -162,7 +173,7 @@ $cacheBust = is_file($versionFile) ? trim((string) file_get_contents($versionFil
                 <div class="topbar-user-wrap">
                     <button class="topbar-username" id="btn-user">
                         <i class="fa-solid fa-circle-user"></i>
-                        <span>admin</span>
+                        <span><?= htmlspecialchars($userDisplay) ?></span>
                         <i class="fa-solid fa-caret-down" style="font-size:.7rem"></i>
                     </button>
                     <div class="user-dropdown" id="user-dropdown">

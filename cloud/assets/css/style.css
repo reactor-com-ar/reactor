@@ -772,3 +772,96 @@ th.action-col, td.action-col {
 .tile-icon  { font-size: 1.6rem; line-height: 1; margin-bottom: 4px; }
 .tile-title { font-weight: 600; font-size: .95rem; color: var(--text); }
 .tile-desc  { font-size: .8rem; color: var(--muted); }
+
+/* ---------- 28. Pantalla de login ----------
+ * login.php es la unica vista que vive fuera de la SPA y no tiene chrome.
+ * Excepcion al patron "rojo solo como acento": el card del login va
+ * PINTADO de rojo institucional (#C11313, var(--primary)) — mismo color
+ * que el banner del logo de marca, asi la pantalla "es" la marca.
+ * Por eso los hijos del card siguen las reglas del chrome rojo (§4-§5):
+ *   - tipografia en #fff / opacidades de blanco.
+ *   - bordes y rellenos internos en negros translucidos.
+ *   - el boton primario invierte la paleta (fondo blanco, texto rojo)
+ *     para destacar sobre el fondo rojo sin perder contraste.
+ *   - los tokens --text / --muted / --border NO se usan dentro del card.
+ */
+body.login-page { background: var(--bg); }
+
+.login-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.login-card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--primary);
+    border: 1px solid rgba(0,0,0,.25);
+    border-radius: 14px;
+    box-shadow: var(--shadow-lg);
+    padding: 28px 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    color: #fff;
+}
+.login-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 0 0;
+}
+.login-logo     { display: block; height: 44px; width: auto; max-width: 80%; object-fit: contain; }
+.login-title    { font-size: 1.2rem; font-weight: 700; text-align: center; color: #fff; margin: 4px 0 0; }
+.login-subtitle { font-size: .85rem; color: rgba(255,255,255,.78); text-align: center; margin: -8px 0 0; }
+
+.login-form     { display: flex; flex-direction: column; gap: 14px; }
+.login-form .form-group label {
+    color: rgba(255,255,255,.88);
+}
+.login-form input[type=text],
+.login-form input[type=password] {
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(0,0,0,.35);
+    color: #fff;
+}
+.login-form input::placeholder { color: rgba(255,255,255,.55); }
+.login-form input:focus {
+    border-color: #fff;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.22);
+}
+.login-form input.input-invalid {
+    border-color: #fff !important;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.3);
+}
+
+/* Mensaje de error: blanco sobre banda negra translucida (visible sobre rojo) */
+.login-error {
+    display: block;
+    color: #fff;
+    background: rgba(0,0,0,.28);
+    border: 1px solid rgba(0,0,0,.35);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: .82rem;
+    font-weight: 500;
+}
+.login-error[hidden] { display: none; }
+
+/* Boton primario invertido: blanco con texto rojo para contraste sobre rojo */
+.login-page .btn-primary {
+    background: #fff;
+    color: var(--primary);
+}
+.login-page .btn-primary:hover {
+    background: rgba(255,255,255,.9);
+    color: var(--primary-h);
+}
+.login-page .btn-primary:disabled {
+    background: rgba(255,255,255,.6);
+    color: var(--primary);
+    cursor: not-allowed;
+}
+.login-submit   { justify-content: center; padding: 10px 16px; margin-top: 4px; }

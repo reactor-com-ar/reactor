@@ -4,8 +4,18 @@ declare(strict_types=1);
 
 date_default_timezone_set('America/Argentina/Buenos_Aires');
 
+require_once __DIR__ . '/auth.php';
+reactor_session_start();
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+
+// Por defecto todo endpoint que incluya bootstrap.php exige sesion.
+// Los endpoints publicos (login, logout) definen CLOUD_API_PUBLIC antes
+// del require para optar fuera.
+if (!defined('CLOUD_API_PUBLIC')) {
+    reactor_require_auth_json();
+}
 
 function env(string $key, ?string $default = null): string
 {

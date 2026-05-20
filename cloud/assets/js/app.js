@@ -9,6 +9,7 @@
     const btnRefresh       = document.getElementById('btn-refresh');
     const btnUser          = document.getElementById('btn-user');
     const userDropdown     = document.getElementById('user-dropdown');
+    const btnLogout        = document.getElementById('btn-logout');
     const hamburger        = document.getElementById('hamburger');
     const sidebar          = document.getElementById('sidebar');
     const sidebarOverlay   = document.getElementById('sidebar-overlay');
@@ -93,6 +94,20 @@
         }
     });
 
+    if (btnLogout) {
+        btnLogout.addEventListener('click', async (e) => {
+            e.preventDefault();
+            try {
+                await fetch('api/logout.php', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                });
+            } catch (_) { /* aun si falla la llamada, vamos al login */ }
+            window.location.href = 'login.php';
+        });
+    }
+
     /* ---------- Sidebar (mobile) ---------- */
     hamburger.addEventListener('click', () => {
         sidebar.classList.add('open');
@@ -113,7 +128,15 @@
             },
             method: opts.method || 'GET',
             body: opts.body ? JSON.stringify(opts.body) : undefined,
+            credentials: 'same-origin',
         });
+
+        // Sesion expirada o no autenticada → al login.
+        if (res.status === 401) {
+            window.location.href = 'login.php';
+            throw new Error('No autenticado');
+        }
+
         let body;
         try { body = await res.json(); } catch (_) { body = null; }
 

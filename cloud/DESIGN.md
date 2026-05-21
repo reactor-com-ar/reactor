@@ -108,7 +108,7 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
 .sidebar-logo  { height: 60px;                /* coincide con la altura de .topbar */
                  padding: 0 20px; border-bottom: 1px solid rgba(0,0,0,.2);
                  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.sidebar-logo-mark  { display: block; width: auto; height: 32px;
+.sidebar-logo-mark  { display: block; width: auto; height: 24px;
                       max-width: 100%; object-fit: contain; }   /* <img src="assets/img/reactor_white.png"> */
 
 .sidebar-nav   { padding: 8px 0 12px; flex: 1; }

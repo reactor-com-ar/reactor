@@ -83,7 +83,6 @@ ingles por convencion).
 
 ## Proximos pasos sugeridos
 
-- Autenticacion con JWT contra la tabla `usuarios`.
 - CRUD de dispositivos (POST/PUT/DELETE).
 - Ingesta de telemetria y graficos en el dashboard.
 - Modulo de alertas y notificaciones.

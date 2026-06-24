@@ -54,7 +54,14 @@ try {
         json_error('Usuario o contrasena incorrectos', 401);
     }
 
-    reactor_login_user($row);
+    $usuarioPayload = [
+        'id'      => (int) $row['id'],
+        'usuario' => (string) $row['usuario'],
+        'nombre'  => (string) $row['nombre'],
+        'correo'  => (string) ($row['correo'] ?? ''),
+    ];
+
+    jwt_cookie_set(jwt_sign($usuarioPayload, JWT_TTL));
 
     // Persistir el ultimo ingreso. Falla silenciosamente si la columna
     // estuviera ausente en alguna BD vieja: no bloquea el login.
@@ -63,14 +70,7 @@ try {
         $upd->execute([':id' => (int) $row['id']]);
     } catch (Throwable $_) { /* noop */ }
 
-    json_ok([
-        'usuario' => [
-            'id'      => (int) $row['id'],
-            'usuario' => (string) $row['usuario'],
-            'nombre'  => (string) $row['nombre'],
-            'correo'  => (string) ($row['correo'] ?? ''),
-        ],
-    ]);
+    json_ok(['usuario' => $usuarioPayload]);
 } catch (Throwable $e) {
     json_error('Error al procesar el login: ' . $e->getMessage(), 500);
 }

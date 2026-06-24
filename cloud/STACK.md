@@ -90,31 +90,39 @@ dentro de `app.js`.
 
 ## 5. Autenticación
 
-- **Sesiones PHP nativas** (cookie `REACTOR_CLOUD_SID`, HttpOnly, SameSite=Lax, `Secure` cuando hay HTTPS). No usamos JWT: no hay Composer ni `lib/jwt.php`, y la sesión nativa cumple sin agregar dependencias.
-- Los helpers viven en `api/auth.php`:
-  - `reactor_session_start()` arranca la sesión con los cookie params correctos. Es idempotente.
-  - `reactor_current_user(): ?array` devuelve el payload del usuario (`id`, `usuario`, `nombre`, `correo`) o `null`.
-  - `reactor_login_user($row)` abre sesión y **regenera el ID** para evitar fixation.
-  - `reactor_logout_user()` borra `$_SESSION`, expira la cookie y llama a `session_destroy()`.
-  - `reactor_require_auth_json()` corta el request con **401 JSON** si no hay sesión activa.
-- **Gating automático**: `api/bootstrap.php` llama a `reactor_require_auth_json()` por defecto. Los endpoints públicos optan fuera con `define('CLOUD_API_PUBLIC', true);` **antes** del require — hoy solo `api/login.php` y `api/logout.php`.
-- **Gating de la SPA**: `index.php` incluye `api/auth.php`, valida sesión y redirige a `login.php` si no hay usuario. `login.php` es la única vista fuera de la SPA (HTML estándar, sin chrome) y hace `POST api/login.php` con `{ usuario, contrasena }`.
-- **Cifrado de contraseña**: la tabla `usuarios` guarda `contrasena` con el **cifrado histórico** de Reactor (XOR sumativa contra una clave rotada en 1 char + base64, clave por defecto `'0123456789'`). La réplica PHP exacta vive en `api/legacy_crypto.php` (`reactor_legacy_encriptar` / `reactor_legacy_desencriptar`) y **no se cambia** sin migrar todos los registros existentes.
+- **JWT HS256 stateless** (cookie `reactor_cloud_token`, HttpOnly siempre, SameSite=Lax, `Secure` en producción). Sin Composer: la implementación HS256 vive en `lib/jwt.php` (~70 líneas). Stateless = escalado horizontal trivial sin sticky sessions ni storage compartido.
+- Firmado con `APP_KEY_CLOUD` (constante publicada por `env.php` desde `.env.development` / `.env.production`). Cada app del repo tiene su propia `APP_KEY_<NOMBRE>` para **aislar sesiones**: un leak en panel/api/app/www no compromete los JWT de cloud.
+- TTL del token: 12 h (`JWT_TTL` en `lib/auth_check.php`). Renovación: re-loguear.
+- Los helpers viven en `lib/auth_check.php`:
+  - `authUser(): ?array` devuelve el payload del usuario (`id`, `usuario`, `nombre`, `correo`) o `null`. Cacheado por request.
+  - `requireAuth(): array` corta el request con **401 JSON** si el endpoint es API (Accept JSON, header `X-Requested-With: XMLHttpRequest`, o path bajo `/api/`); en páginas HTML redirige a `/login.php`.
+  - `jwt_cookie_set($token)` / `jwt_cookie_clear()` emiten o limpian la cookie con los flags correctos.
+- **Gating automático**: `api/bootstrap.php` llama a `requireAuth()` por defecto. Los endpoints públicos optan fuera con `define('CLOUD_API_PUBLIC', true);` **antes** del require — hoy solo `api/login.php` y `api/logout.php`.
+- **Gating de la SPA**: `index.php` incluye `lib/auth_check.php`, llama a `authUser()` y redirige a `login.php` si no hay usuario. `login.php` es la única vista fuera de la SPA (HTML estándar, sin chrome) y hace `POST api/login.php` con `{ usuario, contrasena }`.
+- **Cifrado de contraseña**: la tabla `usuarios` guarda `contrasena` con el **cifrado histórico** de Reactor (XOR sumativa contra una clave rotada en 1 char + base64, clave por defecto `'0123456789'`). La réplica PHP exacta vive en `api/legacy_crypto.php` (`reactor_legacy_encriptar` / `reactor_legacy_desencriptar`) y **no se cambia** sin migrar todos los registros existentes. El verify pasa por `hash_equals` para evitar timing side-channels.
+- **Rotar `APP_KEY_CLOUD`** invalida todos los tokens vivos (lo cual también es la única forma de "revocar" antes del `exp`, ya que el modelo es stateless y no hay blacklist).
 - **Permisos / autorización**: aún no aplicados. Por ahora el login solo bloquea el acceso; cuando se sumen permisos, se leerán de los campos `roles` / `perfil` / `dominio` de la tabla `usuarios` (ver `db/schema.sql`).
 
 ## 6. Variables de entorno
 
 Cloud **no** lee variables de entorno por su cuenta. Las consume a
-través de `api/config/secrets.php` (en la raíz del repositorio padre),
-que carga `.env.development` o `.env.production` según `APP_ENV`.
+través de `env.php` (en la raíz del repo), que **auto-detecta** el
+entorno mirando qué `.env.*` existe:
 
-`APP_ENV` lo setea el contenedor Docker:
-- En desarrollo: `APP_ENV=development` → lee `.env.development` (MySQL local en Docker, base `reactor_dev`).
-- En producción: `APP_ENV=production` → lee `.env.production` (RDS, base `reactor`).
+- Si existe `.env.production` y NO existe `.env.development` → `APP_ENV=production`.
+- En cualquier otro caso → `APP_ENV=development`.
 
-Constantes que cloud usa habitualmente (definidas por `secrets.php`):
-`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`, `DB_CHARSET`,
-`MEDIA_BASE_URL`, `S3_BUCKET`.
+Todas las variables del `.env.*` quedan disponibles como **constantes
+globales** (`DB_HOST`, `DB_USER`, `APP_KEY_CLOUD`, etc.), además de
+`getenv()`, `$_ENV` y `$_SERVER`. Precedencia: si docker-compose ya
+inyectó la var en el entorno del proceso, gana sobre el archivo.
+
+**Sin defaults**: lo que no esté en el `.env.*` no se define. El primer
+uso fallará con "undefined constant", indicando qué hay que agregar.
+
+Constantes que cloud usa habitualmente:
+`APP_ENV`, `APP_KEY_CLOUD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
+`DB_PASS`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASS`.
 
 **Reglas:**
 - Los `.env.*` están en `.gitignore` y nunca se commitean.

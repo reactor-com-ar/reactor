@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/api/auth.php';
-reactor_session_start();
+require_once dirname(__DIR__) . '/env.php';
+require_once __DIR__ . '/lib/auth_check.php';
 
-$currentUser = reactor_current_user();
+$currentUser = authUser();
 if ($currentUser === null) {
     header('Location: login.php');
     exit;

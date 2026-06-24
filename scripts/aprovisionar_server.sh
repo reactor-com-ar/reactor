@@ -18,8 +18,10 @@
 set -eo pipefail
 
 APP_DIR="/opt/app/reactor"
-APP_PORT_HOST=8086
+APP_PORT_HOST=8086        # cloud
+ROBOT_PORT_HOST=8087      # robot
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
+ROBOT_DOMAIN="${ROBOT_DOMAIN:-robot.reactor.com.ar}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-javieralvarez@databox.net.ar}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
@@ -64,7 +66,7 @@ echo "        OK -- Compose $(sudo docker compose version --short) / buildx $(su
 
 # ---- 4. Verificar artefactos transferidos ----
 echo "[ 4/9 ] Verificando archivos del proyecto..."
-for f in cloud docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh .env.production; do
+for f in cloud robot motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
     if [ ! -e "$APP_DIR/$f" ]; then
         echo "        ERROR: falta $APP_DIR/$f"
         echo "        Re-correr scripts/aprovisionar.sh desde la maquina local."
@@ -78,8 +80,13 @@ echo "        OK"
 # ---- 5. Generar docker-compose.prod.yml ----
 # Difiere del docker-compose.yml del repo:
 #   - No incluye el servicio reactor-db (en prod la BD es AWS RDS).
-#   - Bind solo a 127.0.0.1 (Nginx hace el frente publico).
-#   - EMQX expone 16273:1883 en publico (security group filtra) y 18083 dashboard.
+#   - Apache bindea solo a 127.0.0.1:8086 (Nginx hace el frente publico).
+# Puertos en prod (interno = externo, mismos que dev cuando aplica):
+#   - Apache  8086:8086  (igual a dev)
+#   - EMQX MQTT 16273:16273 (dev usa 1884 por choque con vigicom-emqx)
+#   - EMQX Dashboard 18083:18083 (dev usa 18084 por choque con vigicom-emqx)
+# Tambien hay que bindear env.php y los .env.* al container para que las
+# constantes (APP_KEY_*, DB_*) queden disponibles via env.php.
 echo "[ 5/9 ] Generando $COMPOSE_FILE..."
 cat > "$APP_DIR/$COMPOSE_FILE" << EOF
 # Generado por scripts/aprovisionar_server.sh - no editar a mano.
@@ -91,9 +98,13 @@ services:
       context: ./docker
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:${APP_PORT_HOST}:80"
+      - "127.0.0.1:${APP_PORT_HOST}:${APP_PORT_HOST}"      # cloud
+      - "127.0.0.1:${ROBOT_PORT_HOST}:${ROBOT_PORT_HOST}"  # robot
     volumes:
       - ./cloud:/var/www/html
+      - ./robot:/var/www/robot
+      - ./env.php:/var/www/env.php:ro
+      - ./.env.production:/var/www/.env.production:ro
     env_file:
       - .env.production
     restart: unless-stopped
@@ -102,7 +113,7 @@ services:
     container_name: reactor-emqx
     image: emqx/emqx:5.8
     ports:
-      - "16273:1883"     # MQTT publico (abierto en security group)
+      - "16273:16273"    # MQTT publico (interno = externo, abierto en security group)
       - "18083:18083"    # dashboard (filtrado por IP en security group)
     env_file:
       - .env.production
@@ -111,11 +122,27 @@ services:
       EMQX_AUTHENTICATION__1__MECHANISM: password_based
       EMQX_AUTHENTICATION__1__BACKEND: built_in_database
       EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
+      EMQX_LISTENERS__TCP__DEFAULT__BIND: "0.0.0.0:16273"
+      EMQX_DASHBOARD__LISTENERS__HTTP__BIND: "0.0.0.0:18083"
     volumes:
       - reactor-emqx-data:/opt/emqx/data
       - ./docker/emqx/init.sh:/init.sh:ro
     entrypoint: ["/init.sh"]
     command: ["/opt/emqx/bin/emqx", "foreground"]
+    restart: unless-stopped
+
+  reactor-motor:
+    container_name: reactor-motor
+    build:
+      context: ./motor
+      dockerfile: Dockerfile
+    volumes:
+      - ./motor:/app
+    env_file:
+      - .env.production
+    depends_on:
+      reactor-emqx:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
@@ -127,11 +154,28 @@ echo "        OK"
 echo "[ 6/9 ] Configurando Nginx como reverse proxy..."
 sudo tee /etc/nginx/conf.d/reactor.conf > /dev/null << NGX
 # Reverse proxy reactor -- generado por aprovisionar_server.sh
+
+# cloud.reactor.com.ar -> Apache 8086
 server {
     listen 80;
     server_name ${DOMAIN};
     location / {
         proxy_pass         http://127.0.0.1:${APP_PORT_HOST};
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        client_max_body_size 50M;
+        proxy_read_timeout 120s;
+    }
+}
+
+# robot.reactor.com.ar -> Apache 8087
+server {
+    listen 80;
+    server_name ${ROBOT_DOMAIN};
+    location / {
+        proxy_pass         http://127.0.0.1:${ROBOT_PORT_HOST};
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -180,14 +224,27 @@ if [ -z "$PUBLIC_IP" ]; then
 else
     echo "        IP publica del servidor: $PUBLIC_IP"
 
-    RESOLVED=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
-    if [ "$RESOLVED" != "$PUBLIC_IP" ]; then
-        echo "        DNS aun no apunta al servidor:"
-        echo "          $DOMAIN -> ${RESOLVED:-(no resuelve)} (esperado $PUBLIC_IP)"
-        echo ""
-        echo "        Configurar DNS y volver a correr este script para SSL."
+    RESOLVED_CLOUD=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
+    RESOLVED_ROBOT=$(dig +short A "$ROBOT_DOMAIN" @8.8.8.8 | tail -n1)
+
+    # Armar lista de dominios cuyo DNS YA apunta al server (-d por cada uno).
+    CERT_DOMAINS=()
+    if [ "$RESOLVED_CLOUD" = "$PUBLIC_IP" ]; then
+        CERT_DOMAINS+=("-d" "$DOMAIN")
     else
-        echo "        DNS OK. Verificando certbot..."
+        echo "        DNS de $DOMAIN -> ${RESOLVED_CLOUD:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+    fi
+    if [ "$RESOLVED_ROBOT" = "$PUBLIC_IP" ]; then
+        CERT_DOMAINS+=("-d" "$ROBOT_DOMAIN")
+    else
+        echo "        DNS de $ROBOT_DOMAIN -> ${RESOLVED_ROBOT:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+    fi
+
+    if [ ${#CERT_DOMAINS[@]} -eq 0 ]; then
+        echo "        Ningun dominio resolvio al servidor -- configurar DNS y volver a correr para SSL."
+    else
+        echo "        DNS OK para: ${CERT_DOMAINS[*]}"
+        echo "        Verificando certbot..."
 
         if [ ! -x /opt/certbot/bin/certbot ]; then
             echo "        Instalando certbot en /opt/certbot..."
@@ -198,14 +255,14 @@ else
         fi
         echo "        certbot $(/usr/bin/certbot --version 2>&1 | awk '{print $2}')"
 
-        echo "        Emitiendo/verificando certificado para $DOMAIN..."
+        echo "        Emitiendo/verificando certificado..."
         if sudo certbot --nginx \
                 --non-interactive \
                 --agree-tos \
                 --email "$CERTBOT_EMAIL" \
                 --redirect \
                 --keep-until-expiring \
-                -d "$DOMAIN"; then
+                "${CERT_DOMAINS[@]}"; then
             echo "        OK -- SSL configurado."
         else
             echo "        AVISO: certbot fallo. Revisar /var/log/letsencrypt/letsencrypt.log"
@@ -223,7 +280,8 @@ echo ""
 echo "============================================================"
 echo "  Setup remoto completo."
 echo ""
-echo "  App:        https://${DOMAIN}/   (proxy a 127.0.0.1:${APP_PORT_HOST})"
+echo "  Cloud:      https://${DOMAIN}/         (proxy a 127.0.0.1:${APP_PORT_HOST})"
+echo "  Robot:      https://${ROBOT_DOMAIN}/   (proxy a 127.0.0.1:${ROBOT_PORT_HOST})"
 echo "  Repo:       $APP_DIR"
 echo "  Compose:    docker compose -f $APP_DIR/$COMPOSE_FILE <cmd>"
 echo "  Logs:       sudo docker logs -f reactor-apache"

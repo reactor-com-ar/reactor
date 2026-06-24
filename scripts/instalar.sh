@@ -67,30 +67,23 @@ find_free_port() {
     return 1
 }
 
-# --- Elegir puertos ---------------------------------------------------------
-# Cloud preferido en 8086 (convencion del proyecto). Si esta ocupado, busca
-# el siguiente libre hacia arriba. Para MQTT/dashboard usa los defaults
-# estandar de EMQX y si chocan (ej. otro broker corriendo) salta al siguiente.
-APP_PORT=$(find_free_port 8086)
-DB_PORT=$(find_free_port 3307 "$APP_PORT")
-MQTT_PORT=$(find_free_port 1883 "$APP_PORT $DB_PORT")
-EMQX_DASHBOARD_PORT=$(find_free_port 18083 "$APP_PORT $DB_PORT $MQTT_PORT")
+# --- Puertos (todos hardcodeados en docker-compose.yml) ---------------------
+# Dev:  app=8086, mysql=3308, mqtt=1884, dashboard=18084.
+# Prod: app=8086, mysql=RDS:3306, mqtt=16273, dashboard=18083.
+# Apache (8086) y MySQL (3308) son iguales en dev y prod. EMQX usa puertos
+# distintos en dev (libres, no chocan con vigicom-emqx) y prod (16273 publico).
+# Si alguno esta ocupado, el up falla -- liberar el otro proceso, NO remapear.
+APP_PORT=8086
+DB_PORT=3308
+MQTT_PORT=1884
+EMQX_DASHBOARD_PORT=18084
 
-echo -e "${RED}==> Puertos elegidos:${NC}"
+echo -e "${RED}==> Puertos fijos:${NC}"
 echo "    app       -> $APP_PORT"
 echo "    mysql     -> $DB_PORT"
 echo "    mqtt      -> $MQTT_PORT"
 echo "    dashboard -> $EMQX_DASHBOARD_PORT"
 echo ""
-
-# --- Escribir .env ----------------------------------------------------------
-cat > .env << EOF
-# Generado por scripts/instalar.sh - no editar a mano
-REACTOR_APP_PORT=$APP_PORT
-REACTOR_DB_PORT=$DB_PORT
-REACTOR_MQTT_PORT=$MQTT_PORT
-REACTOR_EMQX_DASHBOARD_PORT=$EMQX_DASHBOARD_PORT
-EOF
 
 # --- Limpiar contenedores previos -------------------------------------------
 # El orden importa:

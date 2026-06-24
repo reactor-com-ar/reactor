@@ -1,11 +1,11 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/api/auth.php';
-reactor_session_start();
+require_once dirname(__DIR__) . '/env.php';
+require_once __DIR__ . '/lib/auth_check.php';
 
 // Si ya esta logueado, ir directo a la SPA.
-if (reactor_current_user() !== null) {
+if (authUser() !== null) {
     header('Location: index.php');
     exit;
 }

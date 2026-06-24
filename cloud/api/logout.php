@@ -11,5 +11,5 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     json_error('Metodo no permitido', 405);
 }
 
-reactor_logout_user();
+jwt_cookie_clear();
 json_ok(['logout' => true]);

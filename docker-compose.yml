@@ -1,6 +1,6 @@
 services:
   reactor:
-    container_name: reactor
+    container_name: reactor-apache
     build:
       context: ./docker
       dockerfile: Dockerfile
@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
 
   reactor-db:
-    container_name: reactor-db
+    container_name: reactor-mysql
     image: mysql:8.0
     ports:
       - "${REACTOR_DB_PORT:-3307}:3306"
@@ -37,5 +37,26 @@ services:
       retries: 30
     restart: unless-stopped
 
+  reactor-emqx:
+    container_name: reactor-emqx
+    image: emqx/emqx:5.8
+    ports:
+      - "${REACTOR_MQTT_PORT:-1883}:1883"            # MQTT dev (en prod el compose generado mapea 16273:1883)
+      - "${REACTOR_EMQX_DASHBOARD_PORT:-18083}:18083" # dashboard (filtrado por IP en el security group)
+    env_file:
+      - ${ENV_FILE:-.env.development}
+    environment:
+      EMQX_ALLOW_ANONYMOUS: "false"
+      EMQX_AUTHENTICATION__1__MECHANISM: password_based
+      EMQX_AUTHENTICATION__1__BACKEND: built_in_database
+      EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
+    volumes:
+      - reactor-emqx-data:/opt/emqx/data
+      - ./docker/emqx/init.sh:/init.sh:ro
+    entrypoint: ["/init.sh"]
+    command: ["/opt/emqx/bin/emqx", "foreground"]
+    restart: unless-stopped
+
 volumes:
   reactor-db-data:
+  reactor-emqx-data:

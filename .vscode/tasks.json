@@ -100,6 +100,41 @@
                 "clear": true,
                 "focus": true
             }
+        },
+        {
+            "label": "deploy + rebuild",
+            "type": "process",
+            "windows": {
+                "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+                "args": [
+                    "scripts/deploy.sh",
+                    "--rebuild"
+                ]
+            },
+            "linux": {
+                "command": "bash",
+                "args": [
+                    "scripts/deploy.sh",
+                    "--rebuild"
+                ]
+            },
+            "osx": {
+                "command": "bash",
+                "args": [
+                    "scripts/deploy.sh",
+                    "--rebuild"
+                ]
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
         }
     ]
 }

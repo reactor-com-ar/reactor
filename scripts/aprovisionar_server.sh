@@ -32,12 +32,12 @@ echo "============================================================"
 echo ""
 
 # ---- 1. Actualizar sistema ----
-echo "[ 1/8 ] Actualizando sistema..."
+echo "[ 1/9 ] Actualizando sistema..."
 sudo dnf update -y -q
 echo "        OK"
 
 # ---- 2. Instalar Docker, Git, Nginx, bind-utils, python3 ----
-echo "[ 2/8 ] Instalando Docker, Nginx, bind-utils, python3..."
+echo "[ 2/9 ] Instalando Docker, Nginx, bind-utils, python3..."
 sudo dnf install -y -q docker git nginx bind-utils python3 python3-pip augeas-libs
 sudo systemctl enable docker nginx
 sudo systemctl start docker
@@ -45,7 +45,7 @@ sudo usermod -aG docker ec2-user
 echo "        OK -- $(sudo docker --version)"
 
 # ---- 3. Instalar Docker Compose v2 + buildx ----
-echo "[ 3/8 ] Instalando Docker Compose y buildx..."
+echo "[ 3/9 ] Instalando Docker Compose y buildx..."
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
 
 COMPOSE_VERSION="v2.32.4"
@@ -63,8 +63,8 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 echo "        OK -- Compose $(sudo docker compose version --short) / buildx $(sudo docker buildx version | awk '{print $2}')"
 
 # ---- 4. Verificar artefactos transferidos ----
-echo "[ 4/8 ] Verificando archivos del proyecto..."
-for f in cloud docker/Dockerfile .env.production; do
+echo "[ 4/9 ] Verificando archivos del proyecto..."
+for f in cloud docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh .env.production; do
     if [ ! -e "$APP_DIR/$f" ]; then
         echo "        ERROR: falta $APP_DIR/$f"
         echo "        Re-correr scripts/aprovisionar.sh desde la maquina local."
@@ -79,13 +79,14 @@ echo "        OK"
 # Difiere del docker-compose.yml del repo:
 #   - No incluye el servicio reactor-db (en prod la BD es AWS RDS).
 #   - Bind solo a 127.0.0.1 (Nginx hace el frente publico).
-echo "[ 5/8 ] Generando $COMPOSE_FILE..."
+#   - EMQX expone 16273:1883 en publico (security group filtra) y 18083 dashboard.
+echo "[ 5/9 ] Generando $COMPOSE_FILE..."
 cat > "$APP_DIR/$COMPOSE_FILE" << EOF
 # Generado por scripts/aprovisionar_server.sh - no editar a mano.
 # Produccion: sin servicio reactor-db (BD en AWS RDS, ver .env.production).
 services:
   reactor:
-    container_name: reactor
+    container_name: reactor-apache
     build:
       context: ./docker
       dockerfile: Dockerfile
@@ -96,11 +97,34 @@ services:
     env_file:
       - .env.production
     restart: unless-stopped
+
+  reactor-emqx:
+    container_name: reactor-emqx
+    image: emqx/emqx:5.8
+    ports:
+      - "16273:1883"     # MQTT publico (abierto en security group)
+      - "18083:18083"    # dashboard (filtrado por IP en security group)
+    env_file:
+      - .env.production
+    environment:
+      EMQX_ALLOW_ANONYMOUS: "false"
+      EMQX_AUTHENTICATION__1__MECHANISM: password_based
+      EMQX_AUTHENTICATION__1__BACKEND: built_in_database
+      EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
+    volumes:
+      - reactor-emqx-data:/opt/emqx/data
+      - ./docker/emqx/init.sh:/init.sh:ro
+    entrypoint: ["/init.sh"]
+    command: ["/opt/emqx/bin/emqx", "foreground"]
+    restart: unless-stopped
+
+volumes:
+  reactor-emqx-data:
 EOF
 echo "        OK"
 
 # ---- 6. Configurar Nginx ----
-echo "[ 6/8 ] Configurando Nginx como reverse proxy..."
+echo "[ 6/9 ] Configurando Nginx como reverse proxy..."
 sudo tee /etc/nginx/conf.d/reactor.conf > /dev/null << NGX
 # Reverse proxy reactor -- generado por aprovisionar_server.sh
 server {
@@ -124,7 +148,7 @@ sudo systemctl restart nginx
 echo "        OK"
 
 # ---- 7. Construir imagen y levantar contenedor ----
-echo "[ 7/8 ] Construyendo imagen Docker y levantando contenedor..."
+echo "[ 7/9 ] Construyendo imagen Docker y levantando contenedor..."
 cd "$APP_DIR"
 sudo docker compose -f "$COMPOSE_FILE" build
 sudo docker compose -f "$COMPOSE_FILE" up -d --force-recreate
@@ -132,8 +156,19 @@ sleep 3
 sudo docker compose -f "$COMPOSE_FILE" ps
 echo "        OK"
 
-# ---- 8. Emitir certificado SSL ----
-echo "[ 8/8 ] Verificando DNS para SSL..."
+# ---- 8. Sembrar usuario MQTT en EMQX (idempotente, via API) ----
+# El seeder espera a que el dashboard responda, hace login y upsertea el
+# usuario MQTT_USER:MQTT_PASS leidos de .env.production.
+# Reaplicable cuantas veces quieras: POST -> si 409, PUT.
+echo "[ 8/9 ] Sembrando usuario MQTT en EMQX..."
+if bash "$APP_DIR/scripts/lib/emqx_seed.sh" "$APP_DIR/.env.production"; then
+    echo "        OK"
+else
+    echo "        AVISO: el seeder de EMQX fallo -- revisar: sudo docker logs reactor-emqx"
+fi
+
+# ---- 9. Emitir certificado SSL ----
+echo "[ 9/9 ] Verificando DNS para SSL..."
 
 IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 60" --max-time 3 || echo "")
@@ -191,7 +226,7 @@ echo ""
 echo "  App:        https://${DOMAIN}/   (proxy a 127.0.0.1:${APP_PORT_HOST})"
 echo "  Repo:       $APP_DIR"
 echo "  Compose:    docker compose -f $APP_DIR/$COMPOSE_FILE <cmd>"
-echo "  Logs:       sudo docker logs -f reactor"
+echo "  Logs:       sudo docker logs -f reactor-apache"
 echo "  Restart:    cd $APP_DIR && sudo docker compose -f $COMPOSE_FILE restart"
 echo "  Ver SSL:    sudo certbot certificates"
 echo "============================================================"

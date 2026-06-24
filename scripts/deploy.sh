@@ -39,18 +39,20 @@ echo "  version.txt actualizado en cloud/"
 echo ""
 
 # ---- 2. Verificar artefactos requeridos ----
-for f in .env.production docker/Dockerfile cloud; do
+for f in .env.production env.php docker/Dockerfile cloud; do
     if [ ! -e "$BASE_LOCAL/$f" ]; then
         echo "ERROR: falta $BASE_LOCAL/$f"
         exit 1
     fi
 done
 
-# ---- 3. Subir cloud/, docker/, db/, .env.production ----
+# ---- 3. Subir cloud/, docker/, db/, .env.production, env.php ----
 # NO subimos docker-compose.yml: en el servidor vive docker-compose.prod.yml,
 # generado por aprovisionar_server.sh (sin servicio reactor-db).
-# .env.production se sube en cada deploy para mantener prod en sync.
-echo "  Subiendo cloud/, docker/, db/ y .env.production (mirror con --delete)..."
+# .env.production y env.php se suben en cada deploy para mantener prod en sync.
+# env.php es require_once'd desde cloud/index.php y carga las constantes que
+# lee la app (APP_KEY_*, DB_*, MQTT_*) -- sin el, prod queda 500.
+echo "  Subiendo cloud/, docker/, db/, .env.production y env.php (mirror con --delete)..."
 cd "$BASE_LOCAL"
 
 # db/ se incluye porque CLAUDE.md lo declara como schema de referencia.
@@ -79,7 +81,7 @@ tar \
     --exclude='*.log' \
     --exclude='*.pem' \
     --exclude='*.key' \
-    -czf - cloud docker $INCLUDE_DB .env.production | \
+    -czf - cloud docker $INCLUDE_DB .env.production env.php | \
 ssh -i "$KEY" -o StrictHostKeyChecking=no \
     "$USER@$HOST" "
         set -e
@@ -90,18 +92,27 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no \
                 rsync -a --delete \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\"
             fi
         done
-        if [ -f '$STAGING/.env.production' ]; then
-            cp -f '$STAGING/.env.production' '$BASE_REMOTE/.env.production'
-        fi
+        for f in .env.production env.php; do
+            # Si Docker hizo bind-mount cuando el archivo no existia, el
+            # path en el host quedo como directorio vacio. Lo removemos
+            # antes de copiar el archivo nuevo.
+            if [ -d \"$BASE_REMOTE/\$f\" ]; then
+                rm -rf \"$BASE_REMOTE/\$f\"
+            fi
+            if [ -f \"$STAGING/\$f\" ]; then
+                cp -f \"$STAGING/\$f\" \"$BASE_REMOTE/\$f\"
+            fi
+        done
         rm -rf '$STAGING'
     "
 echo "  OK"
 echo ""
 
 # ---- 4. Rebuild (opcional) + force-recreate del contenedor ----
-# force-recreate siempre: Docker bind-montea .env.production por inodo, no por
-# path. El tar del paso 3 crea un inodo nuevo, asi que sin --force-recreate
-# el contenedor sigue viendo el .env.production viejo. Es barato (~2s).
+# force-recreate siempre: Docker bind-montea .env.production y env.php por
+# inodo, no por path. El cp -f del paso 3 crea inodos nuevos, asi que sin
+# --force-recreate el contenedor sigue viendo los archivos viejos. Es
+# barato (~2s).
 if [ "$REBUILD" = true ]; then
     echo "  Reconstruyendo imagen Docker y recreando contenedor..."
     ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" \

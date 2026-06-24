@@ -900,9 +900,10 @@ tbody tr:hover { background: var(--row-hover); }
     line-height: 1.4;
 }
 
-/* ---------- 24. ABM: columnas de acción del listado ----------
- * Cada ícono (Consultar/Editar/Eliminar) va en su propia columna al
- * final de la tabla, en ese orden. Las columnas son angostas y centradas.
+/* ---------- 24. ABM: columna Acciones del listado ----------
+ * Una única columna "Acciones" al final, con un botón hamburguesa que
+ * abre el menú contextual (ABM.md §1.3). El mismo menú lo dispara
+ * también el click derecho sobre cualquier punto de la fila.
  */
 th.action-col, td.action-col {
     width: 1%;
@@ -910,6 +911,29 @@ th.action-col, td.action-col {
     text-align: center;
     padding-left: 4px;
     padding-right: 4px;
+}
+
+/* Menú contextual flotante (posicionado vía JS con position:fixed para
+ * no quedar clipeado por overflows ni por el borde del table-card).
+ * Reusa los tokens de .action-menu-item / .action-menu-divider.
+ */
+.row-menu {
+    position: fixed;
+    z-index: 200;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    min-width: 220px;
+    padding: 4px 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .12s, transform .12s;
+}
+.row-menu.open {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 /* ---------- 25. ABM: tarjetas de consulta (read-only) ----------
@@ -926,6 +950,7 @@ th.action-col, td.action-col {
 }
 .view-card {
     background: color-mix(in srgb, var(--surface) 90%, #000);
+    border: none;
     border-radius: var(--radius);
     padding: 12px 14px;
     display: flex;

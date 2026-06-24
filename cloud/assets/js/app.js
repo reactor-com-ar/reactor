@@ -165,28 +165,105 @@
     function viewGrid(cards) {
         return `<div class="view-grid">${cards.join('')}</div>`;
     }
-    // Celdas <th> de las columnas de acción (una por icono).
-    function actionHeaderCells(opts) {
-        let h = '';
-        if (opts.view)   h += '<th class="action-col"></th>';
-        if (opts.edit)   h += '<th class="action-col"></th>';
-        if (opts.delete) h += '<th class="action-col"></th>';
-        return h;
+    // Celda <th> única "Acciones" al final del listado (ABM.md §1.3).
+    function actionHeaderCells() {
+        return '<th class="action-col">Acciones</th>';
     }
-    // Celdas <td> con los iconos de acción, en orden Consultar / Editar / Eliminar.
-    function actionCells(opts) {
-        let h = '';
-        if (opts.view) {
-            h += `<td class="action-col"><button class="btn-icon-sm" data-act="view"   title="Consultar"><i class="fa-solid fa-eye"></i></button></td>`;
-        }
-        if (opts.edit) {
-            h += `<td class="action-col"><button class="btn-icon-sm" data-act="edit"   title="Editar"><i class="fa-solid fa-pencil"></i></button></td>`;
-        }
-        if (opts.delete) {
-            h += `<td class="action-col"><button class="btn-icon-sm" data-act="delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button></td>`;
-        }
-        return h;
+    // Celda <td> con el botón hamburguesa que dispara el menú contextual.
+    // El menú real lo arma cada módulo en wireRowActions vía openRowMenu().
+    function actionCells() {
+        return `<td class="action-col"><button class="btn-icon-sm" data-act="menu" title="Acciones"><i class="fa-solid fa-bars"></i></button></td>`;
     }
+
+    // Construye los items estándar del menú contextual de fila (ABM.md §1.3).
+    // `opts` define qué acciones estándar incluir (view/edit/delete) y permite
+    // sumar items extra del módulo. Cada item: { act, label, icon, danger?, onSelect }.
+    function standardRowMenuItems(opts) {
+        const items = [];
+        if (opts.view)   items.push({ act: 'view',   label: 'Consultar', icon: 'fa-eye',    onSelect: opts.onView });
+        if (opts.edit)   items.push({ act: 'edit',   label: 'Editar',    icon: 'fa-pencil', onSelect: opts.onEdit });
+        if (opts.delete) items.push({ act: 'delete', label: 'Eliminar',  icon: 'fa-trash',  danger: true, onSelect: opts.onDelete });
+        if (Array.isArray(opts.extra) && opts.extra.length) {
+            if (items.length) items.push({ divider: true });
+            opts.extra.forEach(it => items.push(it));
+        }
+        return items;
+    }
+
+    // Menú contextual flotante usado por la columna Acciones y por click
+    // derecho sobre filas del listado (ABM.md §1.3). Se posiciona en
+    // coordenadas de viewport (position:fixed) y se cierra al click afuera,
+    // ESC o scroll. `anchor` puede ser:
+    //   - { x, y }                → posiciona en ese punto del viewport
+    //   - { rect: DOMRect }       → posiciona debajo y alineado al rect
+    //   - Element                 → equivalente a { rect: el.getBoundingClientRect() }
+    function openRowMenu(items, anchor) {
+        closeRowMenu();
+        if (!Array.isArray(items) || !items.length) return;
+
+        const menu = document.createElement('div');
+        menu.className = 'row-menu';
+        menu.setAttribute('role', 'menu');
+        menu.innerHTML = items.map((it, i) => {
+            if (it.divider) return `<div class="action-menu-divider"></div>`;
+            const cls = 'action-menu-item' + (it.danger ? ' danger' : '');
+            // `icon` admite un sufijo simple ("fa-eye") al que se le antepone
+            // `fa-solid`, o una clase completa que ya incluye el estilo
+            // (ej.: "fa-regular fa-copy", "fa-brands fa-github").
+            const iconClass = it.icon
+                ? (/\bfa-(solid|regular|brands|light|duotone|thin)\b/.test(it.icon) ? it.icon : `fa-solid ${it.icon}`)
+                : '';
+            const icon = iconClass ? `<i class="${iconClass}"></i>` : '';
+            return `<button type="button" class="${cls}" data-idx="${i}" role="menuitem">${icon} ${escape(it.label)}</button>`;
+        }).join('');
+        document.body.appendChild(menu);
+
+        // Posicionamiento: a partir de un punto (x,y) o de un rect.
+        let x, y;
+        if (anchor instanceof Element) {
+            const r = anchor.getBoundingClientRect();
+            x = r.left;
+            y = r.bottom + 4;
+        } else if (anchor && anchor.rect) {
+            x = anchor.rect.left;
+            y = anchor.rect.bottom + 4;
+        } else {
+            x = (anchor && anchor.x) || 0;
+            y = (anchor && anchor.y) || 0;
+        }
+
+        // Clampeo a viewport: si se sale por derecha o por abajo, lo flipeo.
+        const mw = menu.offsetWidth;
+        const mh = menu.offsetHeight;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (x + mw > vw - 8) x = Math.max(8, vw - mw - 8);
+        if (y + mh > vh - 8) y = Math.max(8, y - mh - 8);
+        menu.style.left = `${x}px`;
+        menu.style.top  = `${y}px`;
+        requestAnimationFrame(() => menu.classList.add('open'));
+
+        menu.addEventListener('click', e => {
+            const btn = e.target.closest('[data-idx]');
+            if (!btn) return;
+            const it = items[+btn.dataset.idx];
+            closeRowMenu();
+            if (typeof it?.onSelect === 'function') it.onSelect();
+        });
+    }
+
+    function closeRowMenu() {
+        document.querySelectorAll('.row-menu').forEach(m => m.remove());
+    }
+
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.row-menu')) closeRowMenu();
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeRowMenu();
+    });
+    window.addEventListener('scroll', closeRowMenu, true);
+    window.addEventListener('resize', closeRowMenu);
     // Lee el valor numérico del campo Límite respetando default 100.
     function readLimit(input, fallback) {
         const v = parseInt(input?.value || '', 10);
@@ -783,7 +860,7 @@
                 <td>${escape(d.ubicacion ?? '—')}</td>
                 <td>${statusBadge(d.estado)}</td>
                 <td>${formatDate(d.last_seen_at)}</td>
-                ${actionCells({ view: true, edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -799,7 +876,7 @@
                         <th>Ubicación</th>
                         <th>Estado</th>
                         <th>Última conexión</th>
-                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -848,15 +925,25 @@
             wireRowActions();
         }
 
+        function rowMenuFor(d) {
+            return standardRowMenuItems({
+                view:     true, onView:   () => openDeviceViewModal(d),
+                edit:     true, onEdit:   () => openDeviceModal(d, allDominios),
+                delete:   true, onDelete: () => confirmDeleteDevice(d),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const d  = allDispositivos.find(x => x.id === id);
-                    if (!d) return;
-                    if (btn.dataset.act === 'view')   openDeviceViewModal(d);
-                    if (btn.dataset.act === 'edit')   openDeviceModal(d, allDominios);
-                    if (btn.dataset.act === 'delete') confirmDeleteDevice(d);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const d  = allDispositivos.find(x => x.id === id);
+                if (!d) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(d), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(d), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -1317,7 +1404,7 @@
                 <td>${c.apn ? escape(c.apn) : '<span class="td-id">—</span>'}</td>
                 <td>${c.plan ? escape(c.plan) : '<span class="td-id">—</span>'}</td>
                 <td>${chipEstadoBadge(c.estado)}</td>
-                ${actionCells({ view: true, edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -1333,7 +1420,7 @@
                         <th>APN</th>
                         <th>Plan</th>
                         <th>Estado</th>
-                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1378,15 +1465,25 @@
             wireRowActions();
         }
 
+        function rowMenuFor(c) {
+            return standardRowMenuItems({
+                view:     true, onView:   () => openChipViewModal(c),
+                edit:     true, onEdit:   () => openChipModal(c, allDominios),
+                delete:   true, onDelete: () => confirmDeleteChip(c),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const c  = allChips.find(x => x.id === id);
-                    if (!c) return;
-                    if (btn.dataset.act === 'view')   openChipViewModal(c);
-                    if (btn.dataset.act === 'edit')   openChipModal(c, allDominios);
-                    if (btn.dataset.act === 'delete') confirmDeleteChip(c);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const c  = allChips.find(x => x.id === id);
+                if (!c) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(c), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -1767,7 +1864,7 @@
                 <td>${t.usuario ? escape(t.usuario) : '<span class="td-id">—</span>'}</td>
                 <td>${t.entrada ? `<code>${escape(t.entrada)}</code>` : '<span class="td-id">—</span>'}</td>
                 <td><span class="badge badge-info">${t.senales_count}</span></td>
-                ${actionCells({ view: true, edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -1782,7 +1879,7 @@
                         <th>Usuario</th>
                         <th>Entrada</th>
                         <th>Señales</th>
-                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1820,15 +1917,25 @@
             wireRowActions();
         }
 
+        function rowMenuFor(t) {
+            return standardRowMenuItems({
+                view:     true, onView:   () => openTransceptorViewModal(t),
+                edit:     true, onEdit:   () => openTransceptorModal(t),
+                delete:   true, onDelete: () => confirmDeleteTransceptor(t),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const t  = allTransceptores.find(x => x.id === id);
-                    if (!t) return;
-                    if (btn.dataset.act === 'view')   openTransceptorViewModal(t);
-                    if (btn.dataset.act === 'edit')   openTransceptorModal(t);
-                    if (btn.dataset.act === 'delete') confirmDeleteTransceptor(t);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const t  = allTransceptores.find(x => x.id === id);
+                if (!t) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(t), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(t), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -2152,7 +2259,7 @@
                 <td>${escape(d.descripcion ?? '—')}</td>
                 <td><span class="badge badge-info">${d.dispositivos_count}</span></td>
                 <td>${formatDate(d.created_at)}</td>
-                ${actionCells({ view: true, edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -2165,7 +2272,7 @@
                         <th>Descripción</th>
                         <th>Dispositivos</th>
                         <th>Creado</th>
-                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -2201,15 +2308,31 @@
             wireRowActions();
         }
 
+        function rowMenuFor(dom) {
+            return standardRowMenuItems({
+                view:   true, onView:   () => openDomainViewModal(dom),
+                edit:   true, onEdit:   () => openDomainModal(dom),
+                delete: true, onDelete: () => confirmDeleteDomain(dom),
+                extra: [
+                    { act: 'go-devices', label: 'Ver dispositivos asociados', icon: 'fa-satellite-dish',
+                      onSelect: () => { pendingDispositivosDominioFilter = dom.id; window.location.hash = '#/dispositivos'; } },
+                    { act: 'copy-id',    label: 'Copiar ID',     icon: 'fa-hashtag',     onSelect: () => copyToClipboard(String(dom.id)) },
+                    { act: 'copy-name',  label: 'Copiar nombre', icon: 'fa-regular fa-copy', onSelect: () => copyToClipboard(dom.nombre) },
+                ],
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const dom = allDominios.find(x => x.id === id);
-                    if (!dom) return;
-                    if (btn.dataset.act === 'view')   openDomainViewModal(dom);
-                    if (btn.dataset.act === 'edit')   openDomainModal(dom);
-                    if (btn.dataset.act === 'delete') confirmDeleteDomain(dom);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id  = +tr.dataset.id;
+                const dom = allDominios.find(x => x.id === id);
+                if (!dom) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(dom), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(dom), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -2580,7 +2703,7 @@
                     : '<span class="badge badge-danger">Inactivo</span>'}</td>
                 <td>${formatDate(u.last_login_at)}</td>
                 <td>${formatDate(u.created_at)}</td>
-                ${actionCells({ view: true, edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -2596,7 +2719,7 @@
                         <th>Estado</th>
                         <th>Último login</th>
                         <th>Creado</th>
-                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -2640,15 +2763,25 @@
             wireRowActions();
         }
 
+        function rowMenuFor(u) {
+            return standardRowMenuItems({
+                view:   true, onView:   () => openUserViewModal(u),
+                edit:   true, onEdit:   () => openUserModal(u),
+                delete: true, onDelete: () => confirmDeleteUser(u),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const u  = allUsuarios.find(x => x.id === id);
-                    if (!u) return;
-                    if (btn.dataset.act === 'view')   openUserViewModal(u);
-                    if (btn.dataset.act === 'edit')   openUserModal(u);
-                    if (btn.dataset.act === 'delete') confirmDeleteUser(u);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const u  = allUsuarios.find(x => x.id === id);
+                if (!u) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(u), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(u), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -3035,7 +3168,7 @@
                 <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
                 <td>${perfilRolBadge(p.rol)}</td>
                 <td>${formatDate(p.created_at)}</td>
-                ${actionCells({ view: true, edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -3048,7 +3181,7 @@
                         <th>Dominio</th>
                         <th>Rol</th>
                         <th>Creado</th>
-                        ${actionHeaderCells({ view: true, edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -3092,15 +3225,25 @@
             wireRowActions();
         }
 
+        function rowMenuFor(p) {
+            return standardRowMenuItems({
+                view:   true, onView:   () => openProfileViewModal(p),
+                edit:   true, onEdit:   () => openProfileModal(p, allUsuarios, allDominios),
+                delete: true, onDelete: () => confirmDeleteProfile(p),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const p  = allPerfiles.find(x => x.id === id);
-                    if (!p) return;
-                    if (btn.dataset.act === 'view')   openProfileViewModal(p);
-                    if (btn.dataset.act === 'edit')   openProfileModal(p, allUsuarios, allDominios);
-                    if (btn.dataset.act === 'delete') confirmDeleteProfile(p);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const p  = allPerfiles.find(x => x.id === id);
+                if (!p) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(p), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(p), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -3722,7 +3865,7 @@
                 <td><span class="td-id">${escape(s.topic ?? '')}</span></td>
                 <td>${s.mensaje != null && s.mensaje !== '' ? escape(s.mensaje) : '<span class="td-id">—</span>'}</td>
                 <td>${s.estado != null ? `<span class="td-id">${s.estado}</span>` : '<span class="td-id">—</span>'}</td>
-                ${actionCells({ view: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -3739,7 +3882,7 @@
                         <th>Topic</th>
                         <th>Mensaje</th>
                         <th>Estado</th>
-                        ${actionHeaderCells({ view: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -3800,12 +3943,35 @@
             }
         }
 
+        function rowMenuFor(s) {
+            return standardRowMenuItems({
+                view: true, onView: () => openSignalViewModal(s),
+                extra: [
+                    ...(s.dispositivo
+                        ? [{ act: 'go-device', label: 'Ver dispositivo', icon: 'fa-satellite-dish',
+                            onSelect: () => { pendingDispositivosDominioFilter = null; window.location.hash = '#/dispositivos'; } }]
+                        : []),
+                    ...(s.topic
+                        ? [{ act: 'copy-topic',   label: 'Copiar topic',   icon: 'fa-regular fa-copy', onSelect: () => copyToClipboard(s.topic) }]
+                        : []),
+                    ...(s.mensaje != null && s.mensaje !== ''
+                        ? [{ act: 'copy-mensaje', label: 'Copiar mensaje', icon: 'fa-regular fa-copy', onSelect: () => copyToClipboard(String(s.mensaje)) }]
+                        : []),
+                ],
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act="view"]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const s  = senales.find(x => x.id === id);
-                    if (s) openSignalViewModal(s);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const s  = senales.find(x => x.id === id);
+                if (!s) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(s), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(s), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -4177,7 +4343,7 @@
                         : (!r.usuario_nombre ? '<span class="td-id">—</span>' : '')}
                 </td>
                 <td>${r.estado != null && r.estado !== '' ? escape(r.estado) : '<span class="td-id">—</span>'}</td>
-                ${actionCells({ view: true })}
+                ${actionCells()}
             </tr>
         `).join('');
 
@@ -4193,7 +4359,7 @@
                         <th>Sentido</th>
                         <th>Usuario</th>
                         <th>Estado</th>
-                        ${actionHeaderCells({ view: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -4255,12 +4421,23 @@
             }
         }
 
+        function rowMenuFor(r) {
+            return standardRowMenuItems({
+                view: true, onView: () => openRegistroViewModal(r),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act="view"]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const r  = registros.find(x => x.id === id);
-                    if (r) openRegistroViewModal(r);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const r  = registros.find(x => x.id === id);
+                if (!r) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(r), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(r), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -4537,14 +4714,24 @@
             wireRowActions();
         }
 
+        function rowMenuFor(p) {
+            return standardRowMenuItems({
+                edit:   true, onEdit:   () => openParametroForm(p, reload),
+                delete: true, onDelete: () => confirmDeleteParametro(p, reload),
+            });
+        }
         function wireRowActions() {
-            tableWrap.querySelectorAll('button[data-act]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const id = +btn.closest('tr').dataset.id;
-                    const p  = state.items.find(x => x.id === id);
-                    if (!p) return;
-                    if (btn.dataset.act === 'edit')   openParametroForm(p, reload);
-                    if (btn.dataset.act === 'delete') confirmDeleteParametro(p, reload);
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const p  = state.items.find(x => x.id === id);
+                if (!p) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(p), e.currentTarget);
+                });
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(p), { x: e.clientX, y: e.clientY });
                 });
             });
         }
@@ -4585,7 +4772,7 @@
                 <td class="td-nombre">${escape(p.variable ?? '')}</td>
                 <td>${p.valor != null && p.valor !== '' ? escape(p.valor) : '<span style="color:var(--muted)">—</span>'}</td>
                 <td>${p.comentario != null && p.comentario !== '' ? escape(p.comentario) : '<span style="color:var(--muted)">—</span>'}</td>
-                ${actionCells({ edit: true, delete: true })}
+                ${actionCells()}
             </tr>
         `).join('');
         return `
@@ -4596,7 +4783,7 @@
                         <th>Variable</th>
                         <th>Valor</th>
                         <th>Comentario</th>
-                        ${actionHeaderCells({ edit: true, delete: true })}
+                        ${actionHeaderCells()}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>

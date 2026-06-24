@@ -22,37 +22,12 @@ services:
       - ./.env.development:/var/www/.env.development:ro
       - ./.env.production:/var/www/.env.production:ro
     # Las credenciales de DB vienen del archivo .env que se le indique.
-    # Por defecto usa .env.development (dev local en contenedor reactor-db).
-    # Para apuntar a produccion (AWS RDS), levantar con:
+    # Por defecto usa .env.development (apunta al MySQL externo de
+    # herramientas-mysql via host.docker.internal). Para apuntar a
+    # produccion (AWS RDS), levantar con:
     #   ENV_FILE=.env.production docker compose -p reactor up -d
     env_file:
       - ${ENV_FILE:-.env.development}
-    depends_on:
-      reactor-db:
-        condition: service_healthy
-    restart: unless-stopped
-
-  reactor-db:
-    container_name: reactor-mysql
-    image: mysql:8.0
-    # Puerto FIJO 3308 (interno = externo). NUNCA cambiar: la app y los
-    # scripts de migracion lo asumen. Si choca con otro servicio, liberar
-    # el otro -- no remapear MySQL.
-    ports:
-      - "3308:3308"
-    command: ["mysqld", "--port=3308"]
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: reactor_dev
-      MYSQL_TCP_PORT: "3308"
-    volumes:
-      - reactor-db-data:/var/lib/mysql
-      - ./cloud/sql:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-P", "3308", "-uroot", "-proot"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
     restart: unless-stopped
 
   reactor-emqx:
@@ -91,12 +66,9 @@ services:
     env_file:
       - ${ENV_FILE:-.env.development}
     depends_on:
-      reactor-db:
-        condition: service_healthy
       reactor-emqx:
         condition: service_started
     restart: unless-stopped
 
 volumes:
-  reactor-db-data:
   reactor-emqx-data:

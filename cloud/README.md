@@ -20,7 +20,7 @@ cloud/
 │   ├── css/style.css   # tema rojo "reactor"
 │   └── js/app.js       # router SPA + render de vistas
 ├── sql/
-│   └── schema.sql      # DDL + datos de ejemplo
+│   └── migrations/     # migraciones idempotentes (ALTER guardados con IF NOT EXISTS)
 └── index.php           # shell HTML de la SPA
 ```
 
@@ -30,16 +30,17 @@ o `.env.production` de la raiz del repo, inyectado al contenedor por
 
 ## Puesta en marcha
 
-1. Crear la base de datos y datos de ejemplo:
-   ```bash
-   mysql -u root -p < cloud/sql/schema.sql
-   ```
-2. Ajustar credenciales en `cloud/config/database.php` si hace falta.
-3. Levantar el server embebido de PHP apuntando a la carpeta `cloud/`:
-   ```bash
-   php -S 127.0.0.1:8000 -t cloud
-   ```
-4. Abrir <http://127.0.0.1:8000>.
+La BD es la `reactor_dev` del stack `herramientas-mysql` (compartida con la
+app legacy de Reactor multi-app), apuntada via `.env.development`. Para
+levantar el cloud:
+
+```bash
+bash scripts/instalar.sh
+```
+
+El script verifica que el MySQL externo responda, levanta el compose
+(Apache + EMQX + motor) y aplica las migraciones de `cloud/sql/migrations/`.
+Despues queda servido en <http://localhost:8086>.
 
 ## Endpoints actuales
 

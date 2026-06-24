@@ -4,11 +4,13 @@
 #
 # Que hace:
 #   - Verifica que Docker este disponible.
-#   - Detecta puertos libres para la app (host) y MySQL.
-#   - Escribe .env con los puertos elegidos.
+#   - Verifica que el MySQL externo (herramientas-mysql) responda.
 #   - Recrea el stack desde cero (down -v + up -d --build).
-#   - Aplica las migraciones de cloud/sql/migrations/*.sql.
+#   - Aplica schema.sql + migraciones contra el MySQL externo.
 #   - Imprime la URL donde se sirve la app.
+#
+# La BD MySQL ya no esta en este compose: corre en el contenedor
+# del repo `herramientas-mysql`. Las creds se leen de .env.development.
 #
 # Pensado para VSCode > Tasks > "instalar" o manualmente desde
 # Git Bash:
@@ -39,59 +41,63 @@ if ! docker version --format '{{.Server.Version}}' > /dev/null 2>&1; then
     exit 1
 fi
 
-# --- Helpers ----------------------------------------------------------------
-# Devuelve 0 si el puerto esta en uso (algo escucha en 127.0.0.1:port),
-# 1 si esta libre. Usa el builtin /dev/tcp/ de bash (disponible en Git Bash).
-port_in_use() {
-    local port="$1"
-    (echo > "/dev/tcp/127.0.0.1/$port") > /dev/null 2>&1
-}
-
-# Devuelve el primer puerto libre desde $1 hacia arriba, saltando los de $2
-# (lista separada por espacios).
-find_free_port() {
-    local start="$1"
-    local reserved="$2"
-    local max=500
-    local p
-    for ((p = start; p < start + max; p++)); do
-        if [[ " $reserved " == *" $p "* ]]; then
-            continue
-        fi
-        if ! port_in_use "$p"; then
-            echo "$p"
-            return 0
-        fi
-    done
-    echo "No se encontro puerto libre en el rango $start..$((start + max - 1))" >&2
-    return 1
-}
+# --- Cargar creds de BD desde .env.development ------------------------------
+# El MySQL ya no esta en este compose: corre en el contenedor de
+# herramientas-mysql. Leemos DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS del
+# .env para pinguear y aplicar migraciones via cliente mysql efimero.
+ENV_FILE_PATH="$REPO_ROOT/.env.development"
+if [ ! -f "$ENV_FILE_PATH" ]; then
+    echo -e "${RED}ERROR: no existe $ENV_FILE_PATH${NC}"
+    exit 1
+fi
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE_PATH"
+set +a
+: "${DB_HOST:?DB_HOST no definido en $ENV_FILE_PATH}"
+: "${DB_PORT:?DB_PORT no definido en $ENV_FILE_PATH}"
+: "${DB_NAME:?DB_NAME no definido en $ENV_FILE_PATH}"
+: "${DB_USER:?DB_USER no definido en $ENV_FILE_PATH}"
+: "${DB_PASS:?DB_PASS no definido en $ENV_FILE_PATH}"
 
 # --- Puertos (todos hardcodeados en docker-compose.yml) ---------------------
-# Dev:  app=8086, mysql=3308, mqtt=1884, dashboard=18084.
-# Prod: app=8086, mysql=RDS:3306, mqtt=16273, dashboard=18083.
-# Apache (8086) y MySQL (3308) son iguales en dev y prod. EMQX usa puertos
-# distintos en dev (libres, no chocan con vigicom-emqx) y prod (16273 publico).
-# Si alguno esta ocupado, el up falla -- liberar el otro proceso, NO remapear.
+# Dev:  app=8086, mqtt=1884, dashboard=18084.
+# Prod: app=8086, mqtt=16273, dashboard=18083.
+# Apache (8086) es igual en dev y prod. EMQX usa puertos distintos en dev
+# (libres, no chocan con vigicom-emqx) y prod (16273 publico). Si alguno
+# esta ocupado, el up falla -- liberar el otro proceso, NO remapear.
+# MySQL lo provee el stack `herramientas-mysql` en $DB_HOST:$DB_PORT.
 APP_PORT=8086
-DB_PORT=3308
 MQTT_PORT=1884
 EMQX_DASHBOARD_PORT=18084
 
-echo -e "${RED}==> Puertos fijos:${NC}"
+echo -e "${RED}==> Servicios:${NC}"
 echo "    app       -> $APP_PORT"
-echo "    mysql     -> $DB_PORT"
+echo "    mysql     -> $DB_HOST:$DB_PORT (externo / herramientas-mysql)"
 echo "    mqtt      -> $MQTT_PORT"
 echo "    dashboard -> $EMQX_DASHBOARD_PORT"
 echo ""
 
+# --- Pre-flight: MySQL externo ----------------------------------------------
+# Pinguea el MySQL de herramientas-mysql via cliente efimero. Si no responde,
+# los contenedores reactor/reactor-motor van a fallar en runtime al conectar.
+echo -e "${RED}==> Verificando MySQL externo en $DB_HOST:$DB_PORT ...${NC}"
+if ! docker run --rm \
+        -e MYSQL_PWD="$DB_PASS" \
+        --add-host=host.docker.internal:host-gateway \
+        mysql:8.0 \
+        mysqladmin -h "$DB_HOST" -P "$DB_PORT" -u"$DB_USER" --connect-timeout=5 ping > /dev/null 2>&1; then
+    echo -e "${RED}ERROR: no se pudo conectar a $DB_HOST:$DB_PORT como $DB_USER.${NC}"
+    echo -e "${YELLOW}Asegurate de que el stack herramientas-mysql este levantado y que las creds en .env.development sean correctas.${NC}"
+    exit 1
+fi
+
 # --- Limpiar contenedores previos -------------------------------------------
 # El orden importa:
 #   1) `docker compose down -v --remove-orphans` SIEMPRE primero. Borra
-#      contenedores, red y -- critico -- el volumen `reactor-mysql-data` del
-#      proyecto. Si saltearamos esto el volumen sobrevive y MySQL no vuelve
-#      a correr schema.sql en el siguiente up (initdb solo se ejecuta en
-#      DB virgen), dejando el schema desactualizado.
+#      contenedores, red y los volumenes propios del proyecto (solo
+#      `reactor-emqx-data` desde que MySQL salio del compose). NO toca el
+#      MySQL externo de herramientas-mysql.
 #   2) `docker rm -f` como fallback por si quedaron contenedores con esos
 #      nombres pero sin label de compose.
 echo -e "${RED}==> Limpiando contenedores previos...${NC}"
@@ -99,7 +105,7 @@ echo -e "${RED}==> Limpiando contenedores previos...${NC}"
 docker compose -p reactor down -v --remove-orphans > /dev/null 2>&1 || true
 
 existing=$(docker ps -a --format '{{.Names}}')
-for name in reactor reactor-apache reactor-mysql reactor-emqx; do
+for name in reactor reactor-apache reactor-emqx reactor-motor; do
     if echo "$existing" | grep -qx "$name"; then
         echo "    removiendo $name (huerfano sin label compose)"
         docker rm -f "$name" > /dev/null
@@ -118,31 +124,49 @@ if ! docker compose -p reactor up -d --build; then
     echo -e "${YELLOW}--- docker logs reactor-apache (ultimas 50 lineas) ---${NC}"
     docker logs --tail 50 reactor-apache 2>&1 || true
     echo ""
-    echo -e "${YELLOW}--- docker logs reactor-mysql (ultimas 50 lineas) ---${NC}"
-    docker logs --tail 50 reactor-mysql 2>&1 || true
+    echo -e "${YELLOW}--- docker logs reactor-emqx (ultimas 50 lineas) ---${NC}"
+    docker logs --tail 50 reactor-emqx 2>&1 || true
     exit 1
 fi
 
 # --- Esperar que la app responda --------------------------------------------
+# Aceptamos cualquier 2xx o 3xx: el cloud usa JWT con redirect a /login
+# cuando no hay cookie, asi que GET / responde 302, no 200. Lo que importa
+# es que Apache este sirviendo (no 000 / no 5xx).
 echo ""
 echo -e "${RED}==> Esperando a que la app responda en http://localhost:$APP_PORT ...${NC}"
 deadline=$(( $(date +%s) + 60 ))
 ok=false
 while [ "$(date +%s)" -lt "$deadline" ]; do
     code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:$APP_PORT/" 2>/dev/null || echo "000")
-    if [ "$code" = "200" ]; then
+    if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
         ok=true
         break
     fi
     sleep 1
 done
 
+# --- Helpers de MySQL externo -----------------------------------------------
+# Ejecuta un archivo SQL contra el MySQL de herramientas-mysql usando un
+# cliente mysql:8.0 efimero. No requiere mysql client local ni acopla a un
+# nombre de contenedor especifico.
+mysql_exec_file() {
+    local sql_file="$1"
+    local db="${2:-$DB_NAME}"
+    docker run --rm -i \
+        -e MYSQL_PWD="$DB_PASS" \
+        --add-host=host.docker.internal:host-gateway \
+        mysql:8.0 \
+        mysql -h "$DB_HOST" -P "$DB_PORT" -u"$DB_USER" "$db" \
+        < "$sql_file"
+}
+
 # --- Aplicar migraciones ----------------------------------------------------
-# `docker-entrypoint-initdb.d` SOLO procesa archivos en su raiz y SOLO la
-# primera vez (DB virgen), asi que las migraciones de cloud/sql/migrations/
-# nunca se ejecutarian solas. Las corremos siempre, en orden alfabetico.
-# Todas estan escritas como idempotentes (chequean information_schema antes
-# de ALTER), asi que reaplicarlas es no-op.
+# La BD ya existe en el MySQL externo (compartida con la app legacy de
+# Reactor multi-app). No hay schema.sql que cargar: el cloud opera sobre las
+# tablas legacy de la DB. Solo aplicamos migraciones, que estan escritas
+# idempotentes (chequean information_schema antes de ALTER / usan
+# CREATE TABLE IF NOT EXISTS).
 migrations_dir="$REPO_ROOT/cloud/sql/migrations"
 if [ -d "$migrations_dir" ]; then
     echo ""
@@ -151,16 +175,11 @@ if [ -d "$migrations_dir" ]; then
         [ -f "$m" ] || continue
         name=$(basename "$m")
         echo "    $name"
-        if ! docker cp "$m" "reactor-mysql:/tmp/migration.sql" > /dev/null; then
-            echo -e "${RED}ERROR copiando $name al contenedor reactor-mysql${NC}"
-            exit 1
-        fi
-        if ! docker exec reactor-mysql sh -c 'mysql -uroot -proot reactor_dev < /tmp/migration.sql'; then
+        if ! mysql_exec_file "$m"; then
             echo -e "${RED}ERROR aplicando $name${NC}"
             exit 1
         fi
     done
-    docker exec reactor-mysql rm -f /tmp/migration.sql > /dev/null || true
 fi
 
 # --- Sembrar usuario MQTT en EMQX (idempotente, via API) --------------------
@@ -185,7 +204,7 @@ fi
 
 echo ""
 echo -e "${GREEN}  Cloud   : http://localhost:$APP_PORT${NC}"
-echo "  MySQL   : localhost:$DB_PORT  (user: root / pass: root / db: reactor_dev)"
+echo "  MySQL   : $DB_HOST:$DB_PORT  (externo / herramientas-mysql, db: $DB_NAME)"
 echo "  EMQX    : MQTT localhost:$MQTT_PORT / Dashboard http://localhost:$EMQX_DASHBOARD_PORT (admin / rf412F576xWUgvLs)"
 echo ""
 echo "  Logs    : docker logs -f reactor-apache"

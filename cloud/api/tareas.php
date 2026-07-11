@@ -55,7 +55,7 @@ function handleGetTareas(): void
     $pdo = db();
     $id  = isset($_GET['id']) ? (int) $_GET['id'] : 0;
     if ($id > 0) {
-        $stmt = $pdo->prepare('SELECT * FROM tareas_cron WHERE id = :id');
+        $stmt = $pdo->prepare('SELECT * FROM tareas WHERE id = :id');
         $stmt->execute([':id' => $id]);
         $row = $stmt->fetch();
         if (!$row) json_error('tarea_no_encontrada', 404);
@@ -79,16 +79,16 @@ function handleGetTareas(): void
     }
     $sqlWhere = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
-    $stmt = $pdo->prepare("SELECT * FROM tareas_cron $sqlWhere ORDER BY id DESC LIMIT $limite");
+    $stmt = $pdo->prepare("SELECT * FROM tareas $sqlWhere ORDER BY id DESC LIMIT $limite");
     $stmt->execute($params);
     $rows = array_map('normalizarTarea', $stmt->fetchAll());
 
     $stats = $pdo->query(
         "SELECT
-           (SELECT COUNT(*) FROM tareas_cron) AS total,
-           (SELECT COUNT(*) FROM tareas_cron WHERE activo = 1) AS activas,
-           (SELECT COUNT(*) FROM tareas_cron_ejecuciones WHERE estado = 'error') AS errores,
-           (SELECT COUNT(*) FROM tareas_cron_ejecuciones WHERE estado = 'corriendo') AS corriendo"
+           (SELECT COUNT(*) FROM tareas) AS total,
+           (SELECT COUNT(*) FROM tareas WHERE activo = 1) AS activas,
+           (SELECT COUNT(*) FROM tareas_ejecuciones WHERE estado = 'error') AS errores,
+           (SELECT COUNT(*) FROM tareas_ejecuciones WHERE estado = 'corriendo') AS corriendo"
     )->fetch();
 
     json_ok(['tareas' => $rows, 'stats' => [
@@ -140,7 +140,7 @@ function handleCreateTarea(): void
 
     try {
         $stmt = db()->prepare(
-            'INSERT INTO tareas_cron (nombre, descripcion, script, cron_expr, activo, overlap, timeout_seg, retencion_dias)
+            'INSERT INTO tareas (nombre, descripcion, script, cron_expr, activo, overlap, timeout_seg, retencion_dias)
              VALUES (:n, :d, :s, :c, :a, :o, :t, :r)'
         );
         $stmt->execute([
@@ -170,7 +170,7 @@ function handleUpdateTarea(): void
 
     try {
         $stmt = db()->prepare(
-            'UPDATE tareas_cron SET nombre=:n, descripcion=:d, script=:s, cron_expr=:c,
+            'UPDATE tareas SET nombre=:n, descripcion=:d, script=:s, cron_expr=:c,
                                activo=:a, overlap=:o, timeout_seg=:t, retencion_dias=:r
              WHERE id=:id'
         );
@@ -199,13 +199,13 @@ function handleDeleteTarea(): void
 
     $pdo = db();
     // 1) Chequear ejecuciones corriendo.
-    $chk = $pdo->prepare("SELECT COUNT(*) FROM tareas_cron_ejecuciones WHERE tarea_id=:tid AND estado='corriendo'");
+    $chk = $pdo->prepare("SELECT COUNT(*) FROM tareas_ejecuciones WHERE tarea_id=:tid AND estado='corriendo'");
     $chk->execute([':tid' => $id]);
     if ((int) $chk->fetchColumn() > 0) {
         json_error('ejecucion_en_curso: hay una ejecucion corriendo — detenela primero.', 409);
     }
     // 2) Borrar archivos .log en disco.
-    $logs = $pdo->prepare('SELECT log_path FROM tareas_cron_ejecuciones WHERE tarea_id=:tid AND log_path IS NOT NULL');
+    $logs = $pdo->prepare('SELECT log_path FROM tareas_ejecuciones WHERE tarea_id=:tid AND log_path IS NOT NULL');
     $logs->execute([':tid' => $id]);
     $archivosBorrados = 0;
     foreach ($logs->fetchAll() as $row) {
@@ -213,8 +213,8 @@ function handleDeleteTarea(): void
         if ($lp !== '' && is_file($lp) && @unlink($lp)) $archivosBorrados++;
     }
     // 3+4) Cascada de filas.
-    $pdo->prepare('DELETE FROM tareas_cron_ejecuciones WHERE tarea_id=:tid')->execute([':tid' => $id]);
-    $del = $pdo->prepare('DELETE FROM tareas_cron WHERE id=:id');
+    $pdo->prepare('DELETE FROM tareas_ejecuciones WHERE tarea_id=:tid')->execute([':tid' => $id]);
+    $del = $pdo->prepare('DELETE FROM tareas WHERE id=:id');
     $del->execute([':id' => $id]);
     json_ok(['borrados' => $del->rowCount(), 'archivos_borrados' => $archivosBorrados]);
 }

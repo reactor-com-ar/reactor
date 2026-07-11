@@ -31,8 +31,8 @@ $ejecDir = $logDir . '/ejecuciones';
 // ---- 1) Watchdog: barrer huérfanos ----
 $stmt = $pdo->query(
     "SELECT e.id, e.pid, e.inicio, t.timeout_seg
-       FROM tareas_cron_ejecuciones e
-       JOIN tareas_cron t ON t.id = e.tarea_id
+       FROM tareas_ejecuciones e
+       JOIN tareas t ON t.id = e.tarea_id
       WHERE e.estado = 'corriendo'
         AND TIMESTAMPDIFF(SECOND, e.inicio, NOW()) > t.timeout_seg * 2"
 );
@@ -42,14 +42,14 @@ foreach ($stmt->fetchAll() as $huerfano) {
         if (@posix_kill($pid, 0)) @posix_kill($pid, 9);
     }
     $pdo->prepare(
-        "UPDATE tareas_cron_ejecuciones
+        "UPDATE tareas_ejecuciones
             SET fin = NOW(), estado = 'killed', exit_code = 137,
                 mensaje = CONCAT('watchdog: killed (', TIMESTAMPDIFF(SECOND, inicio, NOW()), 's)')
           WHERE id = :id AND estado = 'corriendo'"
     )->execute([':id' => (int) $huerfano['id']]);
     $pdo->prepare(
-        "UPDATE tareas_cron t
-            JOIN tareas_cron_ejecuciones e ON e.tarea_id = t.id
+        "UPDATE tareas t
+            JOIN tareas_ejecuciones e ON e.tarea_id = t.id
             SET t.ultimo_estado = 'killed'
           WHERE e.id = :id"
     )->execute([':id' => (int) $huerfano['id']]);
@@ -58,7 +58,7 @@ foreach ($stmt->fetchAll() as $huerfano) {
 // ---- 2) Leer tareas activas ----
 $tareas = $pdo->query(
     'SELECT id, nombre, script, cron_expr, overlap, timeout_seg
-       FROM tareas_cron WHERE activo = 1'
+       FROM tareas WHERE activo = 1'
 )->fetchAll();
 
 $ahora = new DateTime('now');
@@ -69,7 +69,7 @@ foreach ($tareas as $t) {
 
     if ($t['overlap'] === 'skip') {
         $chk = $pdo->prepare(
-            "SELECT COUNT(*) FROM tareas_cron_ejecuciones
+            "SELECT COUNT(*) FROM tareas_ejecuciones
               WHERE tarea_id = :tid AND estado = 'corriendo'"
         );
         $chk->execute([':tid' => (int) $t['id']]);
@@ -86,7 +86,7 @@ function dispararTarea(PDO $pdo, array $tarea, string $ejecDir): void
 {
     $tid = (int) $tarea['id'];
     $ins = $pdo->prepare(
-        "INSERT INTO tareas_cron_ejecuciones (tarea_id, inicio, estado, disparo)
+        "INSERT INTO tareas_ejecuciones (tarea_id, inicio, estado, disparo)
          VALUES (:tid, NOW(), 'corriendo', 'scheduler')"
     );
     $ins->execute([':tid' => $tid]);
@@ -94,11 +94,11 @@ function dispararTarea(PDO $pdo, array $tarea, string $ejecDir): void
 
     $logPath = $ejecDir . '/' . $eid . '.log';
 
-    $pdo->prepare('UPDATE tareas_cron_ejecuciones SET log_path = :p WHERE id = :id')
+    $pdo->prepare('UPDATE tareas_ejecuciones SET log_path = :p WHERE id = :id')
         ->execute([':p' => $logPath, ':id' => $eid]);
 
     $pdo->prepare(
-        "UPDATE tareas_cron
+        "UPDATE tareas
             SET ultimo_run = NOW(), ultimo_estado = 'corriendo', ultimo_error = NULL
           WHERE id = :id"
     )->execute([':id' => $tid]);
@@ -125,7 +125,7 @@ function dispararTarea(PDO $pdo, array $tarea, string $ejecDir): void
     $pid = (int) trim((string) shell_exec($cmd));
 
     if ($pid > 0) {
-        $pdo->prepare('UPDATE tareas_cron_ejecuciones SET pid = :p WHERE id = :id')
+        $pdo->prepare('UPDATE tareas_ejecuciones SET pid = :p WHERE id = :id')
             ->execute([':p' => $pid, ':id' => $eid]);
     }
 }

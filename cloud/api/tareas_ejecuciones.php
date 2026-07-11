@@ -6,7 +6,7 @@ declare(strict_types=1);
 // GET api/tareas_ejecuciones.php?tarea_id=N&estado=...&limite=M
 // GET api/tareas_ejecuciones.php?id=N       -> detalle de una ejecucion
 // POST api/tareas_ejecuciones.php  {id, accion:'detener'}
-// Tabla real: `tareas_cron_ejecuciones` (el .php mantiene su nombre por URL).
+// Tabla real: `tareas_ejecuciones` (el .php mantiene su nombre por URL).
 
 require __DIR__ . '/bootstrap.php';
 
@@ -55,8 +55,8 @@ function handleGetEjecuciones(): void
         $stmt = $pdo->prepare(
             'SELECT e.*, t.nombre AS tarea_nombre, t.script AS tarea_script,
                     t.cron_expr AS tarea_cron_expr, t.timeout_seg
-               FROM tareas_cron_ejecuciones e
-               JOIN tareas_cron t ON t.id = e.tarea_id
+               FROM tareas_ejecuciones e
+               JOIN tareas t ON t.id = e.tarea_id
               WHERE e.id = :id'
         );
         $stmt->execute([':id' => $id]);
@@ -79,8 +79,8 @@ function handleGetEjecuciones(): void
     $sqlWhere = 'WHERE ' . implode(' AND ', $where);
     $stmt = $pdo->prepare(
         "SELECT e.*, t.nombre AS tarea_nombre
-           FROM tareas_cron_ejecuciones e
-           JOIN tareas_cron t ON t.id = e.tarea_id
+           FROM tareas_ejecuciones e
+           JOIN tareas t ON t.id = e.tarea_id
            $sqlWhere
            ORDER BY e.id DESC LIMIT $limite"
     );
@@ -101,7 +101,7 @@ function handlePostEjecuciones(): void
     if ($id <= 0) json_error('missing_id', 400);
 
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT id, pid, estado FROM tareas_cron_ejecuciones WHERE id = :id');
+    $stmt = $pdo->prepare('SELECT id, pid, estado FROM tareas_ejecuciones WHERE id = :id');
     $stmt->execute([':id' => $id]);
     $row = $stmt->fetch();
     if (!$row) json_error('ejecucion_no_encontrada', 404);
@@ -110,12 +110,12 @@ function handlePostEjecuciones(): void
     // 1) Marcar killed ANTES de la señal (para evitar carrera con SIGTERM del hijo).
     $mensaje = 'Detenido manualmente ' . date('c');
     $upd = $pdo->prepare(
-        "UPDATE tareas_cron_ejecuciones SET fin=NOW(), estado='killed', exit_code=143, mensaje=:m
+        "UPDATE tareas_ejecuciones SET fin=NOW(), estado='killed', exit_code=143, mensaje=:m
           WHERE id=:id AND estado='corriendo'"
     );
     $upd->execute([':m' => $mensaje, ':id' => $id]);
     $pdo->prepare(
-        "UPDATE tareas_cron t JOIN tareas_cron_ejecuciones e ON e.tarea_id=t.id
+        "UPDATE tareas t JOIN tareas_ejecuciones e ON e.tarea_id=t.id
             SET t.ultimo_estado='killed'
           WHERE e.id=:id"
     )->execute([':id' => $id]);

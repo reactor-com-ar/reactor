@@ -39,7 +39,7 @@ $pdo = new PDO($dsn, DB_USER, DB_PASS, [
     PDO::ATTR_EMULATE_PREPARES   => false,
 ]);
 
-$stmt = $pdo->prepare('SELECT log_path, estado FROM tareas_cron_ejecuciones WHERE id = :id');
+$stmt = $pdo->prepare('SELECT log_path, estado FROM tareas_ejecuciones WHERE id = :id');
 $stmt->execute([':id' => $id]);
 $row = $stmt->fetch();
 if (!$row) {

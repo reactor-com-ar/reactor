@@ -31,13 +31,13 @@ $errores         = 0;
 try {
     $stmt = $pdo->query(
         "SELECT e.id, e.log_path
-           FROM tareas_cron_ejecuciones e
-           JOIN tareas_cron t ON t.id = e.tarea_id
+           FROM tareas_ejecuciones e
+           JOIN tareas t ON t.id = e.tarea_id
           WHERE e.estado != 'corriendo'
             AND TIMESTAMPDIFF(DAY, e.inicio, NOW()) > t.retencion_dias
           ORDER BY e.id"
     );
-    $del = $pdo->prepare('DELETE FROM tareas_cron_ejecuciones WHERE id = :id');
+    $del = $pdo->prepare('DELETE FROM tareas_ejecuciones WHERE id = :id');
     foreach ($stmt->fetchAll() as $row) {
         $lp = (string) ($row['log_path'] ?? '');
         if ($lp !== '' && is_file($lp)) {

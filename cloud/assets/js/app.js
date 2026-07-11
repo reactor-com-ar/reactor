@@ -5448,6 +5448,31 @@
                `</span>`;
     }
 
+    // Copia el suceso completo al portapapeles con un formato pensado para
+    // pegarse directo en un asistente de programación (metadatos etiquetados
+    // + detalle envuelto entre triples backticks para que el asistente lo
+    // trate como bloque literal y no confunda un stack trace o JSON con
+    // instrucciones). Normaliza \r\n → \n antes de copiar.
+    function sucesoDetalleCopiar(s) {
+        if (!s) { toast('No hay suceso para copiar.', { error: true }); return; }
+        const tipoMeta = SUCESOS_TIPOS[s.tipo] || SUCESOS_TIPOS.info;
+        const partes = [
+            'Suceso #' + (s.id ?? '—') + ' registrado en el panel.',
+            '',
+            'Fecha:   ' + (s.fecha  || '—'),
+            'Origen:  ' + (s.origen || '—'),
+            'Tipo:    ' + tipoMeta.label + ' (' + (s.tipo || 'info') + ')',
+            '',
+            'Detalle:',
+            '```',
+            (s.detalle || '').replace(/\r\n/g, '\n'),
+            '```',
+        ];
+        // Reusa copyToClipboard (§utils) que ya cubre el fallback vía
+        // execCommand para navegadores/contextos sin Clipboard API.
+        copyToClipboard(partes.join('\n'));
+    }
+
     async function abrirVisorSucesos() {
         if (_sucesosCtx && _sucesosCtx.listado && document.body.contains(_sucesosCtx.listado)) return;
 
@@ -5691,6 +5716,10 @@
                     </div>
                 </div>
                 <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="copy" style="margin-right:auto"
+                            title="Copiar el suceso al portapapeles para pegarlo en un asistente de programación">
+                        <i class="fa-solid fa-copy"></i> Copiar
+                    </button>
                     <button class="btn btn-ghost" data-act="close">Cerrar</button>
                 </div>
             </div>
@@ -5702,6 +5731,8 @@
         document.body.appendChild(backdrop);
         requestAnimationFrame(() => backdrop.classList.add('open'));
         _sucesosCtx.detalle = backdrop;
+
+        backdrop.querySelector('[data-act="copy"]').addEventListener('click', () => sucesoDetalleCopiar(s));
 
         const cerrar = () => {
             backdrop.classList.remove('open');

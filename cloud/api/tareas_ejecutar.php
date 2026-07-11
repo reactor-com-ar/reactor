@@ -24,13 +24,13 @@ try {
     if ($tareaId <= 0) json_error('tarea_id_requerido', 400);
 
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT * FROM tareas_cron WHERE id = :id');
+    $stmt = $pdo->prepare('SELECT * FROM tareas WHERE id = :id');
     $stmt->execute([':id' => $tareaId]);
     $tarea = $stmt->fetch();
     if (!$tarea) json_error('tarea_no_encontrada', 404);
 
     if ($tarea['overlap'] === 'skip') {
-        $chk = $pdo->prepare("SELECT COUNT(*) FROM tareas_cron_ejecuciones WHERE tarea_id=:tid AND estado='corriendo'");
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM tareas_ejecuciones WHERE tarea_id=:tid AND estado='corriendo'");
         $chk->execute([':tid' => $tareaId]);
         if ((int) $chk->fetchColumn() > 0) json_error('ya_esta_corriendo', 409);
     }
@@ -39,17 +39,17 @@ try {
     @mkdir($ejecDir, 0755, true);
 
     $ins = $pdo->prepare(
-        "INSERT INTO tareas_cron_ejecuciones (tarea_id, inicio, estado, disparo)
+        "INSERT INTO tareas_ejecuciones (tarea_id, inicio, estado, disparo)
          VALUES (:tid, NOW(), 'corriendo', 'manual')"
     );
     $ins->execute([':tid' => $tareaId]);
     $eid = (int) $pdo->lastInsertId();
 
     $logPath = $ejecDir . '/' . $eid . '.log';
-    $pdo->prepare('UPDATE tareas_cron_ejecuciones SET log_path=:p WHERE id=:id')
+    $pdo->prepare('UPDATE tareas_ejecuciones SET log_path=:p WHERE id=:id')
         ->execute([':p' => $logPath, ':id' => $eid]);
 
-    $pdo->prepare("UPDATE tareas_cron SET ultimo_run=NOW(), ultimo_estado='corriendo', ultimo_error=NULL WHERE id=:id")
+    $pdo->prepare("UPDATE tareas SET ultimo_run=NOW(), ultimo_estado='corriendo', ultimo_error=NULL WHERE id=:id")
         ->execute([':id' => $tareaId]);
 
     $encabezado = sprintf(
@@ -73,7 +73,7 @@ try {
     );
     $pid = (int) trim((string) shell_exec($cmd));
     if ($pid > 0) {
-        $pdo->prepare('UPDATE tareas_cron_ejecuciones SET pid=:p WHERE id=:id')
+        $pdo->prepare('UPDATE tareas_ejecuciones SET pid=:p WHERE id=:id')
             ->execute([':p' => $pid, ':id' => $eid]);
     }
 

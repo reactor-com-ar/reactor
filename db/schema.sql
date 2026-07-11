@@ -1233,14 +1233,13 @@ CREATE TABLE `migraciones`  (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
--- Table structure for tareas_cron
+-- Table structure for tareas
 -- Programador de tareas (herramienta cloud): catalogo de procesos
--- automaticos programados por cron. Nombre distinto de la tabla legacy
--- `tareas` (mas abajo) para no colisionar con las apps historicas.
+-- automaticos programados por cron.
 -- Ver skill crear_programador_de_tareas §2.
 -- ----------------------------
-DROP TABLE IF EXISTS `tareas_cron`;
-CREATE TABLE `tareas_cron` (
+DROP TABLE IF EXISTS `tareas`;
+CREATE TABLE `tareas` (
     `id`                 int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
     `nombre`             varchar(120) NOT NULL,
     `descripcion`        varchar(255) NULL DEFAULT NULL,
@@ -1256,16 +1255,16 @@ CREATE TABLE `tareas_cron` (
     `fecha_creacion`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `fecha_modificacion` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `uq_tareas_cron_nombre` (`nombre`) USING BTREE,
-    KEY `idx_tareas_cron_activo_ultimo_run` (`activo`, `ultimo_run`) USING BTREE
+    UNIQUE KEY `uq_tareas_nombre` (`nombre`) USING BTREE,
+    KEY `idx_tareas_activo_ultimo_run` (`activo`, `ultimo_run`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
--- Table structure for tareas_cron_ejecuciones
+-- Table structure for tareas_ejecuciones
 -- Historial de corridas del scheduler + disparos manuales.
 -- ----------------------------
-DROP TABLE IF EXISTS `tareas_cron_ejecuciones`;
-CREATE TABLE `tareas_cron_ejecuciones` (
+DROP TABLE IF EXISTS `tareas_ejecuciones`;
+CREATE TABLE `tareas_ejecuciones` (
     `id`        int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
     `tarea_id`  int(10) UNSIGNED NOT NULL,
     `pid`       int(10) UNSIGNED NULL DEFAULT NULL,
@@ -1277,9 +1276,9 @@ CREATE TABLE `tareas_cron_ejecuciones` (
     `log_path`  varchar(255) NULL DEFAULT NULL,
     `disparo`   enum('scheduler','manual') NOT NULL DEFAULT 'scheduler',
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_tareas_cron_ej_tarea_id` (`tarea_id`, `id`) USING BTREE,
-    KEY `idx_tareas_cron_ej_estado`   (`estado`) USING BTREE,
-    KEY `idx_tareas_cron_ej_inicio`   (`inicio`) USING BTREE
+    KEY `idx_tareas_ej_tarea_id` (`tarea_id`, `id`) USING BTREE,
+    KEY `idx_tareas_ej_estado`   (`estado`) USING BTREE,
+    KEY `idx_tareas_ej_inicio`   (`inicio`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1711,16 +1710,10 @@ CREATE TABLE `talonarios`  (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = MyISAM AUTO_INCREMENT = 53 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_general_ci ROW_FORMAT = Dynamic;
 
--- ----------------------------
--- Table structure for tareas
--- ----------------------------
-DROP TABLE IF EXISTS `tareas`;
-CREATE TABLE `tareas`  (
-  `id` int(0) NOT NULL AUTO_INCREMENT,
-  `nombre` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NULL DEFAULT NULL,
-  `comando` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE = MyISAM AUTO_INCREMENT = 3 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_general_ci ROW_FORMAT = Dynamic;
+-- NOTE: la definicion antigua de `tareas` (id/nombre/comando, MyISAM utf8mb3,
+-- huerfana — sin referencias en api/panel/app/www) fue eliminada acá porque
+-- el Programador de tareas del panel cloud usa la tabla `tareas` con el
+-- esquema de la skill crear_programador_de_tareas §2 (definida arriba).
 
 -- ----------------------------
 -- Table structure for temporizadores

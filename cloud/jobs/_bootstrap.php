@@ -65,7 +65,7 @@ function _cerrarEjecucion(string $estado, int $exit, ?string $mensaje): void
     try {
         $pdo = _jobsPdo();
         $stmt = $pdo->prepare(
-            "UPDATE tareas_cron_ejecuciones
+            "UPDATE tareas_ejecuciones
                 SET fin = NOW(), estado = :e, exit_code = :x, mensaje = :m
               WHERE id = :id AND estado = 'corriendo'"
         );
@@ -78,8 +78,8 @@ function _cerrarEjecucion(string $estado, int $exit, ?string $mensaje): void
         if ($stmt->rowCount() > 0) {
             // Reflejar en snapshot.
             $pdo->prepare(
-                'UPDATE tareas_cron t
-                    JOIN tareas_cron_ejecuciones e ON e.tarea_id = t.id
+                'UPDATE tareas t
+                    JOIN tareas_ejecuciones e ON e.tarea_id = t.id
                     SET t.ultimo_estado = :e,
                         t.ultimo_error  = :m
                   WHERE e.id = :id'

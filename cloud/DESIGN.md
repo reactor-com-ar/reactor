@@ -1379,29 +1379,35 @@ Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterriz
 - Columna mínima 220px con `auto-fill`: el grid se acomoda solo desde una sola tarjeta hasta varias por fila.
 - No anidar `tile-grid`s ni mezclar `tile-card` con `stat-card` en el mismo contenedor: cada uno tiene su semántica.
 
-## 28. Herramientas: CRUD dentro de modal
+## 28. Herramientas: Editor de parámetros
 
-Algunas utilidades de **Herramientas** (§27) administran tablas de configuración pequeñas que **no merecen una entrada propia en el sidebar**: la lista es corta, la edita un puñado de usuarios y solo se accede de forma esporádica. En esos casos el tile abre directamente un **modal-gestor** que concentra el ABM completo (listar / buscar / alta / edición / eliminación) sin crear una ruta nueva.
+Utilidad de **Herramientas** (§27) que gestiona la tabla `parametros` (`id / variable / valor / comentario`, esquema legacy compartido con las apps históricas de Reactor — no la tocamos, solo la editamos). El tile es `🧩 Editor de parámetros`. Cada fila es una variable runtime que otras partes del sistema leen para configurarse sin redeploy.
 
-El primer caso vivo es **Parámetros** (tabla `parametros`: `id`, `variable`, `valor`, `comentario`). El tile vive en el `tile-grid` de Herramientas y abre el modal-gestor; éste contiene su propia `toolbar` interna y su `table-card`, y delega alta/edición a un **sub-modal de formulario** y eliminación al `confirm-backdrop` estándar (§15).
+Sigue el patrón "modal-gestor + sub-modal de form" común a las utilidades ABM chicas del panel, pero con dos desviaciones respecto de un ABM normal (`ABM.md`):
+
+1. **Sin modal de Consulta separado.** El modelo es plano (3 campos que ya se ven en la tabla) — abrir un modal solo para releerlos sería ruido.
+2. **Row click → Edición** (no Consulta). Diferencia con la regla general `ABM.md §1.3` de que el click abre Consulta.
+
+Estas dos desviaciones vienen de la skill `crear_editor_de_parametros` y se aplican solo a este tipo de herramienta (configuración key/value flat). Para cualquier entidad de dominio con >4 campos, seguir usando el patrón ABM estándar.
 
 ```html
 <div class="modal-backdrop open">
-  <div class="modal modal-wide">
+  <div class="modal" style="max-width:880px">
     <div class="modal-header">
       <div class="modal-title">
-        Parámetros
-        <span class="modal-subtitle">Variables de configuración del sistema</span>
+        🧩 Editor de parámetros
+        <span class="modal-subtitle">15 parámetros</span>
       </div>
       <button class="btn-icon-sm" data-act="close">×</button>
     </div>
     <div class="modal-body">
-      <div class="toolbar" style="margin-bottom:14px">
+      <div class="toolbar" style="margin-bottom:0">
         <div class="toolbar-left">
           <div class="search-wrap">
-            <input type="search" class="search-input" placeholder="Buscar variable, valor o comentario…">
-            <button type="button" class="search-clear">×</button>
+            <input class="search-input" type="search" placeholder="🔍 Buscar variable, valor, comentario…">
+            <button class="search-clear">×</button>
           </div>
+          <button class="btn btn-ghost btn-sm" data-act="refresh"><i class="fa-solid fa-rotate"></i></button>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-primary btn-sm" data-act="new">
@@ -1409,7 +1415,9 @@ El primer caso vivo es **Parámetros** (tabla `parametros`: `id`, `variable`, `v
           </button>
         </div>
       </div>
-      <div class="table-card"> … tabla con Código / Variable / Valor / Comentario + ✏️ 🗑️ … </div>
+      <div class="table-card">
+        <table> … Código / Variable / Valor / Comentario / Acciones (☰) … </table>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" data-act="close">Cerrar</button>
@@ -1419,57 +1427,55 @@ El primer caso vivo es **Parámetros** (tabla `parametros`: `id`, `variable`, `v
 ```
 
 **Reglas:**
-- **Modal `.modal-wide`** (760px): la tabla interna necesita espacio para 4 columnas + acciones sin envolver.
-- **Toolbar interna reutilizada**: el mismo bloque `.toolbar` / `.toolbar-left` / `.toolbar-right` / `.search-wrap` que un listado ABM normal (§9), pero embebido en `.modal-body`. Búsqueda rápida client-side a la izquierda + botón primario `+ Nuevo <entidad>` a la derecha. El `margin-bottom` reducido (`14px`) compensa el padding propio del modal.
-- **Sin botón `Filtros`**: el dataset es chico (decenas de filas) y la búsqueda rápida sobre los campos visibles alcanza. Si en algún caso el volumen creciera, vale promover la herramienta a un módulo ABM real (con ruta + filtros completos) en lugar de complicar el modal.
-- **Columnas de acción reducidas a Editar + Eliminar** (`actionCells({ edit: true, delete: true })`): se omite **Consultar** porque en este patrón todos los campos de la fila ya están visibles en la tabla — abrir un modal solo para releerlos sería ruido. Es la única excepción explícita a la regla de §24 de "tres iconos siempre", justificada porque la entidad tiene ≤4 campos cortos.
-- **Alta y edición** abren un **segundo modal** estándar (`.modal`, 520px) por encima del gestor, con los campos del registro y footer `Cancelar` / `Guardar`. Al guardar, se cierra solo el formulario y el gestor refresca su lista.
-- **Eliminación** usa `confirm-backdrop` (§15) sobre el gestor, igual que cualquier otro ABM.
-- **Footer del gestor**: un único botón `Cerrar` (ghost) — no hay acción primaria, porque el ABM se ejerce desde la tabla y el botón `+ Nuevo` de la toolbar interna.
-- **Subtítulo en el header** (`.modal-subtitle`) para explicar de qué tabla hablamos en una frase; reemplaza al `module-subtitle` (§23) que aquí no aplica porque no hay header de módulo.
-- **Cuándo NO usar este patrón**: si la tabla necesita filtros (estado, dominio, fechas), si crece a cientos de filas, si interactúa con otras entidades, o si justifica métricas en `stat-card`. Esos casos van como módulo ABM regular en el sidebar.
+- **Modal 880px inline** (`style="max-width:880px"`). No hay `.editor-parametros-*` — los anchos específicos van inline.
+- **Toolbar interna**: buscador rápido client-side + botón refrescar (ghost, ícono) a la izquierda; botón primario `+ Nuevo parámetro` a la derecha. Sin botón `Filtros` — dataset chico.
+- **Búsqueda client-side sobre el cache**: el endpoint devuelve el listado completo (`SELECT * FROM parametros ORDER BY variable`). El filtro por substring vive en el front (debounce 150ms).
+- **Sin Consulta.** La columna `Acciones` tiene un único botón hamburguesa (☰) que abre el menú contextual con el orden fijo del skill: **Editar · Copiar variable · --- · Eliminar** (Eliminar al final con `danger:true`). Sin ícono de "ver".
+- **Row click → Editar**: `<tr class="row-clickable">` con listener que ignora clicks originados en `<button>` (para no conflictuar con el botón hamburguesa). Reusa el estilo del §Visor de sucesos.
+- **Sub-modal de Alta/Edición**: `.modal` chico (max-width 560px) con 3 campos: `Variable` (input monospace, `maxlength:255`), `Valor` (textarea monospace, `maxlength:255`), `Comentario` (input opcional, `maxlength:1024`). Validación client-side de `Variable` con regex `^[A-Za-z0-9_.\-]+$` — feedback inmediato en `.field-error`. El backend re-valida longitudes (`api/parametros.php`).
+- **Focus del form**: en alta, `Variable` (autofoco + select); en edición, `Valor` (la variable ya suele ser conocida — el usuario viene a cambiar el valor).
+- **"Copiar variable"** en el menú contextual: la variable es el token que se pega en código (`getParametro('smtp_host')` o equivalente), ahorra alt-tab. Usa el helper `copyToClipboard()`.
+- **Eliminación**: `confirmDialog` estándar (§15) sobre el modal-gestor.
+- **Footer del gestor**: un único botón `Cerrar` ghost. No hay acción primaria — el CRUD se ejerce desde el listado.
+- **ESC en cascada**: menú contextual (row-menu) → sub-modal de form → modal-gestor.
+- **Cuándo NO usar este patrón**: si la entidad tiene >4 campos, si la tabla crece a cientos de filas, o si necesita filtros por estado/fechas. Esos casos van como módulo ABM regular en el sidebar (ver §23).
 
-## 29. Herramientas: consola tipo terminal
+## 29. Herramientas: Migrador DB
 
-Algunas utilidades de **Herramientas** (§27) ejecutan tareas largas que producen progreso (migraciones, importadores, regeneración de caches). En esos casos el tile abre un **modal-consola** con un panel monoespaciado tipo terminal Linux donde se va volcando el log en vivo, una toolbar interna con un único botón primario que dispara la acción, y una línea de estado a la izquierda.
+Utilidad de **Herramientas** (§27) que lista los archivos `.sql` de `cloud/sql/migrations/` cruzados contra el ledger `migraciones` de la BD del entorno actual, y permite aplicarlos uno por uno o en lote. Reemplaza al antiguo "Migraciones" (consola SSE) por un modelo más discreto — cada migración se ve, se previsualiza y se aplica con un click.
 
-El primer caso vivo es **Migraciones** (`cloud/api/migraciones.php` + ledger `migraciones`). El tile vive en el `tile-grid` de Herramientas; abre el modal-consola; el botón **Ejecutar pendientes** dispara un POST que devuelve **Server-Sent Events** y cada `event: log` se renderiza como una línea coloreada por nivel (info / ok / warn / err / skip).
+El tile vive en el `tile-grid` de Herramientas (`📜 Migrador DB`). Al click abre un **modal ancho** (max-width **960px**) con dos badges en el header (nombre de la BD activa + entorno coloreado por `APP_ENV`), toolbar con refrescar + resumen textual (`N archivos · M aplicadas · K pendientes`) + botón primario **Aplicar todas las pendientes**, y una tabla con columnas `Estado / Archivo / Tamaño / Hash / Aplicada / Acciones`. La tabla vive dentro de un `.table-card` con `max-height:52vh; overflow-y:auto` y los `<th>` con `position:sticky; top:0; background:var(--bg)` — solo scrollea la lista.
+
+Las filas **no son clickeables** — las acciones se disparan desde los botones explícitos de la columna `Acciones` (**Ver SQL** siempre; **Aplicar** solo cuando el estado es pendiente). "Ver SQL" abre un segundo modal (`.modal-wide`) con el contenido del archivo en un `<textarea class="json-editor" readonly>`; si la migración está pendiente, el footer del preview trae el botón `Aplicar` inline.
+
+Cada `apply` (individual o masivo) pasa por un confirm reforzado en producción: título con ⚠, copy con `(PRODUCCIÓN)`, label `Aplicar en prod` y CTA rojo (`btn-danger`). En `development` es `btn-primary` con label `Aplicar`. Los toasts de error usan `toast(msg, { error:true, duration:10000 })` porque los mensajes crudos del motor SQL suelen ser largos.
 
 ```html
 <div class="modal-backdrop open">
-  <div class="modal migraciones-modal">
+  <div class="modal" style="max-width:960px">
     <div class="modal-header">
       <div class="modal-title">
-        <i class="fa-solid fa-terminal"></i> Migraciones
-        <span class="modal-subtitle">Aplica las migraciones pendientes de <code>cloud/sql/migrations/</code>. Operación idempotente.</span>
+        📜 Migrador DB
+        <span class="badge badge-info" style="font-family:monospace">reactor_dev</span>
+        <span class="badge badge-success" style="font-family:monospace">development</span>
       </div>
       <button class="btn-icon-sm" data-act="close">×</button>
     </div>
-    <div class="modal-body migraciones-body">
-      <div class="migraciones-toolbar">
-        <div class="migraciones-status">
-          <span class="spin-sm"></span><span>Cargando estado…</span>
+    <div class="modal-body">
+      <div class="toolbar" style="margin-bottom:0">
+        <div class="toolbar-left">
+          <button class="btn btn-ghost btn-sm" data-act="refresh"><i class="fa-solid fa-rotate"></i></button>
+          <span style="font-size:.82rem;color:var(--muted)">4 archivos · 3 aplicadas · 1 pendiente</span>
         </div>
-        <div class="migraciones-actions">
-          <button class="btn btn-ghost btn-sm" data-act="clear">
-            <i class="fa-solid fa-eraser"></i> Limpiar
-          </button>
-          <button class="btn btn-primary btn-sm" data-act="run">
-            <i class="fa-solid fa-play"></i> Ejecutar pendientes
-          </button>
+        <div class="toolbar-right">
+          <button class="btn btn-primary btn-sm" data-act="apply-all">Aplicar 1 pendiente</button>
         </div>
       </div>
-      <div class="migraciones-console">
-        <div class="mig-line mig-info">…</div>
-        <div class="mig-line mig-ok">[OK]  2026-05-16_domains.sql (12 ms)</div>
-        <div class="mig-line mig-skip">[--]  2026-05-17_chips.sql  (aplicada 2026-05-19 18:00, 8 ms)</div>
-        <div class="mig-line mig-err">[ERR] 2026-05-17_perfiles.sql (32 ms): ...</div>
+      <div class="table-card" style="max-height:52vh;overflow-y:auto">
+        <table> … Estado / Archivo / Tamaño / Hash / Aplicada / Acciones … </table>
       </div>
     </div>
     <div class="modal-footer">
-      <span class="migraciones-footer-info">
-        <i class="fa-solid fa-database"></i> Idempotente · Los archivos con éxito previo se saltean
-      </span>
       <button class="btn btn-ghost" data-act="close">Cerrar</button>
     </div>
   </div>
@@ -1477,16 +1483,123 @@ El primer caso vivo es **Migraciones** (`cloud/api/migraciones.php` + ledger `mi
 ```
 
 **Reglas:**
-- **Modal `.migraciones-modal`** (max-width 900px): la consola necesita ancho para que las líneas de log no se envuelvan.
-- **`.modal-body` sin padding y con fondo `#0a0a0a`**: el contenido es la consola misma; el body actúa de contenedor full-bleed. Toolbar interna y consola viven dentro sin huecos.
-- **Toolbar interna** (`.migraciones-toolbar`): banda gris oscura `#141414` con borde inferior `#1f1f1f`. A la izquierda, `.migraciones-status` con `.spin-sm` + texto monoespaciado describiendo el estado actual. A la derecha, una sola acción primaria (`.btn-primary` con `Play`) más utilidades ghost (`Limpiar`). Es la única acción primaria del modal — el botón **Cerrar** del footer es ghost.
-- **Consola** (`.migraciones-console`): panel `#0a0a0a`, `font-family` monoespaciada, `font-size: .8rem`, `line-height: 1.55`, `height: 60vh`, scroll vertical y horizontal, scrollbar oscuro, `white-space: pre`. Cada línea es un `<div class="mig-line mig-<nivel>">`. Auto-scroll al pie cuando llega contenido nuevo.
-- **Niveles y colores** (no son tokens de `:root` porque viven solo dentro de la consola): info gris `#d4d4d4`, ok verde `#34d399`, warn ámbar `#fbbf24`, err rojo `#f87171`, skip azul `#60a5fa`, muted gris itálico `#6b7280`. Prefijos textuales `[OK]`, `[ERR]`, `[WRN]`, `[--]` para legibilidad en copy/paste.
-- **Streaming server → UI**: el endpoint devuelve `text/event-stream`. El cliente lee la respuesta con `fetch().body.getReader()` y un parser SSE simple (busca `\n\n`, parsea `event:` y `data:` JSON). No usar `EventSource` porque queremos POST + `AbortController` para cancelar al cerrar el modal.
-- **Idempotencia**: la operación se garantiza en el server (ledger `migraciones` con `UNIQUE archivo`). La UI no necesita confirmar antes de ejecutar — re-correr es seguro.
-- **Cierre del modal durante run**: bloqueado. Click en el backdrop o en `Cerrar` durante una corrida muestra un toast y no cierra. Esto evita huérfanos en el ledger por cancelaciones a medio aplicar.
-- **Footer**: ghost `Cerrar` + `.migraciones-footer-info` a la izquierda con icono + leyenda corta sobre la idempotencia. Mismo patrón que `.signals-monitor-footer-info` (§13.2).
-- **Cuándo NO usar este patrón**: si la acción es instantánea (un solo POST sin progreso visible). En ese caso un confirm-backdrop (§15) + toast alcanza. La consola se justifica cuando hay >3 pasos discretos que el usuario quiere ver caer en orden.
+- **Modal 960px inline** (`style="max-width:960px"`): no crear una clase `.migrador-*`. Los anchos específicos de esta herramienta viven como inline styles.
+- **Doble badge en header**: `badge-info` con nombre de BD (monospace) + badge coloreado por entorno: `badge-success` en dev, `badge-danger` en prod, `badge-warn` en cualquier otro valor.
+- **Sin CSS propio**: la herramienta reusa `.modal-backdrop`, `.modal`, `.modal-wide` (para el preview), `.toolbar`, `.table-card`, `.badge*`, `.json-editor`, `.btn*` ya definidos. Solo agrega `tbody tr.row-clickable { cursor: pointer }` (que no usa el migrador pero sí el visor de sucesos, §30).
+- **Orden del listado**: pendientes arriba en orden ascendente (mismo orden en que se aplican); aplicadas debajo por `id` DESC (última aplicada arriba). No ordenar aplicadas por nombre — una migración de fecha vieja aplicada tarde tiene que aparecer arriba, no en el medio.
+- **Estado**: badge `badge-info` para `pendiente`, `badge-success` para `aplicada`, `badge-warn` con emoji `⚠` para `aplicada` con `hash_drift` (el archivo cambió después de aplicarse).
+- **Hash**: se muestran los primeros 8 chars, con el hash completo en el `title` del `<td>`.
+- **Sin CSS propio** para el preview: `.modal-wide` (760px) + `.json-editor` para el textarea SQL; botón `Aplicar` solo visible cuando la migración está pendiente.
+- **Confirm reforzado en prod**: usar el helper local `confirmarMigrador(titulo, msg, ctaLabel, danger, onOk)` — `confirmDialog` estándar hardcodea el label "Eliminar" y no sirve acá.
+- **Cierre durante corrida masiva**: bloqueado con toast (`Hay una migración en curso`). El backdrop de listado ignora clicks; el ESC solo cierra el preview, no el listado, mientras `_migradorAplicando` esté activo.
+- **Cuándo NO usar este patrón**: si la migración implica progreso multi-paso visible (log de 100 líneas por archivo), un modal-consola SSE sería más apropiado. El Migrador DB apuesta a que cada `.sql` es corto y se aplica en <1s — para eso alcanza con el toast final.
+
+## 30. Herramientas: Visor de sucesos
+
+Utilidad de **Herramientas** (§27) que muestra el log de actividad de los módulos del panel cloud (`sucesos_log` — no confundir con la tabla legacy `sucesos` compartida con las apps históricas). El panel solo lee: la escritura vive en `api/lib/sucesos.php` (`registrarSuceso()`), invocada desde el resto de los endpoints cuando pasa algo notable.
+
+El tile es `📰 Visor de sucesos`. El modal es **ancho** (max-width **1100px**) con toolbar que combina buscador rápido + **chips de filtro por tipo** (Todos · Info · Alerta · Error, en ese orden, con Error último) + rango de fechas (`Desde` / `Hasta`) + selector de `Límite` (100 / 200 / 500 / 1000 / 2000, default 200) + refrescar. La tabla lista `ID / Fecha / Origen / Tipo / Detalle`; las filas son clickeables (`row-clickable`) y abren un **modal de detalle** (max-width 780px) con Fecha + Tipo (ícono + etiqueta) en `form-row`, Origen en fila propia, y Detalle en un `<textarea readonly>` monoespaciado grande.
+
+**Iconos + colores por tipo** (fijos, no cambiar por proyecto):
+- **Info** → `fa-circle-info` en `var(--info)`.
+- **Alerta** → `fa-triangle-exclamation` en `var(--warn)`.
+- **Error** → `fa-circle-exclamation` en `var(--danger)`.
+
+Se usan en los chips, en la celda `Tipo` del listado y en el modal de detalle.
+
+```html
+<div class="modal-backdrop open">
+  <div class="modal" style="max-width:1100px">
+    <div class="modal-header">
+      <div class="modal-title">
+        📰 Visor de sucesos
+        <span class="modal-subtitle">200 de 12.345 registros</span>
+      </div>
+      <button class="btn-icon-sm" data-act="close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="toolbar" style="margin-bottom:0">
+        <div class="toolbar-left">
+          <div class="search-wrap"><input class="search-input" type="search" placeholder="🔍 Buscar origen, detalle…"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="filter-chip active">Todos</button>
+            <button class="filter-chip"><i class="fa-solid fa-circle-info" style="color:var(--info)"></i> Info</button>
+            <button class="filter-chip"><i class="fa-solid fa-triangle-exclamation" style="color:var(--warn)"></i> Alerta</button>
+            <button class="filter-chip"><i class="fa-solid fa-circle-exclamation" style="color:var(--danger)"></i> Error</button>
+          </div>
+          <label>Desde <input type="date"></label>
+          <label>Hasta <input type="date"></label>
+          <label>Límite <select>…</select></label>
+          <button class="btn btn-ghost btn-sm"><i class="fa-solid fa-rotate"></i></button>
+        </div>
+      </div>
+      <div class="table-card">
+        <table> … ID / Fecha / Origen / Tipo / Detalle … </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-act="close">Cerrar</button>
+    </div>
+  </div>
+</div>
+```
+
+**Reglas:**
+- **Read-only end to end.** No hay botones de alta / edición / borrado. El endpoint `api/sucesos.php` rechaza con 405 cualquier método que no sea `GET`. Si el usuario necesita purgar la tabla, es otra herramienta (que no existe todavía — por ahora se hace vía DB directa).
+- **Orden fijo `id DESC`** (más recientes arriba). No exponer control de orden en la UI.
+- **Chips excluyentes**: sólo un chip activo a la vez. Todos · Info · Alerta · Error, en ese orden — Error último porque visualmente pesa más y es la categoría menos frecuente. No hay multi-select.
+- **Selector de límite explícito** en vez de paginación: el visor es para ojear, no para recorrer. Si el usuario necesita más de 2000, afinar filtros.
+- **Truncado del detalle en el listado**: `max-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap` en la celda + `title="<detalle>"` para tooltip completo al hover. Click en la fila abre el modal de detalle con el textarea grande.
+- **Doble modal**: el modal de listado queda abierto **debajo** del modal de detalle. Al cerrar el detalle, el listado sigue visible y preserva filtros + scroll. ESC cierra en cascada (detalle → listado).
+- **Sin CSS propio**: reusa `.modal-backdrop`, `.modal`, `.toolbar`, `.search-wrap`, `.filter-chip`, `.table-card`, `.form-row`, `.form-group`, `.json-editor`, `.td-id`, `.badge*` y `tbody tr.row-clickable`. Los anchos (`max-width:1100px` en listado, `780px` en detalle) van inline sobre `.modal`.
+- **`tipo` NUNCA es null en el JSON**: el backend fuerza `'info'` ante valores inválidos o vacíos, para que el front siempre pinte el ícono correcto sin condicionales extra.
+- **Escritura desde otros módulos**: `require_once __DIR__ . '/lib/sucesos.php'` (o su equivalente) + `registrarSuceso($pdo, 'NombreCorto', 'info'|'error'|'alerta', 'texto')`. El helper swallowea sus propios errores: un fallo en el log nunca debe romper el flujo del caller.
+
+## 31. Herramientas: Explorador DB
+
+Utilidad de **Herramientas** que recorre las tablas de la BD del entorno activo. Modal a pantalla casi completa (`max-width:1080px; height:calc(100vh - 64px)`), dos vistas: **listado de tablas** (tabla clickeable con `Tabla / Filas (aprox.) / Engine`) y **detalle** con tabs `Registros` (default) y `Campos`. Breadcrumbs `🗄️ <db> / <tabla>` navegan entre vistas.
+
+**Pestaña Registros**: selector de `Límite` (10 / 50 / 100 / 200 / 500, default 50), buscador client-side sobre lo cargado, orden fijo `PK DESC`. **Doble click** en celdas editables abre editor inline con ✓ / ✗ y `⊘ NULL` cuando la columna lo permite. Se bloquea la edición de columnas PK, `auto_increment` y de tablas sin PK — visualmente con `cursor:not-allowed` y color muteado.
+
+**Pestaña Campos**: `# / Campo / Tipo / Null / Clave / Default / Extra`. Badges: `PRI→PK warn`, `UNI→UQ info`, `MUL→IDX`. `Default null` como `NULL` muteado; `Extra` y valores no nulos en `<code>`.
+
+**Endpoints** (`api/db_tables.php`, `api/db_describe.php`, `api/db_records.php`, `api/db_update.php`): siempre validan identificadores contra `INFORMATION_SCHEMA` antes de meterlos en SQL. `update` es solo POST, PK obligatoria, rechaza editar PK/auto_increment/NULL sobre NOT NULL, relee el valor guardado (por si el motor casteó) y lo devuelve como `valor_guardado`.
+
+**Estilo local**: reusa `.modal`, `.badge*`, `.table-card`, `.spin`. La única clase específica del módulo es la cascada `.db-exp-*` documentada en el bloque §30 de `style.css`.
+
+## 32. Herramientas: Explorador S3
+
+Utilidad de **Herramientas** que navega el bucket S3 del entorno activo como un file manager. Modal `max-width:980px; height:calc(100vh - 24px)`; header con badge `badge-info` del bucket activo; toolbar con **breadcrumbs 🏠 raíz / ...** a la izquierda y a la derecha, en orden estricto: **Refrescar · Buscador · Subir · Nueva carpeta**. Tabla `[ícono] / Nombre / Tamaño / Modificado / Acciones` con la fila `..` cuando hay `prefix` activo, ordenada por `Modificado DESC`.
+
+**Menú contextual** (usa `openRowMenu` estándar): `Abrir / Descargar` · `Copiar URL pública` · --- · `Eliminar` (rojo). Los dos primeros se ocultan para carpetas. **Eliminar carpeta** siempre pasa por `confirmDialog` con copy explícito de "TODO su contenido de forma recursiva".
+
+**Thumbnails** 28×28 para archivos de imagen (`jpg/jpeg/png/gif/webp/bmp/svg/avif`) con `loading="lazy"` y fallback a `fa-file-image` `onerror`.
+
+**Backend**: 4 endpoints (`api/s3_list.php`, `api/s3_upload.php`, `api/s3_create_folder.php`, `api/s3_delete.php`) apoyados en el helper `api/lib/s3.php` que firma SigV4 desde cero (sin AWS SDK). Las 4 variables `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_S3_BUCKET` viven en el `.env*` del entorno (canónicas — no usar `AWS_DEFAULT_REGION`). **Upload límite 20 MB**, MIME detectado del contenido real.
+
+## 33. Herramientas: Programador de tareas
+
+Utilidad de **Herramientas** que administra procesos automáticos programables. La fuente de verdad de qué corre y cuándo vive en la tabla `tareas_cron` (nombre distinto de la tabla legacy `tareas` id/nombre/comando que ya existe en el schema); el cron del sistema tiene **una única línea** que invoca el scheduler cada minuto.
+
+**Modal de listado** (`max-width:1080px`): toolbar con buscador + chips `Todas / Activas / Inactivas` + `+ Nueva tarea`; tabla `Código / Nombre / Cron / Estado / Última corrida / Activa / Acciones`. Toggle inline en la columna `Activa`. Click en fila abre el **modal de Ejecuciones**; menú contextual con `Ver ejecuciones · Ejecutar ahora · Activar/Desactivar · Editar · Eliminar`.
+
+**Modal de Alta/Edición** (`max-width:640px`): `Nombre`, `Descripción` opcional, `Script` (`<select>` poblado desde `api/tareas_scripts_disponibles.php`), `Expresión cron` (monospace) con botón `fa-sliders` que abre el **Constructor de cron** (5 selects modo + input + preview + descripción en español), `Timeout`, `Si ya está corriendo` (`Saltar` / `Ejecutar`), `Retención (días)`, `Estado`.
+
+**Modal de Ejecuciones** (`max-width:1000px`): chips por estado (`Todas / Corriendo / OK / Error / Timeout / Killed`) + tabla `Código / Inicio / Duración / Estado / Disparo / Mensaje / Acciones`. Click en fila abre el **modal Terminal** con streaming SSE.
+
+**Modal Terminal** (`max-width:960px`): `<pre class="terminal-live">` a fondo `#0d1117`, badge de estado en vivo, footer con `Auto-scroll` (toggle), `Detener` (visible mientras el SSE sigue abierto) y `Cerrar`. La conexión SSE emite `event: end` al cerrar la fila; el badge muta a `ok / error / timeout / killed`.
+
+**Backend**: 5 endpoints (`tareas.php`, `tareas_ejecuciones.php`, `tareas_ejecutar.php`, `tareas_ejecucion_stream.php`, `tareas_scripts_disponibles.php`) — los nombres de archivo mantienen `tareas` (sin `_cron`) para no reflejar detalle interno en la URL. Dos tablas: `tareas_cron` (catálogo) + `tareas_cron_ejecuciones` (historial). `DELETE` de una tarea corta en cascada (rechaza si hay una ejecución corriendo, borra los `.log` de disco, luego historial + fila). **Logging de errores**: cada `catch (Throwable $e)` de los endpoints llama a `registrarSuceso($pdo, 'cron/<endpoint>', 'error', $e->getMessage())` para que las fallas aparezcan en el Visor de sucesos (`sucesos_log`).
+
+**Infraestructura de jobs** (`cloud/jobs/`): `_scheduler.php` (tick minutal), `_bootstrap.php` (runtime común con `marcarEjecucionOk/Error`, `anotarLog`, `ejecucionId`), `_cleanup_logs.php` (cleanup nocturno por `retencion_dias`), `.htaccess` (`Require all denied`), `crontab` (versionado; se instala en `/etc/cron.d/reactor-cloud`). Cada ejecución tiene su propio `.log` en `/var/log/reactor/cloud/ejecuciones/<id>.log`.
+
+**Requisitos de despliegue** (una sola vez al aprovisionar el server, ver `cloud/jobs/crontab`):
+1. `cronie` instalado.
+2. Extensión PHP `pcntl` habilitada (para el handler de SIGTERM del bootstrap).
+3. Directorio `/var/log/reactor/cloud/ejecuciones/` con owner `www-data:www-data` y `chmod 755`.
+4. Copiar `cloud/jobs/crontab` a `/etc/cron.d/reactor-cloud` (`chown root:root`, `chmod 644`).
+
+Estos pasos se documentan también en el propio `cloud/jobs/crontab` y quedan pendientes del script de aprovisionar del server (no forman parte del deploy).
 
 ---
 

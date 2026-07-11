@@ -1,0 +1,19 @@
+# cloud/jobs/crontab
+# Se instala en /etc/cron.d/reactor-cloud durante el aprovisionar del server.
+# El deploy NO regenera este archivo — el ABM de tareas vive en la BD.
+#
+# Convención de naming (skill §5c): /etc/cron.d/<monorepo>-<admin>
+#   monorepo = reactor
+#   admin    = cloud
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Tick minutal del scheduler.
+* * * * * root docker exec reactor-apache php /opt/app/reactor/cloud/jobs/_scheduler.php >> /var/log/reactor/cloud/scheduler.log 2>&1
+
+# Cleanup nocturno por retencion_dias.
+0 3 * * * root docker exec reactor-apache php /opt/app/reactor/cloud/jobs/_cleanup_logs.php >> /var/log/reactor/cloud/scheduler.log 2>&1
+
+# Rotación blanda del propio scheduler.log.
+5 3 * * * root find /var/log/reactor/cloud/scheduler.log -size +10M -exec truncate -s 0 {} \; 2>/dev/null

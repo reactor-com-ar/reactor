@@ -1219,19 +1219,67 @@ CREATE TABLE `menus`  (
 
 -- ----------------------------
 -- Table structure for migraciones
+-- Ledger del Migrador DB (cloud). Una fila por migracion aplicada
+-- exitosamente. La unicidad de `nombre` la garantiza el endpoint apply
+-- en aplicacion (no hay UNIQUE a nivel DDL para permitir re-runs manuales).
 -- ----------------------------
 DROP TABLE IF EXISTS `migraciones`;
 CREATE TABLE `migraciones`  (
   `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `archivo` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `hash_sha256` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `ejecutado_at` datetime(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-  `duracion_ms` int(10) UNSIGNED NOT NULL DEFAULT 0,
-  `success` tinyint(1) NOT NULL DEFAULT 1,
-  `error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `uq_archivo` (`archivo`) USING BTREE,
-  INDEX `idx_ejecutado_at` (`ejecutado_at`) USING BTREE
+  `nombre` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `aplicada` datetime(0) NULL DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for tareas_cron
+-- Programador de tareas (herramienta cloud): catalogo de procesos
+-- automaticos programados por cron. Nombre distinto de la tabla legacy
+-- `tareas` (mas abajo) para no colisionar con las apps historicas.
+-- Ver skill crear_programador_de_tareas §2.
+-- ----------------------------
+DROP TABLE IF EXISTS `tareas_cron`;
+CREATE TABLE `tareas_cron` (
+    `id`                 int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+    `nombre`             varchar(120) NOT NULL,
+    `descripcion`        varchar(255) NULL DEFAULT NULL,
+    `script`             varchar(255) NOT NULL,
+    `cron_expr`          varchar(80)  NOT NULL,
+    `activo`             tinyint(1)   NOT NULL DEFAULT 1,
+    `overlap`            enum('skip','allow') NOT NULL DEFAULT 'skip',
+    `timeout_seg`        int(10) UNSIGNED NOT NULL DEFAULT 300,
+    `retencion_dias`     int(10) UNSIGNED NOT NULL DEFAULT 7,
+    `ultimo_run`         datetime NULL DEFAULT NULL,
+    `ultimo_estado`      enum('ok','error','timeout','killed','corriendo') NULL DEFAULT NULL,
+    `ultimo_error`       text NULL,
+    `fecha_creacion`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `fecha_modificacion` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uq_tareas_cron_nombre` (`nombre`) USING BTREE,
+    KEY `idx_tareas_cron_activo_ultimo_run` (`activo`, `ultimo_run`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for tareas_cron_ejecuciones
+-- Historial de corridas del scheduler + disparos manuales.
+-- ----------------------------
+DROP TABLE IF EXISTS `tareas_cron_ejecuciones`;
+CREATE TABLE `tareas_cron_ejecuciones` (
+    `id`        int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+    `tarea_id`  int(10) UNSIGNED NOT NULL,
+    `pid`       int(10) UNSIGNED NULL DEFAULT NULL,
+    `inicio`    datetime NOT NULL,
+    `fin`       datetime NULL DEFAULT NULL,
+    `estado`    enum('corriendo','ok','error','timeout','killed') NOT NULL DEFAULT 'corriendo',
+    `exit_code` int NULL DEFAULT NULL,
+    `mensaje`   text NULL,
+    `log_path`  varchar(255) NULL DEFAULT NULL,
+    `disparo`   enum('scheduler','manual') NOT NULL DEFAULT 'scheduler',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_tareas_cron_ej_tarea_id` (`tarea_id`, `id`) USING BTREE,
+    KEY `idx_tareas_cron_ej_estado`   (`estado`) USING BTREE,
+    KEY `idx_tareas_cron_ej_inicio`   (`inicio`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1610,6 +1658,9 @@ CREATE TABLE `sesiones`  (
 
 -- ----------------------------
 -- Table structure for sucesos
+-- Legacy Reactor: log compartido con apps historicas (api / panel / www /
+-- app). No la toca `cloud/`. El visor de sucesos del panel cloud usa
+-- `sucesos_log` (mas abajo), que sigue el esquema estandar de la skill.
 -- ----------------------------
 DROP TABLE IF EXISTS `sucesos`;
 CREATE TABLE `sucesos`  (
@@ -1621,6 +1672,23 @@ CREATE TABLE `sucesos`  (
   `detalle` varchar(2000) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NULL DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = MyISAM AUTO_INCREMENT = 4059556 CHARACTER SET = utf8mb3 COLLATE = utf8mb3_general_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sucesos_log
+-- Log de actividad de los modulos de `cloud/`, leido por el Visor de
+-- sucesos del panel. Los modulos escriben con registrarSuceso() (helper
+-- api/lib/sucesos.php). Independiente de la tabla legacy `sucesos` para
+-- no interferir con las apps historicas.
+-- ----------------------------
+DROP TABLE IF EXISTS `sucesos_log`;
+CREATE TABLE `sucesos_log`  (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `fecha` datetime(0) NULL DEFAULT NULL,
+  `origen` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
+  `tipo` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'info',
+  `detalle` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for talonarios

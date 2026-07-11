@@ -4612,9 +4612,15 @@
     }
 
     /* ---------- Views: Herramientas ---------- */
+    // Orden alfabético por título (crear_modulo_herramientas). Cuando agregues
+    // una tarjeta nueva, insertala en el lugar que le corresponda por título.
     const toolsCatalog = [
-        { icon: '⚙️', title: 'Parámetros',  desc: 'Administra las variables de configuración del sistema.', action: openParametrosManager },
-        { icon: '🛠️', title: 'Migraciones', desc: 'Ejecuta migraciones de base de datos con log en vivo. Idempotente.', action: openMigracionesConsole },
+        { icon: '🧩', title: 'Editor de parámetros',   desc: 'Variables runtime (variable / valor) que el resto del sistema lee.', action: abrirEditorParametros },
+        { icon: '🗄️', title: 'Explorador DB',           desc: 'Recorré las tablas de la base del entorno actual, ojeá su estructura y los últimos registros.', action: abrirExploradorDB },
+        { icon: '📁', title: 'Explorador S3',           desc: 'Navegá, subí, descargá y eliminá carpetas y archivos del bucket del entorno actual.', action: abrirExploradorS3 },
+        { icon: '📜', title: 'Migrador DB',            desc: 'Aplicá las migraciones pendientes de cloud/sql/migrations/ contra la BD del entorno actual.', action: abrirMigraciones },
+        { icon: '⏰', title: 'Programador de tareas',   desc: 'Administrá los procesos automáticos programados (tabla tareas) y revisá el historial + log en vivo de cada ejecución.', action: abrirTareas },
+        { icon: '📰', title: 'Visor de sucesos',       desc: 'Recorré el log de actividad (tabla sucesos_log) que los distintos módulos van registrando al trabajar.', action: abrirVisorSucesos },
     ];
 
     function renderTools(root) {
@@ -4642,42 +4648,75 @@
         });
     }
 
-    /* ---------- Herramientas: Parámetros ---------- */
+    /* ---------- Herramientas: Editor de parámetros ---------- */
     // Tabla `parametros` (db/schema.sql): id, variable, valor, comentario.
-    // A diferencia de los ABM regulares, vive 100% dentro de un modal lanzado
-    // desde el tile-grid de Herramientas. La lista se mantiene en memoria
-    // dentro del modal y se re-fetchea tras cada alta/edición/borrado.
+    // El schema es el legacy compartido con las apps históricas de Reactor
+    // (MyISAM utf8mb3, sin UNIQUE en variable, sin timestamps). Adaptamos la
+    // UX del skill "crear_editor_de_parametros" al esquema real: los campos
+    // del form se llaman "Variable" y "Comentario" (coincidiendo con la
+    // columna) en vez de "Clave" y "Descripción". El menú contextual sigue
+    // el orden del skill: Editar / Copiar variable / --- / Eliminar. Row
+    // click → edición directa (no hay modal de Consulta separado — con 3
+    // campos flat, la consulta colapsa con la edición).
 
-    async function openParametrosManager() {
+    let _paramCache          = [];   // último listado recibido
+    let _paramFiltroQ        = '';
+    let _paramCtx            = null; // { listado: backdrop, form: backdrop|null }
+    let _paramSearchTimer    = null;
+    let _paramGuardando      = false;
+
+    const _RE_VARIABLE_PARAM = /^[A-Za-z0-9_.\-]+$/;
+
+    async function abrirEditorParametros() {
+        if (_paramCtx && _paramCtx.listado && document.body.contains(_paramCtx.listado)) return;
+        _paramFiltroQ = '';
+
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="params-title">
+            <div class="modal" role="dialog" aria-modal="true" style="max-width:880px">
                 <div class="modal-header">
-                    <div class="modal-title" id="params-title">
-                        Parámetros
-                        <span class="modal-subtitle">Variables de configuración del sistema</span>
+                    <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-size:1.2rem">🧩</span>
+                        <span>Editor de parámetros</span>
+                        <span id="paramResumen" class="modal-subtitle"></span>
                     </div>
-                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
                 </div>
-                <div class="modal-body">
-                    <div class="toolbar" style="margin-bottom:14px">
-                        <div class="toolbar-left">
+                <div class="modal-body" style="gap:12px">
+                    <div class="toolbar" style="margin-bottom:0">
+                        <div class="toolbar-left" style="gap:8px;flex-wrap:wrap">
                             <div class="search-wrap">
-                                <input type="search" id="params-quick" class="search-input"
-                                       placeholder="Buscar variable, valor o comentario…">
-                                <button type="button" class="search-clear"
-                                        data-act="quick-clear" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">×</button>
+                                <input class="search-input" type="search" id="paramSearch"
+                                       placeholder="🔍 Buscar variable, valor, comentario…">
+                                <button class="search-clear" id="paramSearchClear" style="display:none">×</button>
                             </div>
+                            <button class="btn btn-ghost btn-sm" data-act="refresh" title="Refrescar">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
                         </div>
                         <div class="toolbar-right">
-                            <button type="button" class="btn btn-primary btn-sm" data-act="new">
+                            <button class="btn btn-primary btn-sm" data-act="new">
                                 <i class="fa-solid fa-plus"></i> Nuevo parámetro
                             </button>
                         </div>
                     </div>
-                    <div class="table-card" id="params-table">
-                        <div class="table-empty"><div class="spin"></div></div>
+
+                    <div class="table-card">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:80px">Código</th>
+                                    <th style="width:220px">Variable</th>
+                                    <th>Valor</th>
+                                    <th>Comentario</th>
+                                    <th style="width:60px;text-align:center">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paramTbody">
+                                <tr><td colspan="5" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -4687,185 +4726,264 @@
         `;
         document.body.appendChild(backdrop);
         requestAnimationFrame(() => backdrop.classList.add('open'));
+        _paramCtx = { listado: backdrop, form: null };
 
-        const close = () => {
-            backdrop.classList.remove('open');
-            setTimeout(() => backdrop.remove(), 200);
-        };
-        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
-        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrarEditorParametros(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarEditorParametros));
+        backdrop.querySelector('[data-act="refresh"]').addEventListener('click', cargarParametros);
+        backdrop.querySelector('[data-act="new"]').addEventListener('click', () => abrirFormParametro(null));
 
-        const tableWrap = backdrop.querySelector('#params-table');
-        const quick     = backdrop.querySelector('#params-quick');
-        const quickClr  = backdrop.querySelector('[data-act="quick-clear"]');
-        const btnNew    = backdrop.querySelector('[data-act="new"]');
-
-        const state = { texto: '', items: [] };
-
-        function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const filtered = q
-                ? state.items.filter(p =>
-                    ((p.variable   ?? '') + ' ' +
-                     (p.valor      ?? '') + ' ' +
-                     (p.comentario ?? '')).toLowerCase().includes(q))
-                : state.items;
-            tableWrap.innerHTML = parametrosTableBody(filtered);
-            wireRowActions();
-        }
-
-        function rowMenuFor(p) {
-            return standardRowMenuItems({
-                edit:   true, onEdit:   () => openParametroForm(p, reload),
-                delete: true, onDelete: () => confirmDeleteParametro(p, reload),
-            });
-        }
-        function wireRowActions() {
-            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
-                const id = +tr.dataset.id;
-                const p  = state.items.find(x => x.id === id);
-                if (!p) return;
-                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
-                    e.stopPropagation();
-                    openRowMenu(rowMenuFor(p), e.currentTarget);
-                });
-                tr.addEventListener('contextmenu', e => {
-                    e.preventDefault();
-                    openRowMenu(rowMenuFor(p), { x: e.clientX, y: e.clientY });
-                });
-            });
-        }
-
-        async function reload() {
-            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
-            try {
-                const data = await api('parametros.php');
-                state.items = data.parametros || [];
-                applyAndRender();
-            } catch (e) {
-                tableWrap.innerHTML = `<div class="table-empty" style="color:var(--danger)">Error: ${escape(e.message)}</div>`;
-            }
-        }
-
-        quick.addEventListener('input', () => {
-            state.texto = quick.value.trim();
-            applyAndRender();
+        const inputSearch = backdrop.querySelector('#paramSearch');
+        const btnClear    = backdrop.querySelector('#paramSearchClear');
+        inputSearch.addEventListener('input', () => paramOnSearch(inputSearch.value));
+        btnClear.addEventListener('click', () => {
+            inputSearch.value = '';
+            paramLimpiarBusqueda();
+            inputSearch.focus();
         });
-        quickClr.addEventListener('click', () => {
-            quick.value = '';
-            state.texto = '';
-            applyAndRender();
-            quick.focus();
-        });
-        btnNew.addEventListener('click', () => openParametroForm(null, reload));
 
-        reload();
+        cargarParametros();
     }
 
-    function parametrosTableBody(items) {
-        if (!items.length) {
-            return `<div class="table-empty">No hay parámetros para mostrar.</div>`;
-        }
-        const rows = items.map(p => `
-            <tr data-id="${p.id}">
-                <td><span class="td-id">#${p.id}</span></td>
-                <td class="td-nombre">${escape(p.variable ?? '')}</td>
-                <td>${p.valor != null && p.valor !== '' ? escape(p.valor) : '<span style="color:var(--muted)">—</span>'}</td>
-                <td>${p.comentario != null && p.comentario !== '' ? escape(p.comentario) : '<span style="color:var(--muted)">—</span>'}</td>
-                ${actionCells()}
-            </tr>
-        `).join('');
-        return `
-            <table>
-                <thead>
-                    <tr>
-                        <th>Código</th>
-                        <th>Variable</th>
-                        <th>Valor</th>
-                        <th>Comentario</th>
-                        ${actionHeaderCells()}
-                    </tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
-        `;
+    function cerrarEditorParametros() {
+        if (!_paramCtx || !_paramCtx.listado) return;
+        const bd = _paramCtx.listado;
+        bd.classList.remove('open');
+        setTimeout(() => bd.remove(), 200);
+        _paramCtx = null;
     }
 
-    function openParametroForm(param, onSaved) {
+    function paramOnSearch(v) {
+        _paramFiltroQ = (v || '').trim();
+        if (_paramCtx) {
+            _paramCtx.listado.querySelector('#paramSearchClear').style.display =
+                _paramFiltroQ ? '' : 'none';
+        }
+        clearTimeout(_paramSearchTimer);
+        // Filtrado 100% client-side sobre el cache — el endpoint no soporta
+        // ?q. Debounce corto para no re-renderizar en cada tecla.
+        _paramSearchTimer = setTimeout(() => renderParametros(_paramFiltroAplicado()), 150);
+    }
+
+    function paramLimpiarBusqueda() {
+        _paramFiltroQ = '';
+        if (_paramCtx) {
+            _paramCtx.listado.querySelector('#paramSearch').value = '';
+            _paramCtx.listado.querySelector('#paramSearchClear').style.display = 'none';
+        }
+        renderParametros(_paramCache);
+    }
+
+    function _paramFiltroAplicado() {
+        if (!_paramFiltroQ) return _paramCache;
+        const q = _paramFiltroQ.toLowerCase();
+        return _paramCache.filter(p =>
+            ((p.variable   ?? '') + ' ' +
+             (p.valor      ?? '') + ' ' +
+             (p.comentario ?? '')).toLowerCase().includes(q)
+        );
+    }
+
+    async function cargarParametros() {
+        if (!_paramCtx) return;
+        const tbody = _paramCtx.listado.querySelector('#paramTbody');
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>`;
+        try {
+            const data = await api('parametros.php');
+            _paramCache = data.parametros || [];
+            renderParametros(_paramFiltroAplicado());
+            actualizarResumenParametros();
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        }
+    }
+
+    function actualizarResumenParametros() {
+        if (!_paramCtx) return;
+        const total   = _paramCache.length;
+        const shown   = _paramFiltroAplicado().length;
+        const resumen = _paramCtx.listado.querySelector('#paramResumen');
+        if (!resumen) return;
+        resumen.textContent = _paramFiltroQ
+            ? `${shown} de ${total} parámetros`
+            : `${total} parámetros`;
+    }
+
+    function renderParametros(rows) {
+        if (!_paramCtx) return;
+        const tbody = _paramCtx.listado.querySelector('#paramTbody');
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty">No hay parámetros para mostrar.</td></tr>`;
+            actualizarResumenParametros();
+            return;
+        }
+        const dashVacio = `<span style="color:var(--muted)">—</span>`;
+        tbody.innerHTML = rows.map(p => {
+            const variable   = escape(p.variable   ?? '');
+            const valorFull  = escape(p.valor      ?? '');
+            const comentario = escape(p.comentario ?? '');
+            return `
+                <tr class="row-clickable" data-id="${p.id}">
+                    <td class="td-id">#${p.id}</td>
+                    <td style="font-family:monospace;font-weight:600">${variable}</td>
+                    <td style="font-family:monospace;color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                        title="${valorFull}">
+                        ${p.valor != null && p.valor !== '' ? valorFull : dashVacio}
+                    </td>
+                    <td style="font-size:.82rem;color:var(--muted)">${p.comentario != null && p.comentario !== '' ? comentario : dashVacio}</td>
+                    <td style="text-align:center">
+                        <div class="actions" style="justify-content:center">
+                            <button class="btn-icon-sm" data-act="menu" title="Más acciones">
+                                <i class="fa-solid fa-bars"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+            const id = +tr.dataset.id;
+            const p  = _paramCache.find(x => x.id === id);
+            if (!p) return;
+            // Row click → editar (skill: no hay Consulta separada).
+            tr.addEventListener('click', e => {
+                if (e.target.closest('button')) return;
+                abrirFormParametro(p);
+            });
+            tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                e.stopPropagation();
+                openRowMenu(menuItemsParametro(p), e.currentTarget);
+            });
+            tr.addEventListener('contextmenu', e => {
+                e.preventDefault();
+                openRowMenu(menuItemsParametro(p), { x: e.clientX, y: e.clientY });
+            });
+        });
+        actualizarResumenParametros();
+    }
+
+    // Menú contextual de fila (orden fijo del skill):
+    //   Editar · Copiar variable · --- · Eliminar
+    // No hay "Consultar" — el row click ya abre la edición y el modelo
+    // (variable / valor / comentario) es flat.
+    function menuItemsParametro(p) {
+        return [
+            { act: 'edit',   label: 'Editar',            icon: 'fa-pencil', onSelect: () => abrirFormParametro(p) },
+            { act: 'copy',   label: 'Copiar variable',   icon: 'fa-copy',   onSelect: () => copiarVariableParametro(p) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar',          icon: 'fa-trash',  danger: true, onSelect: () => eliminarParametro(p) },
+        ];
+    }
+
+    function copiarVariableParametro(p) {
+        copyToClipboard(p.variable || '');
+    }
+
+    // Modal de Alta/Edición. `param === null` → alta; row completo → edición.
+    // Se abre por ENCIMA del modal de listado (dos modales apilados). El
+    // listado sigue visible detrás para dar contexto.
+    function abrirFormParametro(param) {
         const isEdit = !!param;
 
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal" role="dialog" aria-modal="true" style="max-width:560px">
                 <div class="modal-header">
-                    <div class="modal-title">${isEdit ? 'Editar parámetro' : 'Nuevo parámetro'}</div>
-                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                    <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+                        <span style="font-size:1.2rem">🧩</span>
+                        <span>${isEdit ? 'Editar parámetro' : 'Nuevo parámetro'}</span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
-                        <label for="param-variable">Variable</label>
-                        <input type="text" id="param-variable" maxlength="255"
-                               value="${escape(param?.variable ?? '')}"
-                               placeholder="ej.: smtp_host" required>
-                        <div class="field-error" id="param-variable-err" style="display:none"></div>
+                        <label for="paramFormVariable">Variable</label>
+                        <input type="text" id="paramFormVariable" maxlength="255"
+                               autocomplete="off" autocapitalize="none" spellcheck="false"
+                               style="font-family:monospace"
+                               placeholder="ej.: smtp_host, moneda_default"
+                               value="${escape(param?.variable ?? '')}">
+                        <div class="field-error" id="paramFormVariableErr" style="display:none"></div>
                     </div>
                     <div class="form-group">
-                        <label for="param-valor">Valor</label>
-                        <input type="text" id="param-valor" maxlength="255"
-                               value="${escape(param?.valor ?? '')}"
-                               placeholder="Opcional">
-                        <div class="field-error" id="param-valor-err" style="display:none"></div>
+                        <label for="paramFormValor">Valor</label>
+                        <textarea id="paramFormValor" maxlength="255"
+                                  rows="3" style="font-family:monospace"
+                                  placeholder="Valor del parámetro…">${escape(param?.valor ?? '')}</textarea>
+                        <div class="field-error" id="paramFormValorErr" style="display:none"></div>
                     </div>
                     <div class="form-group">
-                        <label for="param-comentario">Comentario</label>
-                        <textarea id="param-comentario" maxlength="1024" placeholder="Opcional">${escape(param?.comentario ?? '')}</textarea>
-                        <div class="field-error" id="param-comentario-err" style="display:none"></div>
+                        <label for="paramFormComentario">
+                            Comentario <span style="font-weight:400;color:var(--muted)">— opcional</span>
+                        </label>
+                        <input type="text" id="paramFormComentario" maxlength="1024"
+                               placeholder="Para qué se usa este parámetro"
+                               value="${escape(param?.comentario ?? '')}">
+                        <div class="field-error" id="paramFormComentarioErr" style="display:none"></div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
+                    <button class="btn btn-ghost" data-act="close">Cancelar</button>
                     <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear parámetro'}</button>
                 </div>
             </div>
         `;
         document.body.appendChild(backdrop);
         requestAnimationFrame(() => backdrop.classList.add('open'));
+        if (_paramCtx) _paramCtx.form = backdrop;
 
-        const close = () => {
+        const cerrar = () => {
             backdrop.classList.remove('open');
             setTimeout(() => backdrop.remove(), 200);
+            if (_paramCtx) _paramCtx.form = null;
         };
-        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
-        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrar(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrar));
 
-        const varInput = backdrop.querySelector('#param-variable');
-        const valInput = backdrop.querySelector('#param-valor');
-        const comInput = backdrop.querySelector('#param-comentario');
-        const varErr   = backdrop.querySelector('#param-variable-err');
+        const varInput = backdrop.querySelector('#paramFormVariable');
+        const valInput = backdrop.querySelector('#paramFormValor');
+        const comInput = backdrop.querySelector('#paramFormComentario');
+        const varErr   = backdrop.querySelector('#paramFormVariableErr');
         const saveBtn  = backdrop.querySelector('[data-act="save"]');
 
-        varInput.focus();
-        varInput.select();
+        // Al editar, foco en el campo Valor (la variable ya suele ser conocida).
+        // Al crear, foco en Variable.
+        if (isEdit) { valInput.focus(); }
+        else        { varInput.focus(); varInput.select(); }
 
-        saveBtn.addEventListener('click', async () => {
-            const variable   = varInput.value.trim();
-            const valor      = valInput.value.trim();
-            const comentario = comInput.value.trim();
-
+        const limpiarErrores = () => {
             varErr.style.display = 'none';
             varInput.classList.remove('input-invalid');
+        };
+
+        const mostrarErrorVariable = (msg) => {
+            varErr.textContent = msg;
+            varErr.style.display = 'block';
+            varInput.classList.add('input-invalid');
+            varInput.focus();
+        };
+
+        saveBtn.addEventListener('click', async () => {
+            if (_paramGuardando) return;
+            limpiarErrores();
+
+            const variable   = varInput.value.trim();
+            const valor      = valInput.value; // no trimear — espacios pueden importar
+            const comentario = comInput.value.trim();
 
             if (!variable) {
-                varErr.textContent = 'La variable es obligatoria';
-                varErr.style.display = 'block';
-                varInput.classList.add('input-invalid');
-                varInput.focus();
+                mostrarErrorVariable('La variable es obligatoria.');
+                return;
+            }
+            if (!_RE_VARIABLE_PARAM.test(variable)) {
+                mostrarErrorVariable('Sólo letras, números, punto, guión y guión bajo.');
                 return;
             }
 
             const payload = { variable, valor, comentario };
-
+            _paramGuardando = true;
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
@@ -4875,24 +4993,26 @@
                     await api('parametros.php', { method: 'POST', body: payload });
                     toast('Parámetro creado');
                 }
-                close();
-                if (typeof onSaved === 'function') onSaved();
+                cerrar();
+                cargarParametros();
             } catch (e) {
                 saveBtn.disabled = false;
                 toast(e.message, 'error');
+            } finally {
+                _paramGuardando = false;
             }
         });
     }
 
-    function confirmDeleteParametro(param, onDeleted) {
+    function eliminarParametro(p) {
         confirmDialog(
             'Eliminar parámetro',
-            `¿Eliminar el parámetro "${param.variable}"? Esta acción no se puede deshacer.`,
+            `¿Eliminar el parámetro "${p.variable}"? Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('parametros.php?id=' + param.id, { method: 'DELETE' });
+                    await api('parametros.php?id=' + p.id, { method: 'DELETE' });
                     toast('Parámetro eliminado');
-                    if (typeof onDeleted === 'function') onDeleted();
+                    cargarParametros();
                 } catch (e) {
                     toast(e.message, 'error');
                 }
@@ -4900,54 +5020,104 @@
         );
     }
 
-    /* ---------- Herramientas: Migraciones ---------- */
-    // Tile de Herramientas que abre un modal con pinta de terminal y un
-    // botón "Ejecutar". El cuerpo es una consola monoespaciada (estilo
-    // `signals-monitor-console`) donde aparece el progreso en vivo.
-    //
-    // El listado inicial (GET api/migraciones.php) marca cada archivo
-    // como aplicado/pendiente. El "Ejecutar" abre un POST que devuelve
-    // Server-Sent Events: cada `event: log` pinta una línea en la
-    // consola; `event: file` actualiza el contador; `event: done` cierra
-    // el run y libera el botón. La operación es idempotente — los
-    // archivos ya aplicados se saltean en el server.
+    // Tecla Escape: cerrar en cascada (form → listado). El openRowMenu
+    // ya tiene su propio handler de Escape que corre antes (cierra el
+    // menú si está abierto).
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        if (_paramCtx && _paramCtx.form && _paramCtx.form.classList.contains('open')) {
+            _paramCtx.form.classList.remove('open');
+            const bd = _paramCtx.form;
+            setTimeout(() => { bd.remove(); if (_paramCtx) _paramCtx.form = null; }, 200);
+            return;
+        }
+        if (_paramCtx && _paramCtx.listado && _paramCtx.listado.classList.contains('open')) {
+            cerrarEditorParametros();
+        }
+    });
 
-    async function openMigracionesConsole() {
+    /* ---------- Herramientas: Migrador DB ---------- */
+    // Tile de Herramientas que abre un modal con el listado de archivos
+    // .sql de cloud/sql/migrations/, cruzado contra el ledger `migraciones`
+    // de la BD del entorno actual. Cada fila muestra estado (pendiente /
+    // aplicada / drift), tamaño, hash truncado, fecha de aplicación y
+    // acciones ("Ver SQL" + "Aplicar" si corresponde).
+    //
+    // Endpoints:
+    //   GET  api/migraciones.php               -> listado cruzado disco vs DB
+    //   GET  api/migraciones_get.php?nombre=X  -> preview del contenido SQL
+    //   POST api/migraciones_apply.php {nombre} -> aplicar una migración
+    //
+    // En producción el confirm se refuerza (título con ⚠, copy con
+    // "(PRODUCCIÓN)", label "Aplicar en prod", danger:true). La aplicación
+    // masiva es secuencial: si una falla, corta el loop y toastea
+    // "corrida parcial".
+
+    let _migradorCtx        = null; // refs a los backdrops abiertos (para ESC en cascada)
+    let _migradorCargando   = false;
+    let _migradorAplicando  = false;
+    let _migradorCache      = [];
+    let _migradorEnv        = 'unknown';
+    let _migradorDatabase   = '';
+
+    async function abrirMigraciones() {
+        // Si ya hay un modal abierto, no hacer nada.
+        if (_migradorCtx && _migradorCtx.listado && document.body.contains(_migradorCtx.listado)) return;
+
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal migraciones-modal" role="dialog" aria-modal="true" aria-labelledby="mig-title">
+            <div class="modal" role="dialog" aria-modal="true" style="max-width:960px">
                 <div class="modal-header">
-                    <div class="modal-title" id="mig-title">
-                        <i class="fa-solid fa-terminal"></i> Migraciones
-                        <span class="modal-subtitle">Aplica las migraciones pendientes de <code>cloud/sql/migrations/</code>. Operación idempotente.</span>
+                    <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-size:1.2rem">📜</span>
+                        <span>Migrador DB</span>
+                        <span class="badge badge-info" id="migrDbName" style="font-family:monospace">—</span>
+                        <span class="badge" id="migrEnvBadge" style="font-family:monospace">—</span>
                     </div>
-                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
                 </div>
-                <div class="modal-body migraciones-body">
-                    <div class="migraciones-toolbar">
-                        <div class="migraciones-status" id="mig-status">
-                            <span class="spin-sm" id="mig-spin"></span>
-                            <span id="mig-status-text">Cargando estado…</span>
-                        </div>
-                        <div class="migraciones-actions">
-                            <button type="button" class="btn btn-ghost btn-sm" data-act="clear" title="Limpiar consola">
-                                <i class="fa-solid fa-eraser"></i> Limpiar
+                <div class="modal-body" style="gap:12px">
+                    <div class="toolbar" style="margin-bottom:0">
+                        <div class="toolbar-left" style="gap:8px;flex-wrap:wrap">
+                            <button class="btn btn-ghost btn-sm" data-act="refresh" title="Refrescar">
+                                <i class="fa-solid fa-rotate"></i>
                             </button>
-                            <button type="button" class="btn btn-primary btn-sm" data-act="run" disabled>
-                                <i class="fa-solid fa-play"></i> Ejecutar pendientes
+                            <span id="migrResumen" style="font-size:.82rem;color:var(--muted)"></span>
+                        </div>
+                        <div class="toolbar-right">
+                            <button class="btn btn-primary btn-sm" id="migrBtnAplicarPendientes" data-act="apply-all" disabled>
+                                Aplicar todas las pendientes
                             </button>
                         </div>
                     </div>
-                    <div class="migraciones-console" id="mig-console">
-                        <div class="mig-line mig-muted">$ esperando comando…<span class="signals-monitor-caret"></span></div>
+
+                    <div class="table-card" style="max-height:52vh;overflow-y:auto">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:110px;position:sticky;top:0;background:var(--bg);z-index:1">Estado</th>
+                                    <th style="position:sticky;top:0;background:var(--bg);z-index:1">Archivo</th>
+                                    <th style="width:90px;position:sticky;top:0;background:var(--bg);z-index:1">Tamaño</th>
+                                    <th style="width:110px;position:sticky;top:0;background:var(--bg);z-index:1">Hash</th>
+                                    <th style="width:160px;position:sticky;top:0;background:var(--bg);z-index:1">Aplicada</th>
+                                    <th style="width:160px;text-align:center;position:sticky;top:0;background:var(--bg);z-index:1">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="migrTbody">
+                                <tr><td colspan="6" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="font-size:.78rem;color:var(--muted);line-height:1.5">
+                        Los archivos viven en <code style="font-family:monospace">cloud/sql/migrations/</code>
+                        y se aplican en orden alfabético. Cada migración se registra en la tabla
+                        <code style="font-family:monospace">migraciones</code> de la BD del entorno actual
+                        para no re-ejecutarse. <strong>El target es siempre la BD del propio panel.</strong>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <span class="migraciones-footer-info">
-                        <i class="fa-solid fa-database"></i>
-                        Idempotente · Los archivos con éxito previo se saltean
-                    </span>
                     <button class="btn btn-ghost" data-act="close">Cerrar</button>
                 </div>
             </div>
@@ -4955,186 +5125,1873 @@
         document.body.appendChild(backdrop);
         requestAnimationFrame(() => backdrop.classList.add('open'));
 
-        const consoleEl  = backdrop.querySelector('#mig-console');
-        const statusText = backdrop.querySelector('#mig-status-text');
-        const spin       = backdrop.querySelector('#mig-spin');
-        const btnRun     = backdrop.querySelector('[data-act="run"]');
-        const btnClear   = backdrop.querySelector('[data-act="clear"]');
+        _migradorCtx = { listado: backdrop, preview: null };
 
-        let activeAbort = null;
-        let running     = false;
+        backdrop.addEventListener('click', e => {
+            if (e.target === backdrop) cerrarMigraciones();
+        });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarMigraciones));
+        backdrop.querySelector('[data-act="refresh"]').addEventListener('click', cargarMigraciones);
+        backdrop.querySelector('[data-act="apply-all"]').addEventListener('click', aplicarPendientesMigraciones);
 
-        const close = () => {
-            if (activeAbort) activeAbort.abort();
+        cargarMigraciones();
+    }
+
+    function cerrarMigraciones() {
+        if (_migradorAplicando) { toast('Hay una migración en curso'); return; }
+        if (!_migradorCtx || !_migradorCtx.listado) return;
+        const bd = _migradorCtx.listado;
+        bd.classList.remove('open');
+        setTimeout(() => bd.remove(), 200);
+        _migradorCtx = null;
+    }
+
+    async function cargarMigraciones() {
+        if (_migradorCargando || !_migradorCtx) return;
+        _migradorCargando = true;
+
+        const tbody = _migradorCtx.listado.querySelector('#migrTbody');
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>`;
+
+        try {
+            const data = await api('migraciones.php');
+            _migradorCache    = data.items    || [];
+            _migradorEnv      = (data.env     || 'unknown').toLowerCase();
+            _migradorDatabase = data.database || '';
+
+            const dbEl  = _migradorCtx.listado.querySelector('#migrDbName');
+            const envEl = _migradorCtx.listado.querySelector('#migrEnvBadge');
+            dbEl.textContent  = _migradorDatabase || '—';
+            envEl.textContent = _migradorEnv;
+            const envCls = ({
+                production:  'badge-danger',
+                development: 'badge-success',
+            })[_migradorEnv] || 'badge-warn';
+            envEl.className = 'badge ' + envCls;
+            envEl.style.fontFamily = 'monospace';
+
+            renderMigraciones(_migradorCache);
+            actualizarResumenMigraciones();
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="6" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+            actualizarResumenMigraciones(0, 0, 0, 0);
+        } finally {
+            _migradorCargando = false;
+        }
+    }
+
+    function renderMigraciones(rows) {
+        if (!_migradorCtx) return;
+        const tbody = _migradorCtx.listado.querySelector('#migrTbody');
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="table-empty">No se encontraron archivos de migración.</td></tr>`;
+            return;
+        }
+        // Pendientes arriba (orden ascendente = cronológico); aplicadas debajo
+        // por id DESC (última aplicada arriba). El cache queda en orden ascendente
+        // para que aplicarPendientesMigraciones() corra vieja -> nueva.
+        const pendientes = rows.filter(m => m.estado === 'pendiente');
+        const aplicadas  = rows.filter(m => m.estado === 'aplicada')
+                               .slice().sort((a, b) => (b.id || 0) - (a.id || 0));
+        const ordenadas  = pendientes.concat(aplicadas);
+
+        tbody.innerHTML = ordenadas.map(m => {
+            let badge;
+            if (m.estado === 'aplicada' && m.hash_drift) {
+                badge = `<span class="badge badge-warn" title="El archivo cambió después de aplicarse">⚠ drift</span>`;
+            } else if (m.estado === 'aplicada') {
+                badge = `<span class="badge badge-success">aplicada</span>`;
+            } else {
+                badge = `<span class="badge badge-info">pendiente</span>`;
+            }
+            const aplicada = m.aplicada
+                ? `<span style="font-family:monospace">${escape(m.aplicada)}</span>`
+                : `<span style="color:var(--muted)">—</span>`;
+            const btnAplicar = m.estado === 'pendiente'
+                ? `<button class="btn btn-primary btn-sm" data-act="apply" data-nombre="${escape(m.nombre)}">Aplicar</button>`
+                : '';
+            return `
+                <tr>
+                    <td>${badge}</td>
+                    <td style="font-family:monospace;font-weight:600">${escape(m.nombre)}</td>
+                    <td style="font-size:.82rem;color:var(--muted)">${formatearTamanoBytes(m.tamano)}</td>
+                    <td style="font-family:monospace;font-size:.78rem;color:var(--muted)" title="${escape(m.hash)}">${escape((m.hash || '').substring(0, 8))}</td>
+                    <td>${aplicada}</td>
+                    <td style="text-align:center">
+                        <button class="btn btn-ghost btn-sm" data-act="preview" data-nombre="${escape(m.nombre)}">Ver SQL</button>
+                        ${btnAplicar}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.querySelectorAll('[data-act="preview"]').forEach(b => {
+            b.addEventListener('click', () => verMigracion(b.dataset.nombre));
+        });
+        tbody.querySelectorAll('[data-act="apply"]').forEach(b => {
+            b.addEventListener('click', () => aplicarMigracionConConfirmacion(b.dataset.nombre));
+        });
+    }
+
+    function actualizarResumenMigraciones() {
+        if (!_migradorCtx) return;
+        const total     = _migradorCache.length;
+        const aplicadas = _migradorCache.filter(m => m.estado === 'aplicada').length;
+        const pendientes= _migradorCache.filter(m => m.estado === 'pendiente').length;
+        const drift     = _migradorCache.filter(m => m.hash_drift).length;
+
+        const resumen = _migradorCtx.listado.querySelector('#migrResumen');
+        let txt = `${total} archivo${total === 1 ? '' : 's'} · ${aplicadas} aplicada${aplicadas === 1 ? '' : 's'} · ${pendientes} pendiente${pendientes === 1 ? '' : 's'}`;
+        if (drift > 0) txt += ` · ⚠ ${drift} con drift de hash`;
+        resumen.textContent = txt;
+
+        const btn = _migradorCtx.listado.querySelector('#migrBtnAplicarPendientes');
+        if (pendientes === 0) {
+            btn.disabled    = true;
+            btn.textContent = 'Sin pendientes';
+        } else {
+            btn.disabled    = false;
+            btn.textContent = `Aplicar ${pendientes} pendiente${pendientes === 1 ? '' : 's'}`;
+        }
+    }
+
+    function formatearTamanoBytes(n) {
+        n = +n || 0;
+        if (n < 1024)          return n + ' B';
+        if (n < 1024 * 1024)   return (n / 1024).toFixed(1) + ' KB';
+        return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    async function verMigracion(nombre) {
+        if (!_migradorCtx) return;
+        // Modal de preview (max-width via modal-wide).
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-size:1.2rem">📜</span>
+                        <span>Migración</span>
+                        <span class="modal-subtitle"><code style="font-family:monospace" id="migrPreviewNombre">${escape(nombre)}</code></span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Contenido SQL (solo lectura)</label>
+                        <textarea class="json-editor" id="migrPreviewSql" readonly spellcheck="false" autocomplete="off"><div class="spin"></div></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                    <button class="btn btn-primary" id="migrPreviewBtnAplicar" data-act="apply" style="display:none">Aplicar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        _migradorCtx.preview = backdrop;
+
+        const cerrar = () => {
             backdrop.classList.remove('open');
             setTimeout(() => backdrop.remove(), 200);
+            if (_migradorCtx) _migradorCtx.preview = null;
         };
-        backdrop.addEventListener('click', e => { if (e.target === backdrop && !running) close(); });
-        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', () => {
-            if (running) { toast('Hay una migración en curso', 'error'); return; }
-            close();
-        }));
-
-        function appendLine(level, msg) {
-            const cls = ({
-                info: 'mig-info', ok: 'mig-ok', warn: 'mig-warn',
-                err:  'mig-err',  skip: 'mig-skip',
-            })[level] || 'mig-muted';
-            // Prefijo tipo prompt para info, [OK]/[ERR]/etc. para el resto.
-            const prefix = ({
-                ok:   '[OK]  ',
-                err:  '[ERR] ',
-                warn: '[WRN] ',
-                skip: '[--]  ',
-                info: '',
-            })[level] ?? '';
-            const div = document.createElement('div');
-            div.className = 'mig-line ' + cls;
-            div.textContent = prefix + (msg ?? '');
-            consoleEl.appendChild(div);
-            consoleEl.scrollTop = consoleEl.scrollHeight;
-        }
-
-        function setStatus(text, busy) {
-            statusText.textContent = text;
-            spin.style.visibility = busy ? '' : 'hidden';
-        }
-
-        btnClear.addEventListener('click', () => {
-            if (running) return;
-            consoleEl.innerHTML = '<div class="mig-line mig-muted">$ consola limpia</div>';
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrar(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrar));
+        backdrop.querySelector('[data-act="apply"]').addEventListener('click', () => {
+            cerrar();
+            aplicarMigracionConConfirmacion(nombre);
         });
 
-        async function refreshList() {
-            setStatus('Cargando estado…', true);
-            btnRun.disabled = true;
-            try {
-                const data = await api('migraciones.php');
-                const total = data.total ?? 0;
-                const pend  = data.pendientes ?? 0;
-                if (total === 0) {
-                    setStatus('No se encontraron archivos de migración.', false);
-                    btnRun.disabled = true;
-                } else if (pend === 0) {
-                    setStatus(`Todas al día (${total}/${total} aplicadas).`, false);
-                    btnRun.disabled = false; // permitir re-run (será no-op).
-                } else {
-                    setStatus(`${pend} pendiente(s) de ${total} total.`, false);
-                    btnRun.disabled = false;
-                }
-                appendLine('info', `Estado: ${total - pend}/${total} aplicadas, ${pend} pendiente(s).`);
-                (data.migraciones || []).forEach(m => {
-                    if (m.aplicada) {
-                        appendLine('skip', `${m.archivo}  (aplicada ${m.ejecutado_at ?? ''}, ${m.duracion_ms ?? 0} ms)`);
-                    } else if (m.success === 0) {
-                        appendLine('warn', `${m.archivo}  (último intento falló: ${m.error ?? 'sin detalle'})`);
-                    } else {
-                        appendLine('info', `${m.archivo}  (pendiente)`);
-                    }
-                });
-            } catch (e) {
-                setStatus('Error al cargar estado.', false);
-                appendLine('err', 'No se pudo obtener el estado: ' + e.message);
-            }
+        const ta      = backdrop.querySelector('#migrPreviewSql');
+        const btnApli = backdrop.querySelector('#migrPreviewBtnAplicar');
+        ta.value = 'Cargando…';
+
+        try {
+            const data = await api('migraciones_get.php?nombre=' + encodeURIComponent(nombre));
+            ta.value = data.contenido || '';
+            const registro = _migradorCache.find(m => m.nombre === nombre);
+            if (registro && registro.estado === 'pendiente') btnApli.style.display = '';
+        } catch (e) {
+            ta.value = '✗ ' + e.message;
         }
+    }
 
-        btnRun.addEventListener('click', async () => {
-            if (running) return;
-            running = true;
-            btnRun.disabled = true;
-            btnClear.disabled = true;
-            setStatus('Ejecutando…', true);
-            appendLine('info', '');
-            appendLine('info', '$ POST api/migraciones.php?run=1');
+    function aplicarMigracionConConfirmacion(nombre) {
+        const esProd  = _migradorEnv === 'production';
+        const marker  = esProd ? ' (PRODUCCIÓN)' : '';
+        const titulo  = esProd ? '⚠ Aplicar en PRODUCCIÓN' : 'Aplicar migración';
+        const mensaje = `Vas a aplicar «${nombre}» contra la base ${_migradorDatabase || '?'}${marker}. `
+                      + `Las sentencias DDL no se pueden deshacer. ¿Continuar?`;
+        confirmarMigrador(titulo, mensaje, esProd ? 'Aplicar en prod' : 'Aplicar', esProd, () => {
+            aplicarMigracionSinConfirmar(nombre);
+        });
+    }
 
-            activeAbort = new AbortController();
+    async function aplicarMigracionSinConfirmar(nombre) {
+        if (_migradorAplicando) return;
+        _migradorAplicando = true;
+        try {
+            const data = await api('migraciones_apply.php', { method: 'POST', body: { nombre } });
+            toast(`Aplicada «${nombre}» en ${data.duracion_ms} ms.`);
+            await cargarMigraciones();
+        } catch (e) {
+            toast(e.message || 'Error al aplicar.', { error: true, duration: 10000 });
+        } finally {
+            _migradorAplicando = false;
+        }
+    }
+
+    async function aplicarPendientesMigraciones() {
+        const pendientes = _migradorCache.filter(m => m.estado === 'pendiente');
+        if (!pendientes.length) return;
+
+        const esProd  = _migradorEnv === 'production';
+        const marker  = esProd ? ' (PRODUCCIÓN)' : '';
+        const titulo  = esProd ? '⚠ Aplicar en PRODUCCIÓN' : 'Aplicar migraciones pendientes';
+        const mensaje = `Vas a aplicar ${pendientes.length} migración(es) contra la base `
+                      + `${_migradorDatabase || '?'}${marker} en orden alfabético. `
+                      + `Si una falla, se detiene la corrida y las anteriores quedan aplicadas. ¿Continuar?`;
+        confirmarMigrador(titulo, mensaje, esProd ? 'Aplicar en prod' : 'Aplicar', esProd, async () => {
+            if (_migradorAplicando || !_migradorCtx) return;
+            _migradorAplicando = true;
+            const btn        = _migradorCtx.listado.querySelector('#migrBtnAplicarPendientes');
+            const labelOrig  = btn.textContent;
+            btn.disabled     = true;
+            let aplicadas    = 0;
             try {
-                await streamMigracionesRun(activeAbort.signal, (event, payload) => {
-                    if (event === 'log') {
-                        appendLine(payload.level || 'info', payload.msg ?? '');
-                    } else if (event === 'file') {
-                        // Ya quedó loggeado en el evento `log` paralelo; este es
-                        // estructurado por si en el futuro queremos un contador.
-                    } else if (event === 'done') {
-                        const { aplicadas, salteadas, fallidas } = payload;
-                        if (fallidas > 0) {
-                            setStatus(`Terminado con errores: ${aplicadas} aplicadas, ${fallidas} fallidas.`, false);
-                            toast('Migraciones: ' + fallidas + ' fallida(s)', 'error');
-                        } else if (aplicadas > 0) {
-                            setStatus(`Listo. ${aplicadas} aplicada(s), ${salteadas} salteada(s).`, false);
-                            toast(`Migraciones: ${aplicadas} aplicada(s)`);
-                        } else {
-                            setStatus(`Sin cambios. ${salteadas} salteada(s).`, false);
-                            toast('Sin migraciones pendientes');
-                        }
+                for (const m of pendientes) {
+                    btn.textContent = `Aplicando ${m.nombre}…`;
+                    try {
+                        await api('migraciones_apply.php', { method: 'POST', body: { nombre: m.nombre } });
+                        aplicadas++;
+                    } catch (e) {
+                        toast(`Falló «${m.nombre}»: ${e.message}`, { error: true, duration: 10000 });
+                        break;
                     }
-                });
-            } catch (e) {
-                if (e.name === 'AbortError') {
-                    appendLine('warn', 'Operación cancelada.');
+                }
+                if (aplicadas === pendientes.length) {
+                    toast(`Aplicadas ${aplicadas} migración(es).`);
                 } else {
-                    appendLine('err', 'Error de stream: ' + e.message);
-                    setStatus('Error de stream.', false);
+                    toast(`Corrida parcial: ${aplicadas} de ${pendientes.length} aplicadas.`,
+                          { error: true, duration: 10000 });
                 }
             } finally {
-                running = false;
-                activeAbort = null;
-                btnClear.disabled = false;
-                btnRun.disabled = false;
+                _migradorAplicando = false;
+                btn.textContent = labelOrig;
+                await cargarMigraciones();
             }
         });
-
-        refreshList();
     }
 
-    /**
-     * Hace POST a api/migraciones.php?run=1 y parsea la respuesta como
-     * stream Server-Sent Events, llamando `onEvent(eventName, dataObj)`
-     * por cada mensaje. Resuelve cuando el servidor cierra el stream.
-     */
-    async function streamMigracionesRun(signal, onEvent) {
-        const res = await fetch('api/migraciones.php?run=1', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Accept': 'text/event-stream' },
-            signal,
+    // Confirm reforzado para el Migrador DB. A diferencia de confirmDialog()
+    // (que hardcodea el label "Eliminar" y siempre pinta el CTA como danger),
+    // acá el label y la severidad varían según entorno: en prod el CTA
+    // permanece rojo con "Aplicar en prod"; en dev es primario con "Aplicar".
+    function confirmarMigrador(titulo, mensaje, ctaLabel, danger, onConfirm) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'confirm-backdrop';
+        const cls = danger ? 'btn-danger' : 'btn-primary';
+        backdrop.innerHTML = `
+            <div class="confirm-box">
+                <div class="confirm-title">${escape(titulo)}</div>
+                <div class="confirm-msg">${escape(mensaje)}</div>
+                <div class="confirm-actions">
+                    <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+                    <button class="btn ${cls}" data-act="ok">${escape(ctaLabel)}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const cerrar = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 150);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrar(); });
+        backdrop.querySelector('[data-act="cancel"]').addEventListener('click', cerrar);
+        backdrop.querySelector('[data-act="ok"]').addEventListener('click', () => {
+            cerrar();
+            try { onConfirm(); } catch (_) { /* noop */ }
         });
-        if (res.status === 401) {
-            window.location.href = 'login.php';
-            throw new Error('No autenticado');
+    }
+
+    /* ---------- Herramientas: Visor de sucesos ---------- */
+    // Tile de Herramientas que abre un modal con el listado de la tabla
+    // `sucesos_log` (log de actividad de los módulos del panel cloud).
+    // Estrictamente read-only: no hay alta/edición/borrado desde acá; la
+    // escritura vive en api/lib/sucesos.php (registrarSuceso).
+    //
+    // Endpoint único:
+    //   GET api/sucesos.php?q=&tipo=&desde=&hasta=&limite=  -> listado
+    //   GET api/sucesos.php?id=N                            -> detalle
+
+    let _sucesosCtx        = null;
+    let _sucesosCache      = [];
+    let _sucesosFiltroQ    = '';
+    let _sucesosFiltroTipo = '';
+    let _sucesosSearchTimer = null;
+
+    const SUCESOS_TIPOS = {
+        info:   { label: 'Info',   icon: 'fa-circle-info',          color: 'var(--info)'   },
+        alerta: { label: 'Alerta', icon: 'fa-triangle-exclamation', color: 'var(--warn)'   },
+        error:  { label: 'Error',  icon: 'fa-circle-exclamation',   color: 'var(--danger)' },
+    };
+
+    function sucesoTipoHtml(tipo) {
+        const meta = SUCESOS_TIPOS[tipo] || SUCESOS_TIPOS.info;
+        return `<span style="display:inline-flex;align-items:center;gap:6px">` +
+                 `<i class="fa-solid ${meta.icon}" style="color:${meta.color}"></i>` +
+                 `<span>${meta.label}</span>` +
+               `</span>`;
+    }
+
+    async function abrirVisorSucesos() {
+        if (_sucesosCtx && _sucesosCtx.listado && document.body.contains(_sucesosCtx.listado)) return;
+
+        // Reset de filtros al montarse (el visor arranca en "Todos").
+        _sucesosFiltroQ    = '';
+        _sucesosFiltroTipo = '';
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" style="max-width:1100px">
+                <div class="modal-header">
+                    <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-size:1.2rem">📰</span>
+                        <span>Visor de sucesos</span>
+                        <span id="sucesosResumen" class="modal-subtitle"></span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body" style="gap:12px">
+                    <div class="toolbar" style="margin-bottom:0">
+                        <div class="toolbar-left" style="gap:8px;flex-wrap:wrap">
+                            <div class="search-wrap">
+                                <input class="search-input" type="search" id="sucesosSearch" placeholder="🔍 Buscar origen, detalle…">
+                                <button class="search-clear" id="sucesosSearchClear" style="display:none">×</button>
+                            </div>
+                            <div id="sucesosTipoChips" style="display:flex;gap:6px;flex-wrap:wrap">
+                                <button type="button" class="filter-chip active" data-val="">Todos</button>
+                                <button type="button" class="filter-chip"        data-val="info"><i class="fa-solid fa-circle-info" style="color:var(--info)"></i> Info</button>
+                                <button type="button" class="filter-chip"        data-val="alerta"><i class="fa-solid fa-triangle-exclamation" style="color:var(--warn)"></i> Alerta</button>
+                                <button type="button" class="filter-chip"        data-val="error"><i class="fa-solid fa-circle-exclamation" style="color:var(--danger)"></i> Error</button>
+                            </div>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted)">
+                                Desde <input type="date" id="sucesosDesde">
+                            </label>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted)">
+                                Hasta <input type="date" id="sucesosHasta">
+                            </label>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted)">
+                                Límite
+                                <select id="sucesosLimite">
+                                    <option value="100">100</option>
+                                    <option value="200" selected>200</option>
+                                    <option value="500">500</option>
+                                    <option value="1000">1.000</option>
+                                    <option value="2000">2.000</option>
+                                </select>
+                            </label>
+                            <button class="btn btn-ghost btn-sm" data-act="refresh" title="Refrescar">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-card">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:80px">ID</th>
+                                    <th style="width:170px">Fecha</th>
+                                    <th style="width:180px">Origen</th>
+                                    <th style="width:120px">Tipo</th>
+                                    <th>Detalle</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sucesosTbody">
+                                <tr><td colspan="5" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="font-size:.78rem;color:var(--muted);line-height:1.5">
+                        Vista de solo lectura sobre la tabla
+                        <code style="font-family:monospace">sucesos_log</code>.
+                        Los registros se ordenan por <strong>id descendente</strong> (más recientes primero).
+                        Tocá una fila para ver el detalle completo.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        _sucesosCtx = { listado: backdrop, detalle: null };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrarVisorSucesos(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarVisorSucesos));
+        backdrop.querySelector('[data-act="refresh"]').addEventListener('click', cargarSucesos);
+
+        const inputSearch = backdrop.querySelector('#sucesosSearch');
+        const btnClear    = backdrop.querySelector('#sucesosSearchClear');
+        inputSearch.addEventListener('input', () => sucesosOnSearch(inputSearch.value));
+        btnClear.addEventListener('click', () => {
+            inputSearch.value = '';
+            sucesosLimpiarBusqueda();
+            inputSearch.focus();
+        });
+
+        backdrop.querySelectorAll('#sucesosTipoChips .filter-chip').forEach(chip => {
+            chip.addEventListener('click', () => setFiltroTipoSucesos(chip, chip.dataset.val));
+        });
+        backdrop.querySelector('#sucesosDesde').addEventListener('change', cargarSucesos);
+        backdrop.querySelector('#sucesosHasta').addEventListener('change', cargarSucesos);
+        backdrop.querySelector('#sucesosLimite').addEventListener('change', cargarSucesos);
+
+        cargarSucesos();
+    }
+
+    function cerrarVisorSucesos() {
+        if (!_sucesosCtx || !_sucesosCtx.listado) return;
+        const bd = _sucesosCtx.listado;
+        bd.classList.remove('open');
+        setTimeout(() => bd.remove(), 200);
+        _sucesosCtx = null;
+    }
+
+    function sucesosOnSearch(v) {
+        _sucesosFiltroQ = (v || '').trim();
+        if (_sucesosCtx) {
+            _sucesosCtx.listado.querySelector('#sucesosSearchClear').style.display =
+                _sucesosFiltroQ ? '' : 'none';
         }
-        if (!res.ok || !res.body) {
-            throw new Error('HTTP ' + res.status);
+        clearTimeout(_sucesosSearchTimer);
+        _sucesosSearchTimer = setTimeout(cargarSucesos, 250);
+    }
+
+    function sucesosLimpiarBusqueda() {
+        _sucesosFiltroQ = '';
+        if (_sucesosCtx) {
+            _sucesosCtx.listado.querySelector('#sucesosSearch').value = '';
+            _sucesosCtx.listado.querySelector('#sucesosSearchClear').style.display = 'none';
         }
+        cargarSucesos();
+    }
 
-        const reader  = res.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buffer = '';
+    function setFiltroTipoSucesos(chip, valor) {
+        _sucesosFiltroTipo = valor || '';
+        if (_sucesosCtx) {
+            _sucesosCtx.listado.querySelectorAll('#sucesosTipoChips .filter-chip').forEach(c => {
+                c.classList.toggle('active', c === chip);
+            });
+        }
+        cargarSucesos();
+    }
 
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+    async function cargarSucesos() {
+        if (!_sucesosCtx) return;
+        const tbody = _sucesosCtx.listado.querySelector('#sucesosTbody');
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>`;
 
-            // SSE separa mensajes por línea en blanco (\n\n).
-            let sep;
-            while ((sep = buffer.indexOf('\n\n')) !== -1) {
-                const raw = buffer.slice(0, sep);
-                buffer = buffer.slice(sep + 2);
+        const desde  = _sucesosCtx.listado.querySelector('#sucesosDesde').value  || '';
+        const hasta  = _sucesosCtx.listado.querySelector('#sucesosHasta').value  || '';
+        const limite = _sucesosCtx.listado.querySelector('#sucesosLimite').value || '200';
 
-                let evt = 'message';
-                let dataLines = [];
-                raw.split('\n').forEach(line => {
-                    if (line.startsWith('event:')) evt = line.slice(6).trim();
-                    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-                });
-                if (!dataLines.length) continue;
-                let payload = null;
-                try { payload = JSON.parse(dataLines.join('\n')); } catch (_) { payload = { raw: dataLines.join('\n') }; }
-                onEvent(evt, payload);
+        const params = new URLSearchParams();
+        if (_sucesosFiltroQ)    params.set('q', _sucesosFiltroQ);
+        if (_sucesosFiltroTipo) params.set('tipo', _sucesosFiltroTipo);
+        if (desde)              params.set('desde', desde);
+        if (hasta)              params.set('hasta', hasta);
+        params.set('limite', limite);
+
+        try {
+            const data = await api('sucesos.php?' + params.toString());
+            _sucesosCache = data.items || [];
+            const resumen = _sucesosCtx.listado.querySelector('#sucesosResumen');
+            if (resumen && data.stats) {
+                const m = data.stats.mostrados ?? _sucesosCache.length;
+                const t = data.stats.total     ?? m;
+                resumen.textContent = `${m.toLocaleString('es-AR')} de ${t.toLocaleString('es-AR')} registros`;
             }
+            renderSucesos(_sucesosCache);
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
         }
     }
+
+    function renderSucesos(rows) {
+        if (!_sucesosCtx) return;
+        const tbody = _sucesosCtx.listado.querySelector('#sucesosTbody');
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty">Sin sucesos para mostrar.</td></tr>`;
+            return;
+        }
+        const dashVacio = `<span style="color:var(--muted);font-style:italic">—</span>`;
+        tbody.innerHTML = rows.map(s => {
+            const fecha   = escape(s.fecha   || '');
+            const origen  = escape(s.origen  || '');
+            const detalle = escape(s.detalle || '');
+            return `
+                <tr class="row-clickable" data-id="${s.id}">
+                    <td class="td-id">${s.id}</td>
+                    <td style="font-family:monospace;white-space:nowrap">${fecha  || dashVacio}</td>
+                    <td style="font-family:monospace;font-weight:600">${origen || dashVacio}</td>
+                    <td>${sucesoTipoHtml(s.tipo)}</td>
+                    <td style="color:var(--muted);max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${detalle}">${detalle}</td>
+                </tr>
+            `;
+        }).join('');
+        tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+            tr.addEventListener('click', () => sucesosVerDetalle(+tr.dataset.id));
+        });
+    }
+
+    function sucesosVerDetalle(id) {
+        if (!_sucesosCtx) return;
+        const s = _sucesosCache.find(x => x.id === id);
+        if (!s) return;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" style="max-width:780px">
+                <div class="modal-header">
+                    <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-size:1.2rem">📰</span>
+                        <span>Suceso</span>
+                        <span class="modal-subtitle">#${s.id}</span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Fecha</label>
+                            <div style="font-family:monospace">${escape(s.fecha || '—')}</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo</label>
+                            <div style="display:flex;align-items:center;gap:6px">${sucesoTipoHtml(s.tipo)}</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Origen</label>
+                        <div style="font-family:monospace">${escape(s.origen || '—')}</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Detalle</label>
+                        <textarea class="json-editor" readonly spellcheck="false" autocomplete="off" style="min-height:260px;font-family:monospace"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        // El textarea usa `value=` en runtime — asignar como texto para no
+        // sufrir el escape de HTML dentro del innerHTML.
+        backdrop.querySelector('textarea').value = s.detalle || '';
+
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        _sucesosCtx.detalle = backdrop;
+
+        const cerrar = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+            if (_sucesosCtx) _sucesosCtx.detalle = null;
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrar(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrar));
+    }
+
+    // Tecla Escape: cierra en cascada — primero cualquier modal secundario
+    // (preview del migrador, detalle del visor), luego el listado.
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        // Migrador: preview → listado.
+        if (_migradorCtx && _migradorCtx.preview && _migradorCtx.preview.classList.contains('open')) {
+            _migradorCtx.preview.classList.remove('open');
+            setTimeout(() => { if (_migradorCtx) { _migradorCtx.preview?.remove(); _migradorCtx.preview = null; } }, 200);
+            return;
+        }
+        if (_migradorCtx && _migradorCtx.listado && _migradorCtx.listado.classList.contains('open')) {
+            cerrarMigraciones();
+            return;
+        }
+        // Visor de sucesos: detalle → listado.
+        if (_sucesosCtx && _sucesosCtx.detalle && _sucesosCtx.detalle.classList.contains('open')) {
+            _sucesosCtx.detalle.classList.remove('open');
+            setTimeout(() => { if (_sucesosCtx) { _sucesosCtx.detalle?.remove(); _sucesosCtx.detalle = null; } }, 200);
+            return;
+        }
+        if (_sucesosCtx && _sucesosCtx.listado && _sucesosCtx.listado.classList.contains('open')) {
+            cerrarVisorSucesos();
+        }
+    });
+
+    /* ================================================================
+       Herramientas: Explorador DB
+       Tabla de tablas + detalle con tabs Registros/Campos + edición inline.
+       Endpoints: db_tables / db_describe / db_records / db_update.
+       ================================================================ */
+    let dbExpTablas       = [];
+    let dbExpFiltro       = '';
+    let dbExpTablaActual  = null;
+    let dbExpDbName       = '';
+    let dbExpEnv          = '';
+    let dbExpRegistros    = [];
+    let dbExpPkCols       = [];
+    let dbExpAutoIncCols  = [];
+    let dbExpNullableCols = [];
+    let dbExpColsTabla    = [];
+    let dbExpRegsTotal    = 0;
+    let dbExpLimite       = 50;
+    let dbExpFiltroRegs   = '';
+    let _dbExpBackdrop    = null;
+
+    async function abrirExploradorDB() {
+        if (_dbExpBackdrop && document.body.contains(_dbExpBackdrop)) return;
+        dbExpTablas = []; dbExpFiltro = ''; dbExpTablaActual = null;
+        dbExpRegistros = []; dbExpFiltroRegs = '';
+
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 'dbExpModalBackdrop';
+        bd.innerHTML = `
+          <div class="modal db-exp-modal" role="dialog" aria-modal="true">
+            <div class="modal-header">
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:1.2rem">🗄️</span>
+                <span>Explorador DB</span>
+                <span class="badge badge-info" id="dbExpDbName" style="font-family:monospace">—</span>
+                <span class="badge" id="dbExpEnvBadge" style="font-family:monospace">—</span>
+              </div>
+              <button class="btn-icon-sm" data-act="close" title="Cerrar">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="db-exp-toolbar">
+                <div class="db-exp-breadcrumbs" id="dbExpBreadcrumbs"></div>
+                <div class="db-exp-toolbar-right">
+                  <button class="btn btn-ghost btn-sm" data-act="refresh" title="Refrescar"><i class="fa-solid fa-rotate"></i></button>
+                  <div class="search-wrap" id="dbExpSearchWrap">
+                    <input type="search" id="dbExpSearch" class="search-input" placeholder="Buscar tabla…">
+                    <button class="search-clear" data-act="clearSearch">×</button>
+                  </div>
+                </div>
+              </div>
+              <div class="db-exp-view" id="dbExpViewTables">
+                <div class="table-card db-exp-table-card">
+                  <table>
+                    <thead><tr><th style="width:36px"></th><th>Tabla</th><th style="width:140px">Filas (aprox.)</th><th style="width:120px">Engine</th></tr></thead>
+                    <tbody id="dbExpTablesTbody"><tr><td colspan="4" style="text-align:center;padding:24px"><div class="spin"></div></td></tr></tbody>
+                  </table>
+                </div>
+                <div class="db-exp-footer-info" id="dbExpTablesInfo"></div>
+              </div>
+              <div class="db-exp-view db-exp-view-detail" id="dbExpViewDetail" style="display:none">
+                <div class="db-exp-tabs" role="tablist">
+                  <button class="db-exp-tab active" data-tab="recs"><i class="fa-solid fa-table"></i> Registros <span class="db-exp-tab-count" id="dbExpRecsMeta"></span></button>
+                  <button class="db-exp-tab" data-tab="cols"><i class="fa-solid fa-list-ul"></i> Campos <span class="db-exp-tab-count" id="dbExpColsMeta"></span></button>
+                </div>
+                <div class="db-exp-tabpanel" id="dbExpTabRecs">
+                  <div class="db-exp-recs-toolbar">
+                    <div class="db-exp-recs-toolbar-left">
+                      <label class="db-exp-limite-label">Límite
+                        <select id="dbExpLimite">
+                          <option value="10">10</option><option value="50" selected>50</option><option value="100">100</option><option value="200">200</option><option value="500">500</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="db-exp-recs-toolbar-right">
+                      <div class="search-wrap"><input type="search" id="dbExpRecsSearch" class="search-input" placeholder="Buscar en los registros…"><button class="search-clear" data-act="clearRecsSearch">×</button></div>
+                    </div>
+                  </div>
+                  <div class="table-card db-exp-table-card db-exp-recs-card db-exp-fill">
+                    <table id="dbExpRecsTable"><thead><tr><th></th></tr></thead><tbody id="dbExpRecsTbody"><tr><td style="text-align:center;padding:24px"><div class="spin"></div></td></tr></tbody></table>
+                  </div>
+                </div>
+                <div class="db-exp-tabpanel" id="dbExpTabCols" hidden>
+                  <div class="table-card db-exp-table-card db-exp-fill">
+                    <table>
+                      <thead><tr><th style="width:36px">#</th><th>Campo</th><th>Tipo</th><th style="width:70px">Null</th><th style="width:70px">Clave</th><th>Default</th><th>Extra</th></tr></thead>
+                      <tbody id="dbExpColsTbody"><tr><td colspan="7" style="text-align:center;padding:24px"><div class="spin"></div></td></tr></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-ghost" data-act="close">Cerrar</button>
+            </div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _dbExpBackdrop = bd;
+
+        bd.addEventListener('click', e => { if (e.target === bd) cerrarExploradorDB(); });
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarExploradorDB));
+        bd.querySelector('[data-act="refresh"]').addEventListener('click', dbExpRecargar);
+        bd.querySelector('#dbExpSearch').addEventListener('input', dbExpFiltrarTablas);
+        bd.querySelector('[data-act="clearSearch"]').addEventListener('click', dbExpLimpiarBuscador);
+        bd.querySelector('#dbExpLimite').addEventListener('change', dbExpCambiarLimite);
+        bd.querySelector('#dbExpRecsSearch').addEventListener('input', dbExpFiltrarRegistros);
+        bd.querySelector('[data-act="clearRecsSearch"]').addEventListener('click', dbExpLimpiarBuscadorRegs);
+        bd.querySelectorAll('.db-exp-tab').forEach(t => t.addEventListener('click', () => dbExpCambiarTab(t.dataset.tab)));
+
+        await dbExpCargarTablas();
+    }
+    function cerrarExploradorDB() {
+        if (!_dbExpBackdrop) return;
+        _dbExpBackdrop.classList.remove('open');
+        setTimeout(() => { _dbExpBackdrop?.remove(); _dbExpBackdrop = null; }, 200);
+    }
+    function dbExpMostrarVista(v) {
+        if (!_dbExpBackdrop) return;
+        _dbExpBackdrop.querySelector('#dbExpViewTables').style.display  = v === 'tables' ? '' : 'none';
+        _dbExpBackdrop.querySelector('#dbExpViewDetail').style.display  = v === 'detail' ? '' : 'none';
+        _dbExpBackdrop.querySelector('#dbExpSearchWrap').style.display = v === 'tables' ? '' : 'none';
+    }
+    function dbExpRenderBreadcrumbs() {
+        if (!_dbExpBackdrop) return;
+        const el = _dbExpBackdrop.querySelector('#dbExpBreadcrumbs');
+        let html = `<button class="db-exp-crumb" data-act="root"><i class="fa-solid fa-database"></i> ${escape(dbExpDbName)}</button>`;
+        if (dbExpTablaActual) {
+            html += `<span class="db-exp-crumb-sep">/</span><span class="db-exp-crumb current">${escape(dbExpTablaActual)}</span>`;
+        }
+        el.innerHTML = html;
+        el.querySelector('[data-act="root"]')?.addEventListener('click', dbExpVolverATablas);
+    }
+    function dbExpVolverATablas() {
+        dbExpTablaActual = null;
+        dbExpMostrarVista('tables');
+        dbExpRenderBreadcrumbs();
+    }
+    function dbExpRecargar() {
+        if (dbExpTablaActual) {
+            dbExpCargarRegistros(dbExpTablaActual);
+            apiDbDescribe(dbExpTablaActual);
+        } else {
+            dbExpCargarTablas();
+        }
+    }
+    async function dbExpCargarTablas() {
+        try {
+            const data = await api('db_tables.php');
+            dbExpTablas = data.tablas || [];
+            dbExpDbName = data.database || '';
+            dbExpEnv    = (data.env || 'unknown').toLowerCase();
+            const dbEl  = _dbExpBackdrop.querySelector('#dbExpDbName');
+            const envEl = _dbExpBackdrop.querySelector('#dbExpEnvBadge');
+            dbEl.textContent  = dbExpDbName || '—';
+            envEl.textContent = dbExpEnv;
+            const envCls = ({ production: 'badge-danger', development: 'badge-success' })[dbExpEnv] || 'badge-warn';
+            envEl.className = 'badge ' + envCls;
+            envEl.style.fontFamily = 'monospace';
+            dbExpRenderBreadcrumbs();
+            dbExpRenderTablas();
+        } catch (e) {
+            _dbExpBackdrop.querySelector('#dbExpTablesTbody').innerHTML =
+                `<tr><td colspan="4" class="db-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        }
+    }
+    function dbExpRenderTablas() {
+        const tbody = _dbExpBackdrop.querySelector('#dbExpTablesTbody');
+        const info  = _dbExpBackdrop.querySelector('#dbExpTablesInfo');
+        const q = dbExpFiltro.toLowerCase();
+        const rows = q ? dbExpTablas.filter(t => t.nombre.toLowerCase().includes(q)) : dbExpTablas;
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="4" class="db-exp-empty">${q ? 'Sin resultados para el filtro.' : 'No hay tablas.'}</td></tr>`;
+        } else {
+            tbody.innerHTML = rows.map(t => `
+                <tr class="row-clickable" data-tabla="${escape(t.nombre)}">
+                  <td><i class="fa-solid fa-table" style="color:var(--info)"></i></td>
+                  <td><div class="db-exp-nombre">${escape(t.nombre)}</div>${t.comentario ? `<div class="db-exp-coment">${escape(t.comentario)}</div>` : ''}</td>
+                  <td class="db-exp-num">${t.filas_aprox != null ? t.filas_aprox.toLocaleString('es-AR') : '—'}</td>
+                  <td class="db-exp-mono">${escape(t.engine || '')}</td>
+                </tr>`).join('');
+            tbody.querySelectorAll('tr[data-tabla]').forEach(tr => {
+                tr.addEventListener('click', () => dbExpAbrirTabla(tr.dataset.tabla));
+            });
+        }
+        info.innerHTML = `<span>${rows.length} tabla${rows.length === 1 ? '' : 's'}${q ? ` (filtradas de ${dbExpTablas.length})` : ''}</span>`;
+    }
+    function dbExpFiltrarTablas() {
+        dbExpFiltro = (_dbExpBackdrop.querySelector('#dbExpSearch').value || '').trim();
+        dbExpRenderTablas();
+    }
+    function dbExpLimpiarBuscador() {
+        _dbExpBackdrop.querySelector('#dbExpSearch').value = '';
+        dbExpFiltro = ''; dbExpRenderTablas();
+    }
+    async function dbExpAbrirTabla(nombre) {
+        dbExpTablaActual = nombre;
+        dbExpFiltroRegs = '';
+        _dbExpBackdrop.querySelector('#dbExpRecsSearch').value = '';
+        dbExpMostrarVista('detail');
+        dbExpRenderBreadcrumbs();
+        dbExpCambiarTab('recs');
+        _dbExpBackdrop.querySelector('#dbExpRecsTbody').innerHTML = `<tr><td style="text-align:center;padding:24px"><div class="spin"></div></td></tr>`;
+        _dbExpBackdrop.querySelector('#dbExpColsTbody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px"><div class="spin"></div></td></tr>`;
+        await Promise.all([apiDbDescribe(nombre), dbExpCargarRegistros(nombre)]);
+    }
+    function dbExpCambiarTab(t) {
+        _dbExpBackdrop.querySelectorAll('.db-exp-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t));
+        _dbExpBackdrop.querySelector('#dbExpTabRecs').hidden = t !== 'recs';
+        _dbExpBackdrop.querySelector('#dbExpTabCols').hidden = t !== 'cols';
+    }
+    async function apiDbDescribe(nombre) {
+        try {
+            const data = await api('db_describe.php?tabla=' + encodeURIComponent(nombre));
+            dbExpRenderColumnas(data.columnas || []);
+        } catch (e) {
+            _dbExpBackdrop.querySelector('#dbExpColsTbody').innerHTML =
+                `<tr><td colspan="7" class="db-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        }
+    }
+    function dbExpRenderColumnas(cols) {
+        const tbody = _dbExpBackdrop.querySelector('#dbExpColsTbody');
+        _dbExpBackdrop.querySelector('#dbExpColsMeta').textContent = cols.length;
+        if (!cols.length) { tbody.innerHTML = `<tr><td colspan="7" class="db-exp-empty">Sin columnas.</td></tr>`; return; }
+        const claveBadge = k => {
+            if (k === 'PRI') return `<span class="badge badge-warn">PK</span>`;
+            if (k === 'UNI') return `<span class="badge badge-info">UQ</span>`;
+            if (k === 'MUL') return `<span class="badge">IDX</span>`;
+            return '';
+        };
+        const nullBadge = n => n === 'YES' ? `<span class="badge badge-warn">YES</span>` : `<span class="badge" style="color:var(--muted)">NO</span>`;
+        tbody.innerHTML = cols.map(c => `
+            <tr>
+              <td class="db-exp-num">${c.posicion}</td>
+              <td><div class="db-exp-col-nombre">${escape(c.nombre)}</div>${c.comentario ? `<div class="db-exp-coment">${escape(c.comentario)}</div>` : ''}</td>
+              <td class="db-exp-mono">${escape(c.tipo)}</td>
+              <td>${nullBadge(c.nullable)}</td>
+              <td>${claveBadge(c.clave)}</td>
+              <td>${c.predeterminado == null ? `<span class="db-exp-null">NULL</span>` : `<code>${escape(String(c.predeterminado))}</code>`}</td>
+              <td>${c.extra ? `<code>${escape(c.extra)}</code>` : ''}</td>
+            </tr>`).join('');
+    }
+    async function dbExpCargarRegistros(nombre) {
+        try {
+            const data = await api(`db_records.php?tabla=${encodeURIComponent(nombre)}&limite=${dbExpLimite}`);
+            dbExpRegistros    = data.registros || [];
+            dbExpPkCols       = data.pk        || [];
+            dbExpAutoIncCols  = data.auto_inc  || [];
+            dbExpNullableCols = data.nullable  || [];
+            dbExpColsTabla    = data.columnas  || [];
+            dbExpRegsTotal    = data.total     || 0;
+            dbExpPintarRegistros();
+        } catch (e) {
+            _dbExpBackdrop.querySelector('#dbExpRecsTbody').innerHTML =
+                `<tr><td class="db-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        }
+    }
+    function dbExpPintarRegistros() {
+        const thead = _dbExpBackdrop.querySelector('#dbExpRecsTable thead');
+        const tbody = _dbExpBackdrop.querySelector('#dbExpRecsTbody');
+        thead.innerHTML = '<tr>' + dbExpColsTabla.map(c => {
+            const esPk = dbExpPkCols.includes(c);
+            return `<th>${esPk ? `<i class="fa-solid fa-key" style="color:var(--warn);margin-right:4px"></i>` : ''}${escape(c)}</th>`;
+        }).join('') + '</tr>';
+
+        const q = dbExpFiltroRegs.toLowerCase();
+        const filas = q
+            ? dbExpRegistros.filter(r => Object.values(r).some(v => (v == null ? '' : String(v)).toLowerCase().includes(q)))
+            : dbExpRegistros;
+
+        if (!filas.length) {
+            tbody.innerHTML = `<tr><td colspan="${Math.max(1, dbExpColsTabla.length)}" class="db-exp-empty">${q ? `Sin resultados para "${escape(dbExpFiltroRegs)}"` : 'Esta tabla está vacía.'}</td></tr>`;
+        } else {
+            const tienePk = dbExpPkCols.length > 0;
+            tbody.innerHTML = filas.map(r => {
+                const rowIdx = dbExpRegistros.indexOf(r);
+                return `<tr data-row="${rowIdx}">` + dbExpColsTabla.map(c => {
+                    const v = r[c];
+                    const esPk = dbExpPkCols.includes(c);
+                    const esAi = dbExpAutoIncCols.includes(c);
+                    let cls = 'db-exp-cell-edit', title = 'Doble click para editar';
+                    if (!tienePk) { cls = 'db-exp-cell-lock'; title = 'No editable: la tabla no tiene PK'; }
+                    else if (esPk) { cls = 'db-exp-cell-lock'; title = 'No editable: PK'; }
+                    else if (esAi) { cls = 'db-exp-cell-lock'; title = 'No editable: auto_increment'; }
+                    const dbl = cls === 'db-exp-cell-edit' ? ' ondblclick="void 0"' : '';
+                    return `<td class="${cls}" data-col="${escape(c)}" title="${title}"${dbl}>${dbExpFmtValor(v)}</td>`;
+                }).join('') + '</tr>';
+            }).join('');
+            // Wire dblclick on editable cells.
+            tbody.querySelectorAll('td.db-exp-cell-edit').forEach(td => {
+                td.addEventListener('dblclick', () => dbExpEditarCelda(td));
+            });
+        }
+        const meta = _dbExpBackdrop.querySelector('#dbExpRecsMeta');
+        let mt = `${filas.length}/${dbExpRegsTotal}`;
+        if (q && filas.length !== dbExpRegistros.length) mt += ` (filtrados de ${dbExpRegistros.length})`;
+        if (!dbExpPkCols.length && dbExpRegistros.length > 0) mt += ' · solo lectura';
+        meta.textContent = mt;
+    }
+    function dbExpCambiarLimite() {
+        dbExpLimite = parseInt(_dbExpBackdrop.querySelector('#dbExpLimite').value, 10) || 50;
+        if (dbExpTablaActual) dbExpCargarRegistros(dbExpTablaActual);
+    }
+    function dbExpFiltrarRegistros() {
+        dbExpFiltroRegs = (_dbExpBackdrop.querySelector('#dbExpRecsSearch').value || '').trim();
+        dbExpPintarRegistros();
+    }
+    function dbExpLimpiarBuscadorRegs() {
+        _dbExpBackdrop.querySelector('#dbExpRecsSearch').value = '';
+        dbExpFiltroRegs = ''; dbExpPintarRegistros();
+    }
+    function dbExpFmtValor(v) {
+        if (v == null) return `<span class="db-exp-null">NULL</span>`;
+        if (v === '')  return `<span class="db-exp-null">""</span>`;
+        return escape(String(v));
+    }
+    function dbExpEditarCelda(td) {
+        if (td.querySelector('input')) return;
+        const tr     = td.parentElement;
+        const rowIdx = +tr.dataset.row;
+        const col    = td.dataset.col;
+        const reg    = dbExpRegistros[rowIdx];
+        if (!reg) return;
+        const original = reg[col];
+        const puedeNull = dbExpNullableCols.includes(col);
+        const cur = original == null ? '' : String(original);
+        td.classList.add('db-exp-cell-editing');
+        const nullBtn = puedeNull ? `<button class="btn-icon-sm" data-act="null" title="NULL">⊘</button>` : '';
+        td.innerHTML = `
+            <div class="db-exp-edit-wrap">
+              <input class="db-exp-edit-input" value="${escape(cur)}">
+              <div class="db-exp-edit-actions">
+                <button class="btn-icon-sm" data-act="save" title="Guardar">✓</button>
+                <button class="btn-icon-sm" data-act="cancel" title="Cancelar">✗</button>
+                ${nullBtn}
+              </div>
+            </div>`;
+        const inp = td.querySelector('input');
+        inp.focus(); inp.select();
+        const cerrar = () => {
+            td.classList.remove('db-exp-cell-editing', 'db-exp-cell-saving');
+            td.innerHTML = dbExpFmtValor(reg[col]);
+        };
+        const guardar = async (nuevoValor) => {
+            if (nuevoValor === original || (nuevoValor == null && original == null)) { cerrar(); return; }
+            td.classList.add('db-exp-cell-saving');
+            try {
+                const pk = Object.fromEntries(dbExpPkCols.map(c => [c, reg[c]]));
+                const data = await api('db_update.php', { method: 'POST', body: { tabla: dbExpTablaActual, columna: col, pk, valor: nuevoValor }});
+                reg[col] = data.valor_guardado;
+                cerrar();
+                td.classList.add('db-exp-cell-ok');
+                setTimeout(() => td.classList.remove('db-exp-cell-ok'), 800);
+            } catch (e) {
+                td.classList.remove('db-exp-cell-saving');
+                toast(e.message, { error: true, duration: 10000 });
+                inp.focus();
+            }
+        };
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); guardar(inp.value); }
+            else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(); }
+        });
+        td.querySelector('[data-act="save"]').addEventListener('click', () => guardar(inp.value));
+        td.querySelector('[data-act="cancel"]').addEventListener('click', cerrar);
+        td.querySelector('[data-act="null"]')?.addEventListener('click', () => guardar(null));
+    }
+
+    /* ================================================================
+       Herramientas: Explorador S3
+       ================================================================ */
+    let s3ExpPrefix      = '';
+    let s3ExpNextToken   = null;
+    let s3ExpBucket      = '';
+    let s3ExpCargando    = false;
+    let s3ExpUltimaLista = { folders: [], objects: [] };
+    let s3ExpFiltro      = '';
+    let _s3ExpBackdrop   = null;
+
+    async function abrirExploradorS3() {
+        if (_s3ExpBackdrop && document.body.contains(_s3ExpBackdrop)) return;
+        s3ExpPrefix = ''; s3ExpNextToken = null; s3ExpFiltro = '';
+        s3ExpUltimaLista = { folders: [], objects: [] };
+
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 's3ExpModalBackdrop';
+        bd.innerHTML = `
+          <div class="modal s3-exp-modal" role="dialog" aria-modal="true">
+            <div class="modal-header">
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:1.2rem">☁️</span>
+                <span>Explorador S3</span>
+                <span class="badge badge-info" id="s3ExpBucket" style="font-family:monospace">—</span>
+              </div>
+              <button class="btn-icon-sm" data-act="close" title="Cerrar">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="s3-exp-toolbar">
+                <div class="s3-exp-breadcrumbs" id="s3ExpBreadcrumbs"></div>
+                <div class="s3-exp-toolbar-right">
+                  <button class="btn btn-ghost btn-sm" data-act="refresh" title="Refrescar"><i class="fa-solid fa-rotate"></i></button>
+                  <div class="s3-exp-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" id="s3ExpBuscador" placeholder="Buscar archivos…" autocomplete="off"></div>
+                  <input type="file" id="s3ExpUploadInput" style="display:none">
+                  <button class="btn btn-secondary btn-sm" data-act="upload"><i class="fa-solid fa-upload"></i> Subir</button>
+                  <button class="btn btn-secondary btn-sm" data-act="mkdir"><i class="fa-solid fa-folder-plus"></i> Nueva carpeta</button>
+                </div>
+              </div>
+              <div class="table-card s3-exp-table-card">
+                <table>
+                  <thead><tr><th style="width:36px"></th><th>Nombre</th><th style="width:120px">Tamaño</th><th style="width:160px">Modificado</th><th style="width:60px;text-align:center">Acciones</th></tr></thead>
+                  <tbody id="s3ExpTbody"><tr><td colspan="5" style="text-align:center;padding:24px"><div class="spin"></div></td></tr></tbody>
+                </table>
+              </div>
+              <div class="s3-exp-footer-info" id="s3ExpFooterInfo"></div>
+              <div style="text-align:center">
+                <button class="btn btn-ghost btn-sm" id="s3ExpBtnMas" style="display:none">Cargar más</button>
+              </div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-ghost" data-act="close">Cerrar</button></div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _s3ExpBackdrop = bd;
+
+        bd.addEventListener('click', e => { if (e.target === bd) cerrarExploradorS3(); });
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarExploradorS3));
+        bd.querySelector('[data-act="refresh"]').addEventListener('click', s3ExpRecargar);
+        bd.querySelector('#s3ExpBuscador').addEventListener('input', s3ExpFiltrar);
+        bd.querySelector('[data-act="upload"]').addEventListener('click', () => bd.querySelector('#s3ExpUploadInput').click());
+        bd.querySelector('#s3ExpUploadInput').addEventListener('change', e => s3ExpSubirArchivo(e.target.files));
+        bd.querySelector('[data-act="mkdir"]').addEventListener('click', s3ExpCrearCarpeta);
+        bd.querySelector('#s3ExpBtnMas').addEventListener('click', s3ExpCargarMas);
+
+        await s3ExpCargar(true);
+    }
+    function cerrarExploradorS3() {
+        if (!_s3ExpBackdrop) return;
+        _s3ExpBackdrop.classList.remove('open');
+        setTimeout(() => { _s3ExpBackdrop?.remove(); _s3ExpBackdrop = null; }, 200);
+    }
+    function s3ExpRecargar() { s3ExpFiltro = ''; if (_s3ExpBackdrop) _s3ExpBackdrop.querySelector('#s3ExpBuscador').value = ''; s3ExpCargar(true); }
+    function s3ExpNavegar(prefix) {
+        s3ExpPrefix = prefix;
+        s3ExpFiltro = '';
+        if (_s3ExpBackdrop) _s3ExpBackdrop.querySelector('#s3ExpBuscador').value = '';
+        s3ExpCargar(true);
+    }
+    async function s3ExpCargar(reiniciar) {
+        if (s3ExpCargando) return;
+        s3ExpCargando = true;
+        try {
+            if (reiniciar) {
+                s3ExpNextToken = null;
+                s3ExpUltimaLista = { folders: [], objects: [] };
+            }
+            const qs = new URLSearchParams();
+            if (s3ExpPrefix) qs.set('prefix', s3ExpPrefix);
+            if (s3ExpNextToken) qs.set('token', s3ExpNextToken);
+            const data = await api('s3_list.php?' + qs.toString());
+            s3ExpBucket = data.bucket || '';
+            _s3ExpBackdrop.querySelector('#s3ExpBucket').textContent = s3ExpBucket || '—';
+
+            if (reiniciar) {
+                s3ExpUltimaLista.folders = data.folders || [];
+                s3ExpUltimaLista.objects = data.objects || [];
+            } else {
+                s3ExpUltimaLista.objects = s3ExpUltimaLista.objects.concat(data.objects || []);
+            }
+            // Ordenar objects por last_modified desc.
+            s3ExpUltimaLista.objects.sort((a, b) => {
+                if (!a.last_modified) return 1;
+                if (!b.last_modified) return -1;
+                return b.last_modified.localeCompare(a.last_modified);
+            });
+            s3ExpNextToken = data.truncated ? data.next_token : null;
+            const btnMas = _s3ExpBackdrop.querySelector('#s3ExpBtnMas');
+            btnMas.style.display = s3ExpNextToken ? '' : 'none';
+            btnMas.disabled = false; btnMas.textContent = 'Cargar más';
+
+            s3ExpRenderBreadcrumbs(s3ExpPrefix);
+            s3ExpRenderTabla(s3ExpPrefix);
+        } catch (e) {
+            _s3ExpBackdrop.querySelector('#s3ExpTbody').innerHTML =
+                `<tr><td colspan="5" class="s3-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        } finally {
+            s3ExpCargando = false;
+        }
+    }
+    function s3ExpCargarMas() {
+        const btn = _s3ExpBackdrop.querySelector('#s3ExpBtnMas');
+        btn.disabled = true; btn.textContent = 'Cargando…';
+        s3ExpCargar(false);
+    }
+    function s3ExpFiltrar() {
+        s3ExpFiltro = (_s3ExpBackdrop.querySelector('#s3ExpBuscador').value || '').trim().toLowerCase();
+        s3ExpRenderTabla(s3ExpPrefix);
+    }
+    function s3ExpRenderBreadcrumbs(prefix) {
+        const el = _s3ExpBackdrop.querySelector('#s3ExpBreadcrumbs');
+        const parts = prefix ? prefix.replace(/\/$/, '').split('/') : [];
+        let html = `<button class="s3-exp-crumb" data-p=""><i class="fa-solid fa-house"></i> raíz</button>`;
+        let acc = '';
+        parts.forEach((p, i) => {
+            acc += p + '/';
+            const isLast = i === parts.length - 1;
+            html += `<span class="s3-exp-crumb-sep">/</span>` +
+                    (isLast ? `<span class="s3-exp-crumb current">${escape(p)}</span>`
+                            : `<button class="s3-exp-crumb" data-p="${escape(acc)}">${escape(p)}</button>`);
+        });
+        el.innerHTML = html;
+        el.querySelectorAll('.s3-exp-crumb[data-p]').forEach(b => b.addEventListener('click', () => s3ExpNavegar(b.dataset.p)));
+    }
+    function s3ExpRenderTabla(prefix) {
+        const tbody = _s3ExpBackdrop.querySelector('#s3ExpTbody');
+        const info  = _s3ExpBackdrop.querySelector('#s3ExpFooterInfo');
+        const relName = k => (k || '').startsWith(prefix) ? k.slice(prefix.length) : k;
+        const foldersOrig = s3ExpUltimaLista.folders || [];
+        const objectsOrig = s3ExpUltimaLista.objects || [];
+        const folders = s3ExpFiltro ? foldersOrig.filter(f => relName(f).toLowerCase().includes(s3ExpFiltro)) : foldersOrig;
+        const objects = s3ExpFiltro ? objectsOrig.filter(o => relName(o.key).toLowerCase().includes(s3ExpFiltro)) : objectsOrig;
+
+        let rowsHtml = '';
+        if (prefix) {
+            const parent = prefix.replace(/[^/]+\/$/, '');
+            rowsHtml += `<tr class="row-clickable" data-nav="${escape(parent)}"><td><i class="fa-solid fa-turn-up" style="transform:rotate(-90deg);color:var(--muted)"></i></td><td colspan="4" style="color:var(--muted)">..</td></tr>`;
+        }
+        folders.forEach(f => {
+            const nm = relName(f);
+            rowsHtml += `<tr class="row-clickable" data-nav="${escape(f)}">
+              <td><i class="fa-solid fa-folder" style="color:var(--warn)"></i></td>
+              <td><div class="s3-exp-nombre">${escape(nm)}</div></td>
+              <td class="s3-exp-size">—</td><td class="s3-exp-date">—</td>
+              <td style="text-align:center"><button class="btn-icon-sm" data-key="${escape(f)}" data-folder="1"><i class="fa-solid fa-bars"></i></button></td>
+            </tr>`;
+        });
+        objects.forEach(o => {
+            const nm = relName(o.key);
+            const esImg = s3ExpEsImagen(nm);
+            const icono = esImg
+                ? `<img class="s3-exp-thumb" loading="lazy" src="${escape(o.url)}" onerror="this.replaceWith(Object.assign(document.createElement('i'),{className:'fa-solid fa-file-image'}))">`
+                : `<i class="fa-solid ${s3ExpIconoArchivo(nm)}" style="color:var(--info)"></i>`;
+            rowsHtml += `<tr class="row-clickable" data-url="${escape(o.url)}">
+              <td>${icono}</td>
+              <td><div class="s3-exp-nombre">${escape(nm)}</div></td>
+              <td class="s3-exp-size">${s3ExpFmtBytes(o.size)}</td>
+              <td class="s3-exp-date">${s3ExpFormatFecha(o.last_modified)}</td>
+              <td style="text-align:center"><button class="btn-icon-sm" data-key="${escape(o.key)}" data-url="${escape(o.url)}"><i class="fa-solid fa-bars"></i></button></td>
+            </tr>`;
+        });
+        if (!rowsHtml) {
+            rowsHtml = `<tr><td colspan="5" class="s3-exp-empty">${s3ExpFiltro ? `Sin resultados para "${escape(s3ExpFiltro)}"` : 'Esta carpeta está vacía.'}</td></tr>`;
+        }
+        tbody.innerHTML = rowsHtml;
+
+        tbody.querySelectorAll('tr[data-nav]').forEach(tr => tr.addEventListener('click', e => {
+            if (e.target.closest('button')) return; s3ExpNavegar(tr.dataset.nav);
+        }));
+        tbody.querySelectorAll('tr[data-url]').forEach(tr => tr.addEventListener('click', e => {
+            if (e.target.closest('button')) return; s3ExpAbrirArchivo(tr.dataset.url);
+        }));
+        tbody.querySelectorAll('button[data-key]').forEach(b => b.addEventListener('click', e => {
+            e.stopPropagation();
+            const items = [];
+            const key = b.dataset.key, esFolder = !!b.dataset.folder, url = b.dataset.url || '';
+            if (!esFolder) {
+                items.push({ act: 'open', label: 'Abrir / Descargar', icon: 'fa-up-right-from-square', onSelect: () => s3ExpAbrirArchivo(url) });
+                items.push({ act: 'copy', label: 'Copiar URL pública', icon: 'fa-link',                 onSelect: () => s3ExpCopiarUrl(url) });
+                items.push({ divider: true });
+            }
+            items.push({ act: 'del', label: 'Eliminar', icon: 'fa-trash', danger: true, onSelect: () => s3ExpEliminar(key, esFolder) });
+            openRowMenu(items, e.currentTarget);
+        }));
+
+        const bytes = objects.reduce((s, o) => s + (o.size || 0), 0);
+        const totalObjects = objectsOrig.length;
+        info.innerHTML = `<span>${folders.length} carpeta${folders.length === 1 ? '' : 's'} · ${objects.length} archivo${objects.length === 1 ? '' : 's'} · ${s3ExpFmtBytes(bytes)}${s3ExpFiltro ? ` (filtrado de ${totalObjects})` : ' en esta carpeta'}</span>`;
+    }
+    function s3ExpFmtBytes(n) { n = +n || 0; if (n < 1024) return n + ' B'; if (n < 1048576) return (n/1024).toFixed(1) + ' KB'; if (n < 1073741824) return (n/1048576).toFixed(1) + ' MB'; return (n/1073741824).toFixed(2) + ' GB'; }
+    function s3ExpFormatFecha(iso) { if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return iso; const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+    function s3ExpEsImagen(n) { return /\.(jpe?g|png|gif|webp|bmp|svg|avif)$/i.test(n); }
+    function s3ExpIconoArchivo(n) {
+        const e = n.split('.').pop().toLowerCase();
+        return { pdf:'fa-file-pdf', mp4:'fa-file-video', mov:'fa-file-video', avi:'fa-file-video', mp3:'fa-file-audio', wav:'fa-file-audio', zip:'fa-file-zipper', rar:'fa-file-zipper', csv:'fa-file-csv', xls:'fa-file-excel', xlsx:'fa-file-excel', doc:'fa-file-word', docx:'fa-file-word', txt:'fa-file-lines', log:'fa-file-lines', json:'fa-file-code', xml:'fa-file-code', html:'fa-file-code' }[e] || 'fa-file';
+    }
+    function s3ExpAbrirArchivo(url) { window.open(url, '_blank', 'noopener'); }
+    function s3ExpCopiarUrl(url) { copyToClipboard(url); }
+    async function s3ExpSubirArchivo(files) {
+        if (!files || !files.length) return;
+        const file = files[0];
+        toast('Subiendo ' + file.name + '…');
+        const fd = new FormData();
+        fd.append('archivo', file);
+        fd.append('prefix', s3ExpPrefix);
+        fd.append('nombre', file.name);
+        try {
+            const res = await fetch('api/s3_upload.php', { method: 'POST', credentials: 'same-origin', body: fd });
+            const body = await res.json();
+            if (res.status === 401) { window.location.href = 'login.php'; return; }
+            if (!res.ok || body.ok === false) throw new Error(body.error || ('HTTP ' + res.status));
+            toast('Archivo subido');
+            _s3ExpBackdrop.querySelector('#s3ExpUploadInput').value = '';
+            s3ExpCargar(true);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 10000 });
+        }
+    }
+    async function s3ExpCrearCarpeta() {
+        const nombre = prompt('Nombre de la nueva carpeta:');
+        if (!nombre) return;
+        try {
+            await api('s3_create_folder.php', { method: 'POST', body: { prefix: s3ExpPrefix, nombre }});
+            toast('Carpeta creada');
+            s3ExpCargar(true);
+        } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
+    }
+    function s3ExpEliminar(key, esCarpeta) {
+        const mensaje = esCarpeta
+            ? `Vas a eliminar la carpeta "${key}" y TODO su contenido de forma recursiva. Esta acción no se puede deshacer.`
+            : `¿Eliminar el archivo "${key}"?`;
+        confirmDialog(esCarpeta ? 'Eliminar carpeta' : 'Eliminar archivo', mensaje, async () => {
+            try {
+                await api('s3_delete.php', { method: 'POST', body: { key, recursivo: esCarpeta }});
+                toast('Eliminado');
+                s3ExpCargar(true);
+            } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
+        });
+    }
+
+    /* ================================================================
+       Herramientas: Programador de tareas
+       ================================================================ */
+    let tareasCache            = [];
+    let tareasFiltroQ          = '';
+    let tareasFiltroActivo     = '1';
+    let _tareasBackdrop        = null;
+    let _tareasFormBackdrop    = null;
+    let _tareasEjecBackdrop    = null;
+    let _tareasTermBackdrop    = null;
+    let _tareasCronBackdrop    = null;
+    let ejecucionesTareaSel    = null;
+    let ejecucionesFiltroEstado= '';
+    let ejecucionesCache       = [];
+    let terminalES             = null;
+    let terminalEjecucionActual= null;
+    let terminalAutoscroll     = true;
+
+    async function abrirTareas() {
+        if (_tareasBackdrop && document.body.contains(_tareasBackdrop)) return;
+        tareasFiltroQ = ''; tareasFiltroActivo = '1';
+
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 'tareasBackdrop';
+        bd.innerHTML = `
+          <div class="modal" role="dialog" aria-modal="true" style="max-width:1080px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden">
+            <div class="modal-header" style="flex-shrink:0">
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:1.2rem">⏰</span>
+                <span>Programador de tareas</span>
+              </div>
+              <button class="btn-icon-sm" data-act="close">×</button>
+            </div>
+            <div class="modal-body" style="gap:12px;flex:1;overflow:hidden;min-height:0;display:flex;flex-direction:column">
+              <div class="toolbar" style="margin-bottom:0">
+                <div class="toolbar-left" style="gap:8px;flex-wrap:wrap">
+                  <div class="search-wrap"><input type="search" id="tareasSearch" class="search-input" placeholder="Buscar tareas…"><button class="search-clear" data-act="clearSearch">×</button></div>
+                  <div id="tareasChips" style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="filter-chip" data-val="">Todas</button>
+                    <button class="filter-chip active" data-val="1">Activas</button>
+                    <button class="filter-chip" data-val="0">Inactivas</button>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" data-act="refresh"><i class="fa-solid fa-rotate"></i></button>
+                </div>
+                <div class="toolbar-right">
+                  <button class="btn btn-primary btn-sm" data-act="new"><i class="fa-solid fa-plus"></i> Nueva tarea</button>
+                </div>
+              </div>
+              <div class="table-card" style="flex:1;overflow-y:auto;min-height:0">
+                <table>
+                  <thead style="position:sticky;top:0;background:var(--bg);z-index:1">
+                    <tr><th style="width:80px">Código</th><th>Nombre</th><th style="width:140px">Cron</th><th style="width:120px">Estado</th><th style="width:170px">Última corrida</th><th style="width:80px">Activa</th><th style="width:60px;text-align:center">Acciones</th></tr>
+                  </thead>
+                  <tbody id="tareasTbody"><tr><td colspan="7" style="text-align:center;padding:24px"><div class="spin"></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="modal-footer" style="flex-shrink:0"><button class="btn btn-ghost" data-act="close">Cerrar</button></div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _tareasBackdrop = bd;
+
+        bd.addEventListener('click', e => { if (e.target === bd) cerrarTareas(); });
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarTareas));
+        bd.querySelector('[data-act="refresh"]').addEventListener('click', cargarTareas);
+        bd.querySelector('[data-act="new"]').addEventListener('click', () => abrirFormTarea(null));
+        bd.querySelector('#tareasSearch').addEventListener('input', tareasOnSearch);
+        bd.querySelector('[data-act="clearSearch"]').addEventListener('click', tareasLimpiarBusqueda);
+        bd.querySelectorAll('#tareasChips .filter-chip').forEach(c => c.addEventListener('click', () => tareasSetActivo(c.dataset.val, c)));
+
+        cargarTareas();
+    }
+    function cerrarTareas() {
+        if (!_tareasBackdrop) return;
+        _tareasBackdrop.classList.remove('open');
+        setTimeout(() => { _tareasBackdrop?.remove(); _tareasBackdrop = null; }, 200);
+    }
+    let _tareasSearchTimer = null;
+    function tareasOnSearch() {
+        tareasFiltroQ = (_tareasBackdrop.querySelector('#tareasSearch').value || '').trim();
+        clearTimeout(_tareasSearchTimer);
+        _tareasSearchTimer = setTimeout(cargarTareas, 250);
+    }
+    function tareasLimpiarBusqueda() {
+        _tareasBackdrop.querySelector('#tareasSearch').value = '';
+        tareasFiltroQ = ''; cargarTareas();
+    }
+    function tareasSetActivo(v, el) {
+        tareasFiltroActivo = v;
+        _tareasBackdrop.querySelectorAll('#tareasChips .filter-chip').forEach(c => c.classList.toggle('active', c === el));
+        cargarTareas();
+    }
+    async function cargarTareas() {
+        const tbody = _tareasBackdrop?.querySelector('#tareasTbody');
+        if (!tbody) return;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px"><div class="spin"></div></td></tr>`;
+        try {
+            const qs = new URLSearchParams();
+            if (tareasFiltroQ) qs.set('q', tareasFiltroQ);
+            if (tareasFiltroActivo !== '') qs.set('activo', tareasFiltroActivo);
+            const data = await api('tareas.php?' + qs.toString());
+            tareasCache = data.tareas || [];
+            renderTareas(tareasCache);
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        }
+    }
+    function tareaBadgeEstado(estado) {
+        const map = {
+            ok:        { cls: 'badge-success', label: 'OK' },
+            error:     { cls: 'badge-danger',  label: 'Error' },
+            timeout:   { cls: 'badge-warn',    label: 'Timeout' },
+            killed:    { cls: 'badge-danger',  label: 'Killed' },
+            corriendo: { cls: 'badge-info',    label: 'Corriendo' },
+        };
+        const m = map[estado] || { cls: '', label: 'Sin corrida' };
+        return `<span class="badge ${m.cls}">${m.label}</span>`;
+    }
+    function renderTareas(rows) {
+        const tbody = _tareasBackdrop.querySelector('#tareasTbody');
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">No hay tareas.</td></tr>`; return; }
+        tbody.innerHTML = rows.map(t => `
+            <tr class="row-clickable" data-id="${t.id}">
+              <td class="td-id">#${t.id}</td>
+              <td><div style="font-weight:600">${escape(t.nombre)}</div>${t.descripcion ? `<div style="font-size:.78rem;color:var(--muted)">${escape(t.descripcion)}</div>` : ''}</td>
+              <td style="font-family:monospace;font-size:.82rem">${escape(t.cron_expr)}</td>
+              <td>${tareaBadgeEstado(t.ultimo_estado)}</td>
+              <td style="font-family:monospace;font-size:.82rem">${t.ultimo_run ? escape(t.ultimo_run) : '<span style="color:var(--muted)">—</span>'}</td>
+              <td>
+                <label class="toggle-switch" onclick="event.stopPropagation()">
+                  <input type="checkbox" data-toggle="${t.id}" ${t.activo ? 'checked' : ''}>
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </label>
+              </td>
+              <td style="text-align:center"><button class="btn-icon-sm" data-menu="${t.id}"><i class="fa-solid fa-bars"></i></button></td>
+            </tr>`).join('');
+        tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+            const id = +tr.dataset.id;
+            tr.addEventListener('click', e => { if (e.target.closest('button,label,input')) return; abrirEjecuciones(id); });
+        });
+        tbody.querySelectorAll('input[data-toggle]').forEach(chk => {
+            chk.addEventListener('change', () => toggleActivoTarea(+chk.dataset.toggle, chk.checked));
+        });
+        tbody.querySelectorAll('button[data-menu]').forEach(b => b.addEventListener('click', e => {
+            e.stopPropagation();
+            const id = +b.dataset.menu;
+            const t  = tareasCache.find(x => x.id === id); if (!t) return;
+            openRowMenu([
+                { act: 'ver',    label: 'Ver ejecuciones',                    icon: 'fa-list',      onSelect: () => abrirEjecuciones(id) },
+                { act: 'run',    label: 'Ejecutar ahora',                     icon: 'fa-play',      onSelect: () => ejecutarAhora(id) },
+                { act: 'tog',    label: t.activo ? 'Desactivar' : 'Activar',  icon: 'fa-power-off', onSelect: () => toggleActivoTarea(id, !t.activo) },
+                { divider: true },
+                { act: 'edit',   label: 'Editar',                             icon: 'fa-pen',       onSelect: () => abrirFormTarea(t) },
+                { act: 'del',    label: 'Eliminar',                           icon: 'fa-trash', danger: true, onSelect: () => eliminarTarea(id) },
+            ], e.currentTarget);
+        }));
+    }
+    async function toggleActivoTarea(id, activo) {
+        const t = tareasCache.find(x => x.id === id); if (!t) return;
+        try {
+            await api('tareas.php', { method: 'PUT', body: { ...t, activo: activo ? 1 : 0 } });
+            toast(activo ? 'Tarea activada' : 'Tarea desactivada');
+            cargarTareas();
+        } catch (e) { toast(e.message, { error: true, duration: 10000 }); cargarTareas(); }
+    }
+    async function ejecutarAhora(id) {
+        try {
+            const data = await api('tareas_ejecutar.php', { method: 'POST', body: { tarea_id: id } });
+            cargarTareas();
+            abrirTerminal(data.ejecucion_id);
+        } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
+    }
+    function eliminarTarea(id) {
+        const t = tareasCache.find(x => x.id === id); if (!t) return;
+        confirmDialog('Eliminar tarea', `¿Eliminar "${t.nombre}" y todo su historial? Esta acción no se puede deshacer.`, async () => {
+            try {
+                const data = await api('tareas.php?id=' + id, { method: 'DELETE' });
+                toast(`Tarea eliminada (${data.archivos_borrados || 0} archivos borrados)`);
+                cargarTareas();
+            } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
+        });
+    }
+
+    /* --- Form de tarea (alta/edición) --- */
+    async function abrirFormTarea(param) {
+        const isEdit = !!param;
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 'formTareaBackdrop';
+        bd.innerHTML = `
+          <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
+            <div class="modal-header">
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><span style="font-size:1.2rem">⏰</span><span>${isEdit ? 'Editar tarea' : 'Nueva tarea'}</span></div>
+              <button class="btn-icon-sm" data-act="close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group"><label>Nombre</label><input type="text" id="formTareaNombre" maxlength="120" value="${escape(param?.nombre ?? '')}"><div class="field-error" id="formTareaNombreErr" style="display:none"></div></div>
+              <div class="form-group"><label>Descripción <span style="color:var(--muted);font-weight:400">— opcional</span></label><input type="text" id="formTareaDesc" maxlength="255" value="${escape(param?.descripcion ?? '')}"></div>
+              <div class="form-group">
+                <label>Script</label>
+                <div style="display:flex;gap:6px">
+                  <select id="formTareaScript" style="flex:1"><option value="">Cargando…</option></select>
+                  <button class="btn btn-ghost btn-sm" data-act="refreshScripts" title="Refrescar scripts"><i class="fa-solid fa-rotate"></i></button>
+                </div>
+                <div class="field-error" id="formTareaScriptErr" style="display:none"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Expresión cron</label>
+                  <div style="display:flex;gap:6px">
+                    <input type="text" id="formTareaCron" style="font-family:monospace;flex:1" value="${escape(param?.cron_expr ?? '* * * * *')}">
+                    <button class="btn btn-ghost btn-sm" data-act="cronBuilder" title="Abrir constructor"><i class="fa-solid fa-sliders"></i></button>
+                  </div>
+                  <div class="field-error" id="formTareaCronErr" style="display:none"></div>
+                </div>
+                <div class="form-group"><label>Timeout (segundos)</label><input type="number" id="formTareaTimeout" min="5" max="86400" value="${param?.timeout_seg ?? 300}"></div>
+              </div>
+              <div class="form-row form-row-3">
+                <div class="form-group"><label>Si ya está corriendo</label>
+                  <select id="formTareaOverlap">
+                    <option value="skip" ${!param || param.overlap === 'skip' ? 'selected' : ''}>Saltar</option>
+                    <option value="allow" ${param?.overlap === 'allow' ? 'selected' : ''}>Ejecutar</option>
+                  </select>
+                </div>
+                <div class="form-group"><label>Retención (días)</label><input type="number" id="formTareaRet" min="1" max="3650" value="${param?.retencion_dias ?? 7}"></div>
+                <div class="form-group"><label>Estado</label>
+                  <select id="formTareaActivo">
+                    <option value="1" ${!param || param.activo ? 'selected' : ''}>Activa</option>
+                    <option value="0" ${param && !param.activo ? 'selected' : ''}>Inactiva</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-ghost" data-act="close">Cancelar</button>
+              <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear tarea'}</button>
+            </div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _tareasFormBackdrop = bd;
+
+        const cerrar = () => { bd.classList.remove('open'); setTimeout(() => { bd.remove(); _tareasFormBackdrop = null; }, 200); };
+        bd.addEventListener('click', e => { if (e.target === bd) cerrar(); });
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrar));
+        bd.querySelector('[data-act="refreshScripts"]').addEventListener('click', () => cargarScriptsDisponibles(param?.script ?? ''));
+        bd.querySelector('[data-act="cronBuilder"]').addEventListener('click', abrirCronBuilder);
+        bd.querySelector('[data-act="save"]').addEventListener('click', () => guardarTarea(param, cerrar));
+
+        await cargarScriptsDisponibles(param?.script ?? '');
+    }
+    async function cargarScriptsDisponibles(actual) {
+        try {
+            const scripts = await api('tareas_scripts_disponibles.php');
+            const sel = _tareasFormBackdrop.querySelector('#formTareaScript');
+            let opts = `<option value="">— elegí un script —</option>` + scripts.map(s => `<option value="${escape(s)}" ${s === actual ? 'selected' : ''}>${escape(s)}</option>`).join('');
+            if (actual && !scripts.includes(actual)) {
+                opts += `<option value="${escape(actual)}" selected>⚠️ ${escape(actual)} (no está en cloud/jobs/)</option>`;
+            }
+            sel.innerHTML = opts;
+        } catch (e) {
+            _tareasFormBackdrop.querySelector('#formTareaScript').innerHTML = `<option value="">Error cargando scripts</option>`;
+        }
+    }
+    async function guardarTarea(param, cerrar) {
+        const bd = _tareasFormBackdrop;
+        const nombre    = bd.querySelector('#formTareaNombre').value.trim();
+        const descripcion = bd.querySelector('#formTareaDesc').value.trim();
+        const script    = bd.querySelector('#formTareaScript').value;
+        const cron_expr = bd.querySelector('#formTareaCron').value.trim();
+        const timeout_seg    = +bd.querySelector('#formTareaTimeout').value || 300;
+        const retencion_dias = +bd.querySelector('#formTareaRet').value || 7;
+        const overlap   = bd.querySelector('#formTareaOverlap').value;
+        const activo    = +bd.querySelector('#formTareaActivo').value;
+
+        ['Nombre', 'Script', 'Cron'].forEach(k => { const e = bd.querySelector('#formTarea' + k + 'Err'); if (e) e.style.display = 'none'; });
+        const err = (k, m) => { const el = bd.querySelector('#formTarea' + k + 'Err'); if (el) { el.textContent = m; el.style.display = 'block'; } };
+        if (!nombre) { err('Nombre', 'El nombre es obligatorio.'); return; }
+        if (!script) { err('Script', 'Elegí un script del desplegable.'); return; }
+        if (!cron_expr) { err('Cron', 'La expresión cron es obligatoria.'); return; }
+        if (cron_expr.split(/\s+/).length !== 5) { err('Cron', 'Deben ser 5 campos.'); return; }
+
+        const payload = { nombre, descripcion, script, cron_expr, timeout_seg, retencion_dias, overlap, activo };
+        try {
+            if (param) {
+                await api('tareas.php', { method: 'PUT', body: { id: param.id, ...payload }});
+                toast('Tarea actualizada');
+            } else {
+                await api('tareas.php', { method: 'POST', body: payload });
+                toast('Tarea creada');
+            }
+            cerrar();
+            cargarTareas();
+        } catch (e) {
+            if ((e.message || '').includes('nombre_duplicado')) err('Nombre', 'Ya existe una tarea con ese nombre.');
+            else toast(e.message, { error: true, duration: 10000 });
+        }
+    }
+
+    /* --- Ejecuciones (historial) --- */
+    async function abrirEjecuciones(tareaId) {
+        const t = tareasCache.find(x => x.id === tareaId);
+        ejecucionesTareaSel     = { id: tareaId, nombre: t ? t.nombre : ('#' + tareaId) };
+        ejecucionesFiltroEstado = '';
+
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 'ejecucionesBackdrop';
+        bd.innerHTML = `
+          <div class="modal" role="dialog" aria-modal="true" style="max-width:1000px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden">
+            <div class="modal-header" style="flex-shrink:0">
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><span style="font-size:1.2rem">📜</span><span>Ejecuciones de ${escape(ejecucionesTareaSel.nombre)}</span></div>
+              <button class="btn-icon-sm" data-act="close">×</button>
+            </div>
+            <div class="modal-body" style="gap:12px;flex:1;overflow:hidden;min-height:0;display:flex;flex-direction:column">
+              <div class="toolbar" style="margin-bottom:0">
+                <div class="toolbar-left" style="gap:6px;flex-wrap:wrap">
+                  <div id="ejChips" style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="filter-chip active" data-val="">Todas</button>
+                    <button class="filter-chip" data-val="corriendo">Corriendo</button>
+                    <button class="filter-chip" data-val="ok">OK</button>
+                    <button class="filter-chip" data-val="error">Error</button>
+                    <button class="filter-chip" data-val="timeout">Timeout</button>
+                    <button class="filter-chip" data-val="killed">Killed</button>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" data-act="refresh"><i class="fa-solid fa-rotate"></i></button>
+                </div>
+              </div>
+              <div class="table-card" style="flex:1;overflow-y:auto;min-height:0">
+                <table>
+                  <thead style="position:sticky;top:0;background:var(--bg);z-index:1">
+                    <tr><th style="width:80px">Código</th><th style="width:170px">Inicio</th><th style="width:120px">Duración</th><th style="width:120px">Estado</th><th style="width:120px">Disparo</th><th>Mensaje</th><th style="width:60px;text-align:center">Acciones</th></tr>
+                  </thead>
+                  <tbody id="ejecucionesTbody"><tr><td colspan="7" style="text-align:center;padding:24px"><div class="spin"></div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="modal-footer" style="flex-shrink:0"><button class="btn btn-ghost" data-act="close">Cerrar</button></div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _tareasEjecBackdrop = bd;
+
+        bd.addEventListener('click', e => { if (e.target === bd) cerrarEjecuciones(); });
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarEjecuciones));
+        bd.querySelector('[data-act="refresh"]').addEventListener('click', cargarEjecuciones);
+        bd.querySelectorAll('#ejChips .filter-chip').forEach(c => c.addEventListener('click', () => {
+            ejecucionesFiltroEstado = c.dataset.val;
+            bd.querySelectorAll('#ejChips .filter-chip').forEach(x => x.classList.toggle('active', x === c));
+            cargarEjecuciones();
+        }));
+
+        cargarEjecuciones();
+    }
+    function cerrarEjecuciones() {
+        if (!_tareasEjecBackdrop) return;
+        _tareasEjecBackdrop.classList.remove('open');
+        setTimeout(() => { _tareasEjecBackdrop?.remove(); _tareasEjecBackdrop = null; }, 200);
+        cargarTareas();
+    }
+    async function cargarEjecuciones() {
+        if (!ejecucionesTareaSel) return;
+        const tbody = _tareasEjecBackdrop.querySelector('#ejecucionesTbody');
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px"><div class="spin"></div></td></tr>`;
+        try {
+            const qs = new URLSearchParams({ tarea_id: String(ejecucionesTareaSel.id), limite: '100' });
+            if (ejecucionesFiltroEstado) qs.set('estado', ejecucionesFiltroEstado);
+            const data = await api('tareas_ejecuciones.php?' + qs.toString());
+            ejecucionesCache = data.ejecuciones || [];
+            renderEjecuciones(ejecucionesCache);
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+        }
+    }
+    function renderEjecuciones(rows) {
+        const tbody = _tareasEjecBackdrop.querySelector('#ejecucionesTbody');
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">Sin ejecuciones.</td></tr>`; return; }
+        tbody.innerHTML = rows.map(e => `
+            <tr class="row-clickable" data-id="${e.id}">
+              <td class="td-id">#${e.id}</td>
+              <td style="font-family:monospace;font-size:.82rem">${escape(e.inicio || '')}</td>
+              <td style="font-family:monospace;font-size:.82rem">${formatoDuracion(e.inicio, e.fin)}</td>
+              <td>${tareaBadgeEstado(e.estado)}</td>
+              <td style="font-size:.82rem;color:var(--muted)">${escape(e.disparo || '')}</td>
+              <td style="font-size:.82rem;color:var(--muted);max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(e.mensaje || '')}">${escape(e.mensaje || '')}</td>
+              <td style="text-align:center"><button class="btn-icon-sm" data-menu="${e.id}"><i class="fa-solid fa-bars"></i></button></td>
+            </tr>`).join('');
+        tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+            const id = +tr.dataset.id;
+            tr.addEventListener('click', e => { if (e.target.closest('button')) return; abrirTerminal(id); });
+        });
+        tbody.querySelectorAll('button[data-menu]').forEach(b => b.addEventListener('click', ev => {
+            ev.stopPropagation();
+            const id  = +b.dataset.menu;
+            const ej  = ejecucionesCache.find(x => x.id === id); if (!ej) return;
+            const items = [
+                { act: 'log', label: 'Ver log', icon: 'fa-terminal', onSelect: () => abrirTerminal(id) },
+            ];
+            if (ej.estado === 'corriendo') {
+                items.push({ act: 'stop', label: 'Detener', icon: 'fa-stop', danger: true, onSelect: () => detenerEjecucion(id) });
+            }
+            openRowMenu(items, ev.currentTarget);
+        }));
+    }
+    function formatoDuracion(inicio, fin) {
+        if (!inicio) return '—';
+        const i = new Date(String(inicio).replace(' ', 'T'));
+        const f = fin ? new Date(String(fin).replace(' ', 'T')) : new Date();
+        if (isNaN(i)) return '—';
+        const s = Math.max(0, Math.floor((f - i) / 1000));
+        if (s < 60) return s + 's';
+        if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+        return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    }
+    async function detenerEjecucion(id) {
+        try {
+            await api('tareas_ejecuciones.php', { method: 'POST', body: { id, accion: 'detener' } });
+            toast('Ejecución detenida');
+            cargarEjecuciones();
+        } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
+    }
+
+    /* --- Modal Terminal (SSE) --- */
+    function abrirTerminal(ejecucionId) {
+        terminalEjecucionActual = ejecucionId;
+        terminalAutoscroll = true;
+
+        if (terminalES) { try { terminalES.close(); } catch(_){} terminalES = null; }
+
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 'terminalBackdrop';
+        bd.innerHTML = `
+          <div class="modal" role="dialog" aria-modal="true" style="max-width:960px">
+            <div class="modal-header">
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><span style="font-size:1.2rem">🖥️</span><span>Log ejecución #${ejecucionId}</span><span class="badge badge-info" id="terminalBadge">corriendo</span></div>
+              <button class="btn-icon-sm" data-act="close">×</button>
+            </div>
+            <div class="modal-body"><pre id="terminalOutput" class="terminal-live"></pre></div>
+            <div class="modal-footer" style="justify-content:space-between">
+              <button class="btn btn-ghost btn-sm" id="btnTerminalAutoscroll" class="active" title="Auto-scroll"><i class="fa-solid fa-angles-down"></i></button>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-danger btn-sm" id="btnTerminalDetener"><i class="fa-solid fa-stop"></i> Detener</button>
+                <button class="btn btn-ghost" data-act="close">Cerrar</button>
+              </div>
+            </div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _tareasTermBackdrop = bd;
+
+        const btnAuto = bd.querySelector('#btnTerminalAutoscroll'); btnAuto.classList.add('active');
+        btnAuto.addEventListener('click', () => { terminalAutoscroll = !terminalAutoscroll; btnAuto.classList.toggle('active', terminalAutoscroll); toast(terminalAutoscroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'); });
+        bd.querySelector('#btnTerminalDetener').addEventListener('click', () => detenerEjecucion(ejecucionId));
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarTerminal));
+        bd.addEventListener('click', e => { if (e.target === bd) cerrarTerminal(); });
+
+        const out = bd.querySelector('#terminalOutput');
+        terminalES = new EventSource('api/tareas_ejecucion_stream.php?id=' + ejecucionId);
+        terminalES.onmessage = ev => {
+            out.textContent += ev.data + '\n';
+            if (terminalAutoscroll) out.scrollTop = out.scrollHeight;
+        };
+        terminalES.addEventListener('end', ev => {
+            const estado = ev.data || 'finalizado';
+            const badge  = bd.querySelector('#terminalBadge');
+            const map    = { ok: 'badge-success', error: 'badge-danger', killed: 'badge-danger', timeout: 'badge-warn' };
+            badge.className = 'badge ' + (map[estado] || 'badge-info');
+            badge.textContent = estado;
+            bd.querySelector('#btnTerminalDetener').style.display = 'none';
+            out.textContent += `\n── ejecución terminada (${estado}) ──\n`;
+            try { terminalES.close(); } catch(_){}
+            terminalES = null;
+            if (_tareasEjecBackdrop) cargarEjecuciones();
+            if (_tareasBackdrop) cargarTareas();
+        });
+        terminalES.onerror = () => { try { terminalES.close(); } catch(_){} terminalES = null; };
+    }
+    function cerrarTerminal() {
+        if (terminalES) { try { terminalES.close(); } catch(_){} terminalES = null; }
+        if (!_tareasTermBackdrop) return;
+        _tareasTermBackdrop.classList.remove('open');
+        setTimeout(() => { _tareasTermBackdrop?.remove(); _tareasTermBackdrop = null; }, 200);
+        if (_tareasEjecBackdrop) cargarEjecuciones();
+        if (_tareasBackdrop) cargarTareas();
+    }
+
+    /* --- Constructor de cron (mini) --- */
+    const CRON_CAMPOS = ['min', 'hor', 'dom', 'mes', 'dow'];
+    function abrirCronBuilder() {
+        const cur = (_tareasFormBackdrop?.querySelector('#formTareaCron')?.value || '* * * * *').trim();
+        const partes = cur.split(/\s+/); while (partes.length < 5) partes.push('*');
+
+        const bd = document.createElement('div');
+        bd.className = 'modal-backdrop';
+        bd.id = 'cronBuilderBackdrop';
+        bd.style.zIndex = '160';
+        const campoRow = (id, label, val) => `
+            <div class="form-row form-row-3" style="align-items:end;gap:8px">
+              <div class="form-group"><label>${label}</label>
+                <select data-cron-modo="${id}">
+                  <option value="star">Cualquiera</option>
+                  <option value="exact">Exacto</option>
+                  <option value="step">Cada</option>
+                  <option value="range">Rango</option>
+                  <option value="list">Lista</option>
+                </select>
+              </div>
+              <div class="form-group" style="grid-column:span 2"><label>Valor</label>
+                <input type="text" data-cron-valor="${id}" value="${escape(val)}" style="font-family:monospace">
+              </div>
+            </div>`;
+        bd.innerHTML = `
+          <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
+            <div class="modal-header"><div class="modal-title" style="display:flex;align-items:center;gap:8px"><span>🧮</span><span>Constructor de cron</span></div><button class="btn-icon-sm" data-act="close">×</button></div>
+            <div class="modal-body">
+              ${campoRow('min', 'Minuto (0-59)',  partes[0])}
+              ${campoRow('hor', 'Hora (0-23)',    partes[1])}
+              ${campoRow('dom', 'Día del mes (1-31)', partes[2])}
+              ${campoRow('mes', 'Mes (1-12)',     partes[3])}
+              ${campoRow('dow', 'Día de la semana (0=Dom..6=Sáb)', partes[4])}
+              <div style="background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border)">
+                <div style="font-family:monospace;font-weight:700;font-size:1rem" id="cronBuilderPreview">${escape(cur)}</div>
+                <div style="font-size:.82rem;color:var(--muted);margin-top:4px" id="cronBuilderDesc">—</div>
+              </div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-ghost" data-act="close">Cancelar</button><button class="btn btn-primary" data-act="apply">Aplicar</button></div>
+          </div>`;
+        document.body.appendChild(bd);
+        requestAnimationFrame(() => bd.classList.add('open'));
+        _tareasCronBackdrop = bd;
+
+        CRON_CAMPOS.forEach((k, i) => { cronBuilderPoblarCampo(k, partes[i]); });
+        cronBuilderOnChange();
+
+        const cerrar = () => { bd.classList.remove('open'); setTimeout(() => { bd.remove(); _tareasCronBackdrop = null; }, 200); };
+        bd.addEventListener('click', e => { if (e.target === bd) cerrar(); });
+        bd.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrar));
+        bd.querySelector('[data-act="apply"]').addEventListener('click', () => {
+            const expr = cronBuilderConstruir();
+            if (_tareasFormBackdrop) {
+                const inp = _tareasFormBackdrop.querySelector('#formTareaCron');
+                inp.value = expr;
+                _tareasFormBackdrop.querySelector('#formTareaCronErr').style.display = 'none';
+            }
+            cerrar();
+        });
+        bd.querySelectorAll('[data-cron-modo]').forEach(sel => sel.addEventListener('change', () => cronBuilderModoChange(sel.dataset.cronModo)));
+        bd.querySelectorAll('[data-cron-valor]').forEach(inp => inp.addEventListener('input', cronBuilderOnChange));
+    }
+    function cronBuilderPoblarCampo(campo, valor) {
+        const bd = _tareasCronBackdrop; if (!bd) return;
+        const sel = bd.querySelector(`[data-cron-modo="${campo}"]`);
+        const inp = bd.querySelector(`[data-cron-valor="${campo}"]`);
+        let modo = 'star', v = '';
+        if (valor === '*') modo = 'star';
+        else if (/^\*\/\d+$/.test(valor))    { modo = 'step';  v = valor.slice(2); }
+        else if (/^\d+-\d+$/.test(valor))    { modo = 'range'; v = valor; }
+        else if (valor.includes(','))         { modo = 'list';  v = valor; }
+        else                                   { modo = 'exact'; v = valor; }
+        sel.value = modo;
+        inp.value = v;
+        inp.disabled = modo === 'star';
+    }
+    function cronBuilderModoChange(campo) {
+        const bd = _tareasCronBackdrop; if (!bd) return;
+        const sel = bd.querySelector(`[data-cron-modo="${campo}"]`);
+        const inp = bd.querySelector(`[data-cron-valor="${campo}"]`);
+        inp.disabled = sel.value === 'star';
+        if (sel.value === 'star') inp.value = '';
+        cronBuilderOnChange();
+    }
+    function cronBuilderConstruirCampo(campo) {
+        const bd = _tareasCronBackdrop; if (!bd) return '*';
+        const modo = bd.querySelector(`[data-cron-modo="${campo}"]`).value;
+        const v    = (bd.querySelector(`[data-cron-valor="${campo}"]`).value || '').trim();
+        if (modo === 'star' || v === '') return '*';
+        if (modo === 'exact') return v;
+        if (modo === 'step')  return '*/' + v;
+        return v; // range o list ya vienen tal cual
+    }
+    function cronBuilderConstruir() {
+        return CRON_CAMPOS.map(cronBuilderConstruirCampo).join(' ');
+    }
+    function cronBuilderOnChange() {
+        const bd = _tareasCronBackdrop; if (!bd) return;
+        const expr = cronBuilderConstruir();
+        bd.querySelector('#cronBuilderPreview').textContent = expr;
+        bd.querySelector('#cronBuilderDesc').textContent = cronDescribir(expr);
+    }
+    function cronDescribir(expr) {
+        const [m, h, dom, mon, dow] = expr.split(/\s+/);
+        const partes = [];
+        if (m === '*' && h === '*') partes.push('Cada minuto');
+        else if (m.startsWith('*/') && h === '*') partes.push(`Cada ${m.slice(2)} minutos`);
+        else if (h.startsWith('*/') && /^\d+$/.test(m)) partes.push(`Al minuto ${m} de cada ${h.slice(2)} horas`);
+        else if (m === '0' && h === '*') partes.push('Al minuto 0 de cada hora');
+        else if (/^\d+$/.test(m) && /^\d+$/.test(h)) partes.push(`A las ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+        else partes.push(`Según patrón ${m} ${h}`);
+        if (dom !== '*') partes.push('el día ' + dom + ' del mes');
+        const meses = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        if (mon !== '*' && /^\d+$/.test(mon)) partes.push('en ' + (meses[+mon] || mon));
+        else if (mon !== '*') partes.push('en meses ' + mon);
+        const dias = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'];
+        if (dow !== '*') {
+            if (/^\d+$/.test(dow)) partes.push('los ' + (dias[+dow] || dow));
+            else if (/^\d+-\d+$/.test(dow)) {
+                const [a, b] = dow.split('-').map(Number);
+                partes.push(`de ${dias[a] || a} a ${dias[b] || b}`);
+            } else partes.push('los días ' + dow);
+        } else if (dom === '*' && mon === '*') partes.push('todos los días');
+        return partes.join(', ').replace(/^./, s => s.toUpperCase()) + '.';
+    }
+
+    /* --- ESC cascada para el módulo de tareas --- */
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        if (_tareasCronBackdrop?.classList.contains('open')) { _tareasCronBackdrop.classList.remove('open'); setTimeout(() => { _tareasCronBackdrop?.remove(); _tareasCronBackdrop = null; }, 200); return; }
+        if (_tareasTermBackdrop?.classList.contains('open')) { cerrarTerminal(); return; }
+        if (_tareasFormBackdrop?.classList.contains('open')) { _tareasFormBackdrop.classList.remove('open'); const b = _tareasFormBackdrop; setTimeout(() => { b?.remove(); _tareasFormBackdrop = null; }, 200); return; }
+        if (_tareasEjecBackdrop?.classList.contains('open')) { cerrarEjecuciones(); return; }
+        if (_tareasBackdrop?.classList.contains('open'))     { cerrarTareas(); return; }
+        if (_s3ExpBackdrop?.classList.contains('open'))      { cerrarExploradorS3(); return; }
+        if (_dbExpBackdrop?.classList.contains('open'))      { cerrarExploradorDB(); return; }
+    });
 
     /* ---------- Views: Stub ---------- */
     function renderStub(root) {
@@ -5161,12 +7018,24 @@
     }
 
     let toastTimer = null;
-    function toast(msg, kind) {
+    // Compat: acepta tanto la forma vieja toast(msg, 'error') como la forma
+    // objeto toast(msg, { error: true, duration: 10000 }) que usan las
+    // herramientas del panel (Migrador DB, Visor de sucesos) para mostrar
+    // mensajes de error largos que el operador necesita tiempo de leer.
+    function toast(msg, opts) {
+        let isError = false;
+        let duration = 1800;
+        if (typeof opts === 'string') {
+            isError = opts === 'error';
+        } else if (opts && typeof opts === 'object') {
+            isError = !!opts.error;
+            if (typeof opts.duration === 'number') duration = opts.duration;
+        }
         toastEl.textContent = msg;
-        toastEl.classList.toggle('error', kind === 'error');
+        toastEl.classList.toggle('error', isError);
         toastEl.classList.add('show');
         clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+        toastTimer = setTimeout(() => toastEl.classList.remove('show'), duration);
     }
 
     /* ---------- Utils ---------- */

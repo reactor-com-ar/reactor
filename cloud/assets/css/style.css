@@ -325,6 +325,10 @@ tbody tr:hover { background: var(--row-hover); }
 .td-nombre   { font-weight: 600; }
 .td-id       { color: var(--muted); font-size: .8rem; font-family: monospace; }
 
+/* Fila clickeable en listados (visor de sucesos, listados que abren detalle
+   al click). Toma el hover normal de tabla y agrega cursor pointer. */
+tbody tr.row-clickable { cursor: pointer; }
+
 /* ---------- 11. Badges ---------- */
 .badge         { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .75rem; font-weight: 600; }
 .badge-info    { background: rgba(59,130,246,.18);  color: #93c5fd; }
@@ -586,90 +590,6 @@ tbody tr:hover { background: var(--row-hover); }
 }
 
 .signals-monitor-footer-info {
-    margin-right: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: .8rem;
-    color: var(--muted);
-}
-
-/* ---------- 13.3 Migraciones (modal de Herramientas) ---------- */
-/* Modal lanzado desde el tile "Migraciones" de Herramientas. Comparte la
-   estética tipo terminal con `signals-monitor-modal` (fondo negro,
-   monoespaciada), pero arriba tiene una toolbar interna con estado +
-   botón "Ejecutar pendientes" + "Limpiar". Cada línea del log se
-   colorea por nivel: info (gris), ok (verde), warn (ámbar), err (rojo)
-   y skip (azul muted). */
-.modal.migraciones-modal { max-width: 900px; }
-.migraciones-modal .modal-body {
-    padding: 0;
-    background: #0a0a0a;
-    gap: 0;
-}
-
-.migraciones-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 18px;
-    background: #141414;
-    border-bottom: 1px solid #1f1f1f;
-    flex-wrap: wrap;
-}
-.migraciones-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: .82rem;
-    color: #d4d4d4;
-}
-.migraciones-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-/* Spinner chico para el header de estado del modal, alineado a baseline. */
-.spin-sm {
-    display: inline-block;
-    width: 14px; height: 14px;
-    border: 2px solid #2a2a2a;
-    border-top-color: var(--primary);
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-    vertical-align: -2px;
-}
-
-.migraciones-console {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: .8rem;
-    line-height: 1.55;
-    color: #d4d4d4;
-    background: #0a0a0a;
-    padding: 14px 18px;
-    height: 60vh;
-    overflow-y: auto;
-    overflow-x: auto;
-    scroll-behavior: smooth;
-    white-space: pre;
-}
-.migraciones-console::-webkit-scrollbar      { width: 10px; height: 10px; }
-.migraciones-console::-webkit-scrollbar-track { background: #0a0a0a; }
-.migraciones-console::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 5px; }
-.migraciones-console::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
-
-.mig-line { padding: 1px 0; }
-.mig-info  { color: #d4d4d4; }
-.mig-muted { color: #6b7280; font-style: italic; }
-.mig-ok    { color: #34d399; }
-.mig-warn  { color: #fbbf24; }
-.mig-err   { color: #f87171; }
-.mig-skip  { color: #60a5fa; }
-
-.migraciones-footer-info {
     margin-right: auto;
     display: inline-flex;
     align-items: center;
@@ -1142,3 +1062,232 @@ body.login-page { background: var(--bg); }
     cursor: not-allowed;
 }
 .login-submit   { justify-content: center; padding: 10px 16px; margin-top: 4px; }
+
+/* ---------- 30. Explorador DB (herramienta) ---------- */
+/* Modal a pantalla casi completa con dos vistas: listado de tablas
+   y detalle (tabs Registros / Campos). Un único scroll: la table-card
+   con `flex:1; overflow:auto`. Header, toolbar y footer quedan fijos. */
+.modal.db-exp-modal         { max-width: 1080px; width: calc(100% - 32px);
+                              height: calc(100vh - 64px);
+                              display: flex; flex-direction: column;
+                              overflow: hidden; }
+.db-exp-modal .modal-header,
+.db-exp-modal .modal-footer { flex: 0 0 auto; }
+.db-exp-modal .modal-body   { gap: 12px; flex: 1 1 auto; min-height: 0;
+                              display: flex; flex-direction: column; overflow: hidden; }
+
+.db-exp-toolbar       { display: flex; align-items: center; justify-content: space-between;
+                        gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+.db-exp-toolbar-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.db-exp-toolbar-right .search-wrap .search-input { width: 220px; }
+
+.db-exp-breadcrumbs   { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+                        font-size: .88rem; color: var(--muted); min-height: 28px; }
+.db-exp-crumb         { background: none; border: none; cursor: pointer;
+                        color: var(--primary); font-size: .88rem; font-weight: 600;
+                        padding: 2px 6px; border-radius: 6px; font-family: inherit;
+                        display: inline-flex; align-items: center; gap: 6px; }
+.db-exp-crumb:hover   { background: var(--bg); }
+.db-exp-crumb.current { color: var(--text); cursor: default; }
+.db-exp-crumb.current:hover { background: none; }
+.db-exp-crumb-sep     { color: var(--muted); opacity: .6; }
+
+.db-exp-view          { display: flex; flex-direction: column; gap: 8px;
+                        flex: 1 1 auto; min-height: 0; }
+
+.db-exp-tabs          { display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+                        margin: 0 -4px; padding: 0 4px; flex-shrink: 0; }
+.db-exp-tab           { background: none; border: none; cursor: pointer;
+                        font-family: inherit; font-size: .85rem; font-weight: 600;
+                        color: var(--muted); padding: 10px 14px;
+                        border-bottom: 2px solid transparent; margin-bottom: -1px;
+                        display: inline-flex; align-items: center; gap: 8px;
+                        transition: color .15s, border-color .15s; }
+.db-exp-tab:hover     { color: var(--text); }
+.db-exp-tab.active    { color: var(--primary); border-bottom-color: var(--primary); }
+.db-exp-tab i         { font-size: .9rem; }
+.db-exp-tab-count     { display: inline-flex; align-items: center; justify-content: center;
+                        min-width: 18px; height: 18px; padding: 0 6px; border-radius: 99px;
+                        background: var(--bg); border: 1px solid var(--border);
+                        color: var(--muted); font-size: .7rem; font-weight: 700; }
+.db-exp-tab.active .db-exp-tab-count {
+                        background: rgba(193,19,19,.18); color: var(--primary);
+                        border-color: rgba(193,19,19,.4); }
+
+.db-exp-tabpanel      { flex: 1 1 auto; min-height: 0; display: flex;
+                        flex-direction: column; padding-top: 8px; gap: 8px; }
+.db-exp-tabpanel[hidden] { display: none; }
+
+.db-exp-recs-toolbar       { display: flex; align-items: center; justify-content: space-between;
+                             gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+.db-exp-recs-toolbar-left  { display: flex; align-items: center; gap: 10px; }
+.db-exp-recs-toolbar-right { display: flex; align-items: center; gap: 8px; }
+.db-exp-recs-toolbar-right .search-wrap .search-input { width: 240px; }
+.db-exp-limite-label       { display: inline-flex; align-items: center; gap: 8px;
+                             font-size: .8rem; font-weight: 600; color: var(--muted); }
+.db-exp-limite-label select{ padding: 6px 10px; font-size: .85rem; }
+
+#dbExpViewTables .db-exp-table-card { flex: 1 1 auto; min-height: 0; }
+.db-exp-table-card           { overflow: auto; }
+.db-exp-fill                 { flex: 1 1 auto; min-height: 0; max-height: none; }
+.db-exp-table-card thead tr  { background: var(--bg); position: sticky; top: 0; z-index: 1; }
+.db-exp-table-card tbody tr.row-clickable       { cursor: pointer; }
+.db-exp-table-card tbody tr.row-clickable:hover { background: var(--row-hover); }
+.db-exp-table-card td        { vertical-align: top; }
+
+.db-exp-nombre     { font-weight: 600; word-break: break-all; }
+.db-exp-col-nombre { font-weight: 600; color: var(--text); word-break: break-all; }
+.db-exp-coment     { font-size: .75rem; color: var(--muted); margin-top: 2px;
+                     font-style: italic; }
+.db-exp-num        { color: var(--muted); font-size: .82rem; font-family: monospace;
+                     white-space: nowrap; text-align: right; }
+.db-exp-mono       { font-family: monospace; font-size: .82rem; color: var(--text);
+                     white-space: nowrap; }
+.db-exp-recs-card td { font-family: monospace; font-size: .8rem;
+                       max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+                       white-space: nowrap; }
+.db-exp-recs-card td:hover { white-space: normal; word-break: break-all; }
+.db-exp-null       { color: var(--muted); font-style: italic; font-family: monospace;
+                     font-size: .78rem; }
+.db-exp-footer-info { font-size: .78rem; color: var(--muted);
+                      display: flex; justify-content: space-between;
+                      gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+.db-exp-empty       { padding: 30px; text-align: center; color: var(--muted); }
+
+/* Edición inline de celdas */
+.db-exp-cell-edit                 { cursor: text; }
+.db-exp-cell-edit:hover           { outline: 1px solid var(--border); outline-offset: -1px;
+                                    background: rgba(255,255,255,.03); }
+.db-exp-cell-lock                 { cursor: not-allowed; color: var(--muted); }
+.db-exp-cell-lock:hover           { background: transparent; }
+.db-exp-cell-editing              { padding: 4px 6px !important; background: var(--bg);
+                                    outline: 2px solid var(--primary); outline-offset: -2px;
+                                    white-space: normal !important; max-width: none !important;
+                                    overflow: visible !important; }
+.db-exp-cell-saving               { opacity: .6; pointer-events: none; }
+.db-exp-cell-ok                   { animation: dbExpCellOk .8s ease-out; }
+@keyframes dbExpCellOk {
+  0%   { background: rgba(34,197,94,.35); }
+  100% { background: transparent; }
+}
+.db-exp-edit-wrap                 { display: flex; align-items: center; gap: 4px; }
+.db-exp-edit-input                { flex: 1; min-width: 80px; padding: 4px 6px !important;
+                                    font-family: monospace; font-size: .82rem !important;
+                                    border-radius: 6px !important; }
+.db-exp-edit-actions              { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.db-exp-edit-actions .btn-icon-sm { padding: 2px 6px; font-size: .8rem; }
+
+/* ---------- 31. Explorador S3 (herramienta) ---------- */
+/* Modal a alto fijo, sin scroll propio: solo scrollea el listado. */
+.modal.s3-exp-modal            { max-width: 980px; width: calc(100% - 32px);
+                                 height: calc(100vh - 24px);
+                                 overflow: hidden;
+                                 display: flex; flex-direction: column; }
+.s3-exp-modal .modal-header,
+.s3-exp-modal .modal-footer    { flex: 0 0 auto; }
+.s3-exp-modal .modal-body      { flex: 1 1 auto; min-height: 0;
+                                 overflow: hidden;
+                                 display: flex; flex-direction: column; gap: 12px; }
+.s3-exp-toolbar                { display: flex; align-items: center; justify-content: space-between;
+                                 gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+.s3-exp-toolbar-right          { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.s3-exp-search                 { position: relative; display: flex; align-items: center; }
+.s3-exp-search > i             { position: absolute; left: 10px;
+                                 color: var(--muted); font-size: .82rem;
+                                 pointer-events: none; }
+.s3-exp-search input[type="search"] {
+    padding: 6px 10px 6px 28px; font-size: .82rem;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--text);
+    width: 220px; font-family: inherit; outline: none;
+}
+.s3-exp-search input[type="search"]:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(193,19,19,.25);
+}
+.s3-exp-breadcrumbs            { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+                                 font-size: .88rem; color: var(--muted); min-height: 28px; }
+.s3-exp-breadcrumbs .s3-exp-crumb {
+    background: none; border: none; cursor: pointer;
+    color: var(--primary); font-size: .88rem; font-weight: 600;
+    padding: 2px 6px; border-radius: 6px; font-family: inherit;
+}
+.s3-exp-breadcrumbs .s3-exp-crumb:hover { background: var(--bg); }
+.s3-exp-breadcrumbs .s3-exp-crumb.current { color: var(--text); cursor: default; }
+.s3-exp-breadcrumbs .s3-exp-crumb.current:hover { background: none; }
+.s3-exp-breadcrumbs .s3-exp-crumb-sep { color: var(--muted); opacity: .6; }
+.s3-exp-table-card             { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.s3-exp-table-card thead tr    { background: var(--bg); position: sticky; top: 0; z-index: 1; }
+.s3-exp-table-card tbody tr.row-clickable       { cursor: pointer; }
+.s3-exp-table-card tbody tr.row-clickable:hover { background: var(--row-hover); }
+.s3-exp-table-card .s3-exp-nombre {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 500; word-break: break-all;
+}
+.s3-exp-table-card .s3-exp-icon {
+    font-size: 1.05rem; width: 22px; text-align: center; flex-shrink: 0;
+}
+.s3-exp-table-card .s3-exp-size,
+.s3-exp-table-card .s3-exp-date {
+    color: var(--muted); font-size: .82rem; font-family: monospace; white-space: nowrap;
+}
+.s3-exp-thumb {
+    width: 28px; height: 28px; object-fit: cover; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg); display: block;
+}
+.s3-exp-footer-info {
+    font-size: .78rem; color: var(--muted);
+    display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    flex-shrink: 0;
+}
+.s3-exp-empty { padding: 30px; text-align: center; color: var(--muted); }
+
+/* ---------- 32. Ctx menu genérico (reutilizado por exploradores y tareas) ---------- */
+.ctx-menu {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    min-width: 180px;
+    z-index: 250;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+}
+.ctx-menu.open { display: flex; }
+.ctx-menu button {
+    background: none; border: none; cursor: pointer;
+    padding: 8px 10px; border-radius: 6px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: inherit; font-size: .85rem;
+    color: var(--text); text-align: left; width: 100%;
+}
+.ctx-menu button:hover { background: var(--bg); }
+.ctx-menu button.ctx-menu-danger { color: var(--danger); }
+.ctx-menu button.ctx-menu-danger:hover { background: rgba(230,42,42,.12); }
+.ctx-menu button i { width: 14px; text-align: center; }
+.ctx-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* ---------- 33. Programador de tareas ---------- */
+/* Modal terminal para el log en vivo (SSE). */
+.terminal-live {
+    background: #0d1117;
+    color: #d1d9e0;
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+    font-size: .82rem;
+    line-height: 1.45;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    min-height: 340px;
+    max-height: 60vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+}
+#btnTerminalAutoscroll.active i { color: var(--primary); }
+/* Botón "cron picker" alineado a la derecha de un input dentro del constructor */
+.cron-picker-btn.filter-chip { padding: 4px 8px; font-size: .75rem; }

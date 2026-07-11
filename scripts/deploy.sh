@@ -33,26 +33,28 @@ echo "  Host: $HOST"
 echo "================================================"
 echo ""
 
-# ---- 1. version.txt en cloud/ ----
+# ---- 1. version.txt en cloud/ y panel/ ----
 echo "$VERSION" > "$BASE_LOCAL/cloud/version.txt"
-echo "  version.txt actualizado en cloud/"
+echo "$VERSION" > "$BASE_LOCAL/panel/version.txt"
+echo "  version.txt actualizado en cloud/ y panel/"
 echo ""
 
 # ---- 2. Verificar artefactos requeridos ----
-for f in .env.production env.php docker/Dockerfile cloud; do
+for f in .env.production env.php docker/Dockerfile cloud panel; do
     if [ ! -e "$BASE_LOCAL/$f" ]; then
         echo "ERROR: falta $BASE_LOCAL/$f"
         exit 1
     fi
 done
 
-# ---- 3. Subir cloud/, docker/, db/, .env.production, env.php ----
+# ---- 3. Subir cloud/, panel/, docker/, db/, .env.production, env.php ----
 # NO subimos docker-compose.yml: en el servidor vive docker-compose.prod.yml,
 # generado por aprovisionar_server.sh (sin servicio reactor-db).
 # .env.production y env.php se suben en cada deploy para mantener prod en sync.
-# env.php es require_once'd desde cloud/index.php y carga las constantes que
-# lee la app (APP_KEY_*, DB_*, MQTT_*) -- sin el, prod queda 500.
-echo "  Subiendo cloud/, docker/, db/, .env.production y env.php (mirror con --delete)..."
+# env.php es require_once'd desde cloud/index.php y panel/index.php y carga
+# las constantes que leen las apps (APP_KEY_*, DB_*, MQTT_*) -- sin el, prod
+# queda 500.
+echo "  Subiendo cloud/, panel/, docker/, db/, .env.production y env.php (mirror con --delete)..."
 cd "$BASE_LOCAL"
 
 # db/ se incluye porque CLAUDE.md lo declara como schema de referencia.
@@ -78,16 +80,19 @@ tar \
     --exclude='./cloud/.git' \
     --exclude='./cloud/node_modules' \
     --exclude='./cloud/vendor' \
+    --exclude='./panel/.git' \
+    --exclude='./panel/node_modules' \
+    --exclude='./panel/vendor' \
     --exclude='*.log' \
     --exclude='*.pem' \
     --exclude='*.key' \
-    -czf - cloud docker $INCLUDE_DB .env.production env.php | \
+    -czf - cloud panel docker $INCLUDE_DB .env.production env.php | \
 ssh -i "$KEY" -o StrictHostKeyChecking=no \
     "$USER@$HOST" "
         set -e
         mkdir -p '$STAGING'
         tar -xzf - -C '$STAGING/'
-        for dir in cloud docker $INCLUDE_DB; do
+        for dir in cloud panel docker $INCLUDE_DB; do
             if [ -d \"$STAGING/\$dir\" ]; then
                 rsync -a --delete \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\"
             fi
@@ -137,6 +142,8 @@ echo "  Migraciones SQL: aplicar manualmente contra RDS (ver comentario en deplo
 echo ""
 
 echo "================================================"
-echo "  Deploy completo -- https://cloud.reactor.com.ar"
+echo "  Deploy completo"
+echo "    cloud: https://cloud.reactor.com.ar"
+echo "    panel: https://panel.reactor.com.ar"
 echo "================================================"
 echo ""

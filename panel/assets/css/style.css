@@ -1,0 +1,465 @@
+/* =========================================================
+ * Panel — Reactor
+ * Shell del BackOffice (skill crear_backoffice). Un solo archivo, sin build.
+ *
+ * Zonas cromaticas:
+ *   1) Chrome (sidebar + topbar): pintado en el rojo institucional #C11313
+ *      (var(--primary)). Los hijos usan #fff / rgba negros translucidos,
+ *      NO usan --text / --muted / --border (calibrados para gris).
+ *   2) Contenido (cards, modales, inputs, dropdowns): grises oscuros
+ *      neutros sobre --bg. El rojo institucional reaparece como ACENTO:
+ *      botones primarios, focus, links activos, chips activos.
+ *
+ * No hay modo claro ni toggle. No hay indicador de version al pie del
+ * sidebar (regla dura del skill crear_backoffice).
+ * ======================================================= */
+
+/* ---------- 1. Tokens ---------- */
+:root {
+    --bg:        #1a1a1a;   /* fondo del area de contenido */
+    --surface:   #242526;   /* cards, modales, inputs, dropdowns */
+    --border:    #383838;
+    --row-hover: #2d2e2f;
+    --primary:   #C11313;   /* rojo institucional (chrome + acentos) */
+    --primary-h: #8e0e0e;
+    --danger:    #e62a2a;   /* rojo brillante — solo destructivo */
+    --success:   #22c55e;
+    --warn:      #f59e0b;
+    --info:      #3b82f6;
+    --text:      #f0f0f0;
+    --muted:     #9ca0a4;
+    --radius:    10px;
+    --shadow:    0 1px 4px rgba(0,0,0,.45);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,.65);
+}
+
+/* ---------- 2. Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    color-scheme: dark;
+}
+
+a { color: inherit; text-decoration: none; }
+
+/* ---------- 3. Layout ---------- */
+.layout   { display: flex; min-height: 100vh; }
+
+.sidebar  {
+    width: 220px;
+    background: var(--primary);
+    border-right: 1px solid rgba(0,0,0,.25);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.main     { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+.topbar   {
+    background: var(--primary);
+    border-bottom: 1px solid rgba(0,0,0,.25);
+    padding: 0 24px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow);
+    flex-shrink: 0;
+}
+
+.content  { flex: 1; padding: 24px; overflow-y: auto; }
+
+/* ---------- 4. Sidebar ---------- */
+/* Chrome rojo: los hijos usan blanco / negros translucidos, no los tokens grises. */
+.sidebar-logo {
+    height: 60px;                /* empata con la altura del topbar */
+    padding: 0 20px;
+    border-bottom: 1px solid rgba(0,0,0,.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.sidebar-logo-mark { display: block; width: auto; height: 24px; max-width: 100%; object-fit: contain; }
+
+.sidebar-nav { padding: 8px 0 12px; flex: 1; }
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    font-size: .9rem;
+    color: rgba(255,255,255,.85);
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background .15s, color .15s;
+    text-decoration: none;
+}
+.nav-item:hover  { background: rgba(0,0,0,.18); color: #fff; }
+.nav-item.active { background: rgba(0,0,0,.28); color: #fff; border-left-color: #fff; font-weight: 600; }
+.nav-icon        { font-size: 1.1rem; width: 20px; text-align: center; }
+
+/* Grupos colapsables */
+.nav-group-wrap  { display: block; }
+.nav-group-toggle {
+    width: 100%;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    color: rgba(255,255,255,.85);
+}
+.nav-group-label { flex: 1; }
+.nav-group-arrow {
+    margin-left: auto;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    color: rgba(255,255,255,.7);
+    transition: transform .2s;
+}
+.nav-group-wrap.open .nav-group-arrow { transform: rotate(45deg); }   /* + -> x */
+
+.nav-sub {
+    display: none;
+    background: rgba(0,0,0,.18);
+    border-top: 1px solid rgba(0,0,0,.2);
+    border-bottom: 1px solid rgba(0,0,0,.2);
+}
+.nav-group-wrap.open .nav-sub { display: block; }
+.nav-sub-item                 { padding-left: 44px; font-size: .85rem; }
+.nav-sub-item.active          { background: rgba(0,0,0,.32); }
+
+/* ---------- 5. Topbar ---------- */
+.topbar-left     { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.topbar-title    { font-size: 1rem; font-weight: 600; flex: 1; color: #fff; }
+
+.topbar-user     { display: flex; align-items: center; gap: 8px; flex-shrink: 0; position: relative; }
+.topbar-username {
+    background: none; border: none; cursor: pointer;
+    font-size: .85rem; color: rgba(255,255,255,.85);
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 8px;
+    transition: background .15s, color .15s;
+    font-family: inherit;
+}
+.topbar-username:hover           { background: rgba(0,0,0,.18); color: #fff; }
+.topbar-username i.fa-circle-user{ font-size: 1.1rem; }
+
+.topbar .hamburger { color: #fff; }
+
+/* Dropdown: se despliega sobre el area gris => tokens grises normales */
+.user-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-lg);
+    min-width: 160px;
+    overflow: hidden;
+    z-index: 200;
+}
+.user-dropdown.open { display: block; }
+.user-dropdown-item {
+    display: block;
+    padding: 10px 16px;
+    font-size: .85rem;
+    color: var(--text);
+    cursor: pointer;
+    transition: background .15s;
+}
+.user-dropdown-item:hover { background: var(--bg); color: var(--primary); }
+
+/* ---------- 6. Botones ---------- */
+.btn {
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    border: none;
+    font-size: .88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .15s, transform .1s, color .15s, border-color .15s;
+    font-family: inherit;
+}
+.btn:active          { transform: scale(.97); }
+.btn-primary         { background: var(--primary); color: #fff; }
+.btn-primary:hover   { background: var(--primary-h); }
+.btn-danger          { background: var(--danger); color: #fff; }
+.btn-danger:hover    { background: #c91515; color: #fff; }
+.btn-secondary       { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { background: var(--bg); }
+.btn-ghost           { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.btn-ghost:hover     { background: var(--bg); color: var(--text); }
+.btn-sm              { padding: 5px 12px; font-size: .8rem; }
+.btn-icon-sm         {
+    background: none; border: none; cursor: pointer;
+    padding: 4px 8px; border-radius: 6px; font-size: .85rem;
+    color: var(--muted);
+}
+.btn-icon-sm:hover   { background: var(--bg); color: var(--text); }
+
+/* ---------- 7. Inputs ---------- */
+input[type=text], input[type=number], input[type=url], input[type=tel],
+input[type=email], input[type=date], input[type=time], input[type=datetime-local],
+input[type=password], input[type=search], select, textarea {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: .88rem;
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+    transition: border .15s, box-shadow .15s;
+    font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(193,19,19,.25);
+}
+input:disabled, select:disabled, textarea:disabled,
+input[readonly], textarea[readonly] {
+    color: var(--muted); background: var(--bg); cursor: not-allowed; opacity: .75;
+}
+textarea { resize: vertical; min-height: 60px; }
+
+.field-error   { margin-top: 4px; font-size: .78rem; color: var(--danger); }
+.input-invalid { border-color: var(--danger) !important; box-shadow: 0 0 0 2px rgba(239,68,68,.18); }
+
+.muted { color: var(--muted); }
+
+/* ---------- 8. Formularios ---------- */
+.form-row    { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-row-3  { grid-template-columns: repeat(3, 1fr); }
+.form-row-4  { grid-template-columns: repeat(4, 1fr); }
+.form-group  { display: flex; flex-direction: column; gap: 5px; }
+.form-group label { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.form-group input,
+.form-group select,
+.form-group textarea { width: 100%; }
+
+/* ---------- 9. Badges ---------- */
+.badge         { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .75rem; font-weight: 600; }
+.badge-info    { background: rgba(59,130,246,.18); color: #93c5fd; }
+.badge-success { background: rgba(34,197,94,.18);  color: #86efac; }
+.badge-danger  { background: rgba(230,42,42,.2);   color: #f5a8a8; }
+.badge-warn    { background: rgba(245,158,11,.18); color: #fcd34d; }
+
+/* ---------- 10. Alerts ---------- */
+.alert         {
+    border-radius: var(--radius); padding: 10px 12px;
+    font-size: .85rem; margin-bottom: 14px;
+    border: 1px solid transparent;
+}
+.alert-error   { background: rgba(230,42,42,.12);  color: #f5a8a8; border-color: rgba(230,42,42,.3); }
+.alert-warn    { background: rgba(245,158,11,.12); color: #fcd34d; border-color: rgba(245,158,11,.3); }
+.alert-info    { background: rgba(59,130,246,.12); color: #93c5fd; border-color: rgba(59,130,246,.3); }
+.alert-success { background: rgba(34,197,94,.12);  color: #86efac; border-color: rgba(34,197,94,.3); }
+
+/* ---------- 11. Modales ---------- */
+.modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.modal-backdrop.open { opacity: 1; pointer-events: all; }
+.modal {
+    background: var(--surface); border-radius: 14px;
+    width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    transform: scale(.96) translateY(12px); transition: transform .2s;
+    margin: 16px;
+}
+.modal-backdrop.open .modal { transform: scale(1) translateY(0); }
+.modal-header {
+    padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+}
+.modal-title  { font-size: 1rem; font-weight: 700; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.modal-body   { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.modal-footer {
+    padding: 16px 24px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; justify-content: flex-end;
+}
+
+/* ---------- 12. Toasts ---------- */
+.toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: #0d0d0d; color: var(--text);
+    border: 1px solid var(--border);
+    padding: 10px 20px; border-radius: 99px;
+    font-size: .88rem; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s;
+    z-index: 200; white-space: nowrap;
+    box-shadow: var(--shadow-lg);
+}
+.toast.show  { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: var(--danger); }
+
+/* ---------- 13. Spinner ---------- */
+.spin {
+    display: inline-block; width: 28px; height: 28px;
+    border: 3px solid var(--border); border-top-color: var(--primary);
+    border-radius: 50%; animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 14. Header de modulo ---------- */
+.module-header   { margin-bottom: 18px; }
+.module-title    { font-size: 1.35rem; font-weight: 700; color: var(--text); margin: 0 0 4px; line-height: 1.2; }
+.module-subtitle { font-size: .88rem; color: var(--muted); margin: 0; line-height: 1.4; }
+
+/* ---------- 15. Stat cards ---------- */
+.stats-bar  { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.stat-card  {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 120px;
+}
+.stat-label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.stat-value { font-size: 1.5rem; font-weight: 700; }
+.stat-value.green  { color: var(--success); }
+.stat-value.orange { color: var(--primary); }
+.stat-value.red    { color: var(--danger); }
+.stat-value.muted  { color: var(--muted); }
+
+/* ---------- 16. Tile grid (menu de tarjetas) ---------- */
+.tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+}
+.tile-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--text);
+    font-family: inherit;
+    transition: border-color .15s, background .15s, transform .1s;
+}
+.tile-card:hover  { border-color: var(--primary); background: var(--row-hover); }
+.tile-card:active { transform: scale(.98); }
+.tile-icon        { font-size: 1.6rem; line-height: 1; margin-bottom: 4px; }
+.tile-title       { font-weight: 600; font-size: .95rem; color: var(--text); }
+.tile-desc        { font-size: .8rem; color: var(--muted); }
+
+/* ---------- 17. Responsive ---------- */
+.hamburger {
+    display: none; background: none; border: none; cursor: pointer;
+    font-size: 1.4rem; color: var(--text);
+    padding: 4px 8px; margin-right: 8px; line-height: 1;
+}
+.sidebar-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.45); z-index: 199;
+}
+.sidebar-overlay.active { display: block; }
+
+@media (max-width: 768px) {
+    .hamburger { display: inline-flex; align-items: center; }
+    .sidebar   {
+        position: fixed; top: 0; left: 0; height: 100vh; z-index: 200;
+        transform: translateX(-100%); transition: transform .25s;
+    }
+    .sidebar.open { transform: translateX(0); }
+    .form-row, .form-row-3, .form-row-4 { grid-template-columns: 1fr; }
+}
+
+/* ---------- 18. Pantalla de login ----------
+ * login.php es la unica vista que vive fuera de la SPA y no tiene chrome.
+ * Excepcion al patron "rojo solo como acento": el card del login va
+ * PINTADO de rojo institucional — mismo color que el chrome, asi la
+ * pantalla "es" la marca. Los hijos siguen las reglas del chrome rojo:
+ *   - tipografia en #fff / opacidades de blanco.
+ *   - bordes y rellenos internos en negros translucidos.
+ *   - el boton primario invierte la paleta (fondo blanco, texto rojo)
+ *     para destacar sobre el fondo rojo sin perder contraste.
+ */
+body.login-page { background: var(--bg); }
+
+.login-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.login-card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--primary);
+    border: 1px solid rgba(0,0,0,.25);
+    border-radius: 14px;
+    box-shadow: var(--shadow-lg);
+    padding: 28px 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    color: #fff;
+}
+.login-brand    { display: flex; align-items: center; justify-content: center; padding: 4px 0 0; }
+.login-logo     { display: block; height: 44px; width: auto; max-width: 80%; object-fit: contain; }
+.login-title    { font-size: 1.2rem; font-weight: 700; text-align: center; color: #fff; margin: 4px 0 0; }
+.login-subtitle { font-size: .85rem; color: rgba(255,255,255,.78); text-align: center; margin: -8px 0 0; }
+
+.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-form .form-group label { color: rgba(255,255,255,.88); }
+.login-form input[type=text],
+.login-form input[type=password] {
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(0,0,0,.35);
+    color: #fff;
+}
+.login-form input::placeholder { color: rgba(255,255,255,.55); }
+.login-form input:focus {
+    border-color: #fff;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.22);
+}
+.login-form input.input-invalid {
+    border-color: #fff !important;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.3);
+}
+
+.login-error {
+    display: block;
+    color: #fff;
+    background: rgba(0,0,0,.28);
+    border: 1px solid rgba(0,0,0,.35);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    font-size: .82rem;
+    font-weight: 500;
+}
+.login-error[hidden] { display: none; }
+
+/* Boton primario invertido: blanco con texto rojo para contraste sobre rojo */
+.login-page .btn-primary          { background: #fff; color: var(--primary); }
+.login-page .btn-primary:hover    { background: rgba(255,255,255,.9); color: var(--primary-h); }
+.login-page .btn-primary:disabled { background: rgba(255,255,255,.6); color: var(--primary); cursor: not-allowed; }
+.login-submit                     { justify-content: center; padding: 10px 16px; margin-top: 4px; }

@@ -16,8 +16,9 @@ que envian los dispositivos IoT.
   (sin rebuild de imagen, salvo que cambies `requirements.txt`).
 - Lee credenciales (MQTT/DB) del `.env.development` / `.env.production` via
   `env_file`.
-- Conexion MQTT: por DNS interno de docker (`reactor-emqx:1884` en dev,
-  `reactor-emqx:16273` en prod).
+- Conexion MQTT: en dev usa el broker compartido del stack `herramientas`
+  (`host.docker.internal:1883`, contenedor `emqx`). En prod es el broker
+  dedicado del compose de prod (`reactor-emqx:16273`).
 - Conexion MySQL: idem (`reactor-mysql:3308` en dev; en prod va al RDS via
   `DB_HOST` del `.env.production`).
 
@@ -52,7 +53,7 @@ Variables de entorno:
 | Variable             | Default            | Notas |
 |----------------------|--------------------|-------|
 | `MQTT_HOST`          | (requerida)        | DNS interno docker en dev/prod |
-| `MQTT_PORT`          | (requerida)        | 1884 dev, 16273 prod |
+| `MQTT_PORT`          | (requerida)        | 1883 dev (broker compartido), 16273 prod |
 | `MQTT_USER`          | (requerida)        | Mismo usuario que EMQX seed |
 | `MQTT_PASS`          | (requerida)        | Idem |
 | `MQTT_TOPIC_FILTER`  | `#`                | Topic al que se suscribe |

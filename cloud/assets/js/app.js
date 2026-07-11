@@ -6537,6 +6537,12 @@
         tbody.querySelectorAll('tr[data-id]').forEach(tr => {
             const id = +tr.dataset.id;
             tr.addEventListener('click', e => { if (e.target.closest('button,label,input')) return; abrirEjecuciones(id); });
+            tr.addEventListener('contextmenu', e => {
+                if (e.target.closest('label,input')) return;
+                e.preventDefault();
+                const t = tareasCache.find(x => x.id === id); if (!t) return;
+                openRowMenu(menuItemsTarea(t), { x: e.clientX, y: e.clientY });
+            });
         });
         tbody.querySelectorAll('input[data-toggle]').forEach(chk => {
             chk.addEventListener('change', () => toggleActivoTarea(+chk.dataset.toggle, chk.checked));
@@ -6545,15 +6551,18 @@
             e.stopPropagation();
             const id = +b.dataset.menu;
             const t  = tareasCache.find(x => x.id === id); if (!t) return;
-            openRowMenu([
-                { act: 'ver',    label: 'Ver ejecuciones',                    icon: 'fa-list',      onSelect: () => abrirEjecuciones(id) },
-                { act: 'run',    label: 'Ejecutar ahora',                     icon: 'fa-play',      onSelect: () => ejecutarAhora(id) },
-                { act: 'tog',    label: t.activo ? 'Desactivar' : 'Activar',  icon: 'fa-power-off', onSelect: () => toggleActivoTarea(id, !t.activo) },
-                { divider: true },
-                { act: 'edit',   label: 'Editar',                             icon: 'fa-pen',       onSelect: () => abrirFormTarea(t) },
-                { act: 'del',    label: 'Eliminar',                           icon: 'fa-trash', danger: true, onSelect: () => eliminarTarea(id) },
-            ], e.currentTarget);
+            openRowMenu(menuItemsTarea(t), e.currentTarget);
         }));
+    }
+    function menuItemsTarea(t) {
+        return [
+            { act: 'ver',    label: 'Ver ejecuciones',                    icon: 'fa-list',      onSelect: () => abrirEjecuciones(t.id) },
+            { act: 'run',    label: 'Ejecutar ahora',                     icon: 'fa-play',      onSelect: () => ejecutarAhora(t.id) },
+            { act: 'tog',    label: t.activo ? 'Desactivar' : 'Activar',  icon: 'fa-power-off', onSelect: () => toggleActivoTarea(t.id, !t.activo) },
+            { divider: true },
+            { act: 'edit',   label: 'Editar',                             icon: 'fa-pen',       onSelect: () => abrirFormTarea(t) },
+            { act: 'del',    label: 'Eliminar',                           icon: 'fa-trash', danger: true, onSelect: () => eliminarTarea(t.id) },
+        ];
     }
     async function toggleActivoTarea(id, activo) {
         const t = tareasCache.find(x => x.id === id); if (!t) return;
@@ -6788,19 +6797,27 @@
         tbody.querySelectorAll('tr[data-id]').forEach(tr => {
             const id = +tr.dataset.id;
             tr.addEventListener('click', e => { if (e.target.closest('button')) return; abrirTerminal(id); });
+            tr.addEventListener('contextmenu', e => {
+                e.preventDefault();
+                const ej = ejecucionesCache.find(x => x.id === id); if (!ej) return;
+                openRowMenu(menuItemsEjecucion(ej), { x: e.clientX, y: e.clientY });
+            });
         });
         tbody.querySelectorAll('button[data-menu]').forEach(b => b.addEventListener('click', ev => {
             ev.stopPropagation();
-            const id  = +b.dataset.menu;
-            const ej  = ejecucionesCache.find(x => x.id === id); if (!ej) return;
-            const items = [
-                { act: 'log', label: 'Ver log', icon: 'fa-terminal', onSelect: () => abrirTerminal(id) },
-            ];
-            if (ej.estado === 'corriendo') {
-                items.push({ act: 'stop', label: 'Detener', icon: 'fa-stop', danger: true, onSelect: () => detenerEjecucion(id) });
-            }
-            openRowMenu(items, ev.currentTarget);
+            const id = +b.dataset.menu;
+            const ej = ejecucionesCache.find(x => x.id === id); if (!ej) return;
+            openRowMenu(menuItemsEjecucion(ej), ev.currentTarget);
         }));
+    }
+    function menuItemsEjecucion(ej) {
+        const items = [
+            { act: 'log', label: 'Ver log', icon: 'fa-terminal', onSelect: () => abrirTerminal(ej.id) },
+        ];
+        if (ej.estado === 'corriendo') {
+            items.push({ act: 'stop', label: 'Detener', icon: 'fa-stop', danger: true, onSelect: () => detenerEjecucion(ej.id) });
+        }
+        return items;
     }
     function formatoDuracion(inicio, fin) {
         if (!inicio) return '—';

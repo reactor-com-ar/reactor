@@ -19,9 +19,9 @@ set -eo pipefail
 
 APP_DIR="/opt/app/reactor"
 APP_PORT_HOST=8086        # cloud
-ROBOT_PORT_HOST=8087      # robot
+PANEL_PORT_HOST=8087      # panel
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
-ROBOT_DOMAIN="${ROBOT_DOMAIN:-robot.reactor.com.ar}"
+PANEL_DOMAIN="${PANEL_DOMAIN:-panel.reactor.com.ar}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-javieralvarez@databox.net.ar}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
@@ -66,7 +66,7 @@ echo "        OK -- Compose $(sudo docker compose version --short) / buildx $(su
 
 # ---- 4. Verificar artefactos transferidos ----
 echo "[ 4/9 ] Verificando archivos del proyecto..."
-for f in cloud robot motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
+for f in cloud panel motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
     if [ ! -e "$APP_DIR/$f" ]; then
         echo "        ERROR: falta $APP_DIR/$f"
         echo "        Re-correr scripts/aprovisionar.sh desde la maquina local."
@@ -99,10 +99,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:${APP_PORT_HOST}:${APP_PORT_HOST}"      # cloud
-      - "127.0.0.1:${ROBOT_PORT_HOST}:${ROBOT_PORT_HOST}"  # robot
+      - "127.0.0.1:${PANEL_PORT_HOST}:${PANEL_PORT_HOST}"  # panel
     volumes:
       - ./cloud:/var/www/html
-      - ./robot:/var/www/robot
+      - ./panel:/var/www/panel
       - ./env.php:/var/www/env.php:ro
       - ./.env.production:/var/www/.env.production:ro
     env_file:
@@ -170,12 +170,12 @@ server {
     }
 }
 
-# robot.reactor.com.ar -> Apache 8087
+# panel.reactor.com.ar -> Apache 8087
 server {
     listen 80;
-    server_name ${ROBOT_DOMAIN};
+    server_name ${PANEL_DOMAIN};
     location / {
-        proxy_pass         http://127.0.0.1:${ROBOT_PORT_HOST};
+        proxy_pass         http://127.0.0.1:${PANEL_PORT_HOST};
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -192,9 +192,14 @@ sudo systemctl restart nginx
 echo "        OK"
 
 # ---- 7. Construir imagen y levantar contenedor ----
+# --pull: re-baja el base image cada vez. Sin esto, buildx puede mantener
+# cacheados todos los layers cuando el base no cambio de digest y NO
+# rebuildear pese a que el Dockerfile mando editado -- vimos ese bug con
+# la fix de pcntl + /var/log/reactor/cloud/ejecuciones (imagen 2 semanas
+# vieja seguia rodando aunque el Dockerfile local ya tenia el cambio).
 echo "[ 7/9 ] Construyendo imagen Docker y levantando contenedor..."
 cd "$APP_DIR"
-sudo docker compose -f "$COMPOSE_FILE" build
+sudo docker compose -f "$COMPOSE_FILE" build --pull
 sudo docker compose -f "$COMPOSE_FILE" up -d --force-recreate
 sleep 3
 sudo docker compose -f "$COMPOSE_FILE" ps
@@ -225,7 +230,7 @@ else
     echo "        IP publica del servidor: $PUBLIC_IP"
 
     RESOLVED_CLOUD=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
-    RESOLVED_ROBOT=$(dig +short A "$ROBOT_DOMAIN" @8.8.8.8 | tail -n1)
+    RESOLVED_PANEL=$(dig +short A "$PANEL_DOMAIN" @8.8.8.8 | tail -n1)
 
     # Armar lista de dominios cuyo DNS YA apunta al server (-d por cada uno).
     CERT_DOMAINS=()
@@ -234,10 +239,10 @@ else
     else
         echo "        DNS de $DOMAIN -> ${RESOLVED_CLOUD:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
     fi
-    if [ "$RESOLVED_ROBOT" = "$PUBLIC_IP" ]; then
-        CERT_DOMAINS+=("-d" "$ROBOT_DOMAIN")
+    if [ "$RESOLVED_PANEL" = "$PUBLIC_IP" ]; then
+        CERT_DOMAINS+=("-d" "$PANEL_DOMAIN")
     else
-        echo "        DNS de $ROBOT_DOMAIN -> ${RESOLVED_ROBOT:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+        echo "        DNS de $PANEL_DOMAIN -> ${RESOLVED_PANEL:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
     fi
 
     if [ ${#CERT_DOMAINS[@]} -eq 0 ]; then
@@ -281,7 +286,7 @@ echo "============================================================"
 echo "  Setup remoto completo."
 echo ""
 echo "  Cloud:      https://${DOMAIN}/         (proxy a 127.0.0.1:${APP_PORT_HOST})"
-echo "  Robot:      https://${ROBOT_DOMAIN}/   (proxy a 127.0.0.1:${ROBOT_PORT_HOST})"
+echo "  Panel:      https://${PANEL_DOMAIN}/   (proxy a 127.0.0.1:${PANEL_PORT_HOST})"
 echo "  Repo:       $APP_DIR"
 echo "  Compose:    docker compose -f $APP_DIR/$COMPOSE_FILE <cmd>"
 echo "  Logs:       sudo docker logs -f reactor-apache"

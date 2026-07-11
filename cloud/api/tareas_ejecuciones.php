@@ -32,18 +32,18 @@ function normalizarEjec(array $r): array
     return [
         'id'                => (int) ($r['id'] ?? 0),
         'tarea_id'          => (int) ($r['tarea_id'] ?? 0),
-        'pid'               => $r['pid'] !== null ? (int) $r['pid'] : null,
+        'pid'               => isset($r['pid'])       ? (int) $r['pid']       : null,
         'inicio'            => $r['inicio'] ?? null,
         'fin'               => $r['fin']    ?? null,
         'estado'            => (string) ($r['estado'] ?? ''),
-        'exit_code'         => $r['exit_code'] !== null ? (int) $r['exit_code'] : null,
+        'exit_code'         => isset($r['exit_code']) ? (int) $r['exit_code'] : null,
         'mensaje'           => $r['mensaje'] ?? null,
         'log_path'          => $r['log_path'] ?? null,
         'disparo'           => (string) ($r['disparo'] ?? ''),
-        'tarea_nombre'      => $r['tarea_nombre']   ?? null,
-        'tarea_script'      => $r['tarea_script']   ?? null,
-        'tarea_cron_expr'   => $r['tarea_cron_expr']?? null,
-        'timeout_seg'       => $r['timeout_seg'] !== null ? (int) $r['timeout_seg'] : null,
+        'tarea_nombre'      => $r['tarea_nombre']    ?? null,
+        'tarea_script'      => $r['tarea_script']    ?? null,
+        'tarea_cron_expr'   => $r['tarea_cron_expr'] ?? null,
+        'timeout_seg'       => isset($r['timeout_seg']) ? (int) $r['timeout_seg'] : null,
     ];
 }
 

@@ -60,16 +60,19 @@ set +a
 : "${DB_USER:?DB_USER no definido en $ENV_FILE_PATH}"
 : "${DB_PASS:?DB_PASS no definido en $ENV_FILE_PATH}"
 
-# --- Puertos (todos hardcodeados en docker-compose.yml) ---------------------
-# Dev:  app=8086, mqtt=1884, dashboard=18084.
-# Prod: app=8086, mqtt=16273, dashboard=18083.
-# Apache (8086) es igual en dev y prod. EMQX usa puertos distintos en dev
-# (libres, no chocan con vigicom-emqx) y prod (16273 publico). Si alguno
-# esta ocupado, el up falla -- liberar el otro proceso, NO remapear.
-# MySQL lo provee el stack `herramientas-mysql` en $DB_HOST:$DB_PORT.
+# --- Puertos ---------------------------------------------------------------
+# Dev:  app=8086, mqtt=1883, dashboard=18083 (broker compartido del stack
+#       `herramientas`, contenedor `emqx`).
+# Prod: app=8086, mqtt=16273, dashboard=18083 (broker dedicado, ver
+#       scripts/aprovisionar_server.sh).
+# Apache (8086) es igual en dev y prod. En dev el broker MQTT ya no vive en
+# este compose: lo provee el contenedor `emqx` del stack `herramientas`
+# (mismo que usa vigicom-dev), asi que si el puerto 1883 / 18083 esta
+# ocupado por otro emqx local, el seeder falla -- liberar el otro proceso.
+# MySQL lo provee el mismo stack `herramientas` (contenedor `herramientas-mysql`).
 APP_PORT=8086
-MQTT_PORT=1884
-EMQX_DASHBOARD_PORT=18084
+MQTT_PORT=1883
+EMQX_DASHBOARD_PORT=18083
 
 echo -e "${RED}==> Servicios:${NC}"
 echo "    app       -> $APP_PORT"
@@ -95,11 +98,13 @@ fi
 # --- Limpiar contenedores previos -------------------------------------------
 # El orden importa:
 #   1) `docker compose down -v --remove-orphans` SIEMPRE primero. Borra
-#      contenedores, red y los volumenes propios del proyecto (solo
-#      `reactor-emqx-data` desde que MySQL salio del compose). NO toca el
-#      MySQL externo de herramientas-mysql.
+#      contenedores y red. Como MySQL y EMQX viven en el stack externo
+#      `herramientas`, este compose ya no declara volumenes propios, asi que
+#      -v es un no-op pero se deja por si vuelven a agregarse. NO toca el
+#      MySQL externo ni el broker EMQX externo.
 #   2) `docker rm -f` como fallback por si quedaron contenedores con esos
-#      nombres pero sin label de compose.
+#      nombres pero sin label de compose. Incluye `reactor-emqx` (nombre
+#      historico) por si quedo dando vueltas de una instalacion vieja.
 echo -e "${RED}==> Limpiando contenedores previos...${NC}"
 
 docker compose -p reactor down -v --remove-orphans > /dev/null 2>&1 || true
@@ -124,8 +129,8 @@ if ! docker compose -p reactor up -d --build; then
     echo -e "${YELLOW}--- docker logs reactor-apache (ultimas 50 lineas) ---${NC}"
     docker logs --tail 50 reactor-apache 2>&1 || true
     echo ""
-    echo -e "${YELLOW}--- docker logs reactor-emqx (ultimas 50 lineas) ---${NC}"
-    docker logs --tail 50 reactor-emqx 2>&1 || true
+    echo -e "${YELLOW}--- docker logs emqx (broker compartido, ultimas 50 lineas) ---${NC}"
+    docker logs --tail 50 emqx 2>&1 || true
     exit 1
 fi
 
@@ -183,15 +188,18 @@ if [ -d "$migrations_dir" ]; then
 fi
 
 # --- Sembrar usuario MQTT en EMQX (idempotente, via API) --------------------
-# EMQX expone su dashboard API en el puerto que elegimos arriba (puede no ser
-# 18083 si otro broker ya lo tenia). El seeder hace POST -> si 409, PUT, asi
-# que se puede reaplicar siempre.
+# El broker es el contenedor `emqx` del stack `herramientas` (compartido).
+# El seeder hace POST -> si 409, PUT, asi que se puede reaplicar siempre.
+# OJO: en el primer boot del broker compartido, si EMQX_DASHBOARD_PASS de
+# este .env no matchea con la pass del broker, cae al fallback admin:public
+# y la cambia -- coordinar con vigicom para que ambos .env.development
+# tengan el mismo EMQX_DASHBOARD_PASS.
 echo ""
 echo -e "${RED}==> Sembrando usuario MQTT en EMQX${NC}"
 if EMQX_DASHBOARD_PORT="$EMQX_DASHBOARD_PORT" bash "$REPO_ROOT/scripts/lib/emqx_seed.sh" "$REPO_ROOT/.env.development"; then
     :
 else
-    echo -e "${YELLOW}    AVISO: el seeder de EMQX fallo -- revisa logs con: docker logs reactor-emqx${NC}"
+    echo -e "${YELLOW}    AVISO: el seeder de EMQX fallo -- revisa logs con: docker logs emqx${NC}"
 fi
 
 # --- Resumen ----------------------------------------------------------------

@@ -8,13 +8,13 @@ services:
     # los puertos de ports.conf (no en 80) y rutea por puerto a cada vhost.
     # Si alguno esta ocupado, liberar el otro proceso -- nunca remapear.
     #   8086 -> cloud
-    #   8087 -> robot
+    #   8087 -> panel
     ports:
       - "8086:8086"
       - "8087:8087"
     volumes:
       - ./cloud:/var/www/html
-      - ./robot:/var/www/robot
+      - ./panel:/var/www/panel
       # env.php y los .env quedan en /var/www (un nivel arriba de los docroots)
       # para que `dirname(__DIR__, 2) . '/env.php'` desde cualquier .php de
       # cloud/api/ resuelva correctamente y sean compartibles entre apps.
@@ -30,31 +30,11 @@ services:
       - ${ENV_FILE:-.env.development}
     restart: unless-stopped
 
-  reactor-emqx:
-    container_name: reactor-emqx
-    image: emqx/emqx:5.8
-    ports:
-      # Puertos FIJOS (interno = externo). En dev usamos 1884/18084 para no
-      # chocar con vigicom-emqx (1883/18083). En prod son 16273/18083 (ver
-      # aprovisionar_server.sh).
-      - "1884:1884"     # MQTT dev
-      - "18084:18084"   # dashboard dev
-    env_file:
-      - ${ENV_FILE:-.env.development}
-    environment:
-      EMQX_ALLOW_ANONYMOUS: "false"
-      EMQX_AUTHENTICATION__1__MECHANISM: password_based
-      EMQX_AUTHENTICATION__1__BACKEND: built_in_database
-      EMQX_AUTHENTICATION__1__USER_ID_TYPE: username
-      # Bind interno = externo (override del listener default de EMQX).
-      EMQX_LISTENERS__TCP__DEFAULT__BIND: "0.0.0.0:1884"
-      EMQX_DASHBOARD__LISTENERS__HTTP__BIND: "0.0.0.0:18084"
-    volumes:
-      - reactor-emqx-data:/opt/emqx/data
-      - ./docker/emqx/init.sh:/init.sh:ro
-    entrypoint: ["/init.sh"]
-    command: ["/opt/emqx/bin/emqx", "foreground"]
-    restart: unless-stopped
+  # En dev el broker MQTT lo provee el stack `herramientas` (contenedor
+  # `emqx`, imagen emqx/emqx:latest, puertos default 1883 / 18083). Reactor
+  # se conecta via host.docker.internal (ver MQTT_HOST/MQTT_PORT en
+  # .env.development). En prod si hay un EMQX dedicado -- ver
+  # scripts/aprovisionar_server.sh.
 
   reactor-motor:
     container_name: reactor-motor
@@ -65,10 +45,4 @@ services:
       - ./motor:/app
     env_file:
       - ${ENV_FILE:-.env.development}
-    depends_on:
-      reactor-emqx:
-        condition: service_started
     restart: unless-stopped
-
-volumes:
-  reactor-emqx-data:

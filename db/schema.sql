@@ -1,3 +1,58 @@
+-- Esquema de referencia de reactor (ver CLAUDE.md).
+--
+-- Base convertida a InnoDB / utf8mb4_unicode_ci y con 99 claves foraneas
+-- declaradas en produccion (98 en desarrollo). Este volcado sale de DEV.
+--
+-- La FK que falta en dev es `programas`.`dominio`: esa tabla existe en
+-- `reactor` pero no en `reactor_dev` (drift previo a estas migraciones).
+--
+--
+-- CRITERIO DE LA REGLA ON DELETE
+--
+--   RESTRICT  Relaciones estructurales y de catalogo. Es el default.
+--   SET NULL  Punteros al "ultimo usado" (`usuarios`.`perfil`, `dispositivos`.
+--             `adopcion`, `dominios`.`contrato`) y bitacoras / atribucion
+--             historica, donde el historial no debe gobernar el ciclo de vida
+--             del padre (`registros`.*, `senales`.*, `notificaciones`,
+--             `sucesos`, `usuarios`.`registrante`, `casos`.`autor`).
+--   CASCADE   Filas de detalle propiedad de su padre (`comprobantesrenglones`,
+--             `dispositivosparametros`, `gadgets`.`dashboard`, `carritos`).
+--
+--   Los ciclos (usuarios<->perfiles, dispositivos<->adopciones,
+--   dominios<->contratos) se resolvieron haciendo ceder siempre al puntero y
+--   manteniendo RESTRICT del lado estructural. `menus`.`padre` y
+--   `usuarios`.`registrante` son auto-referenciales: eso NO es un ciclo.
+--
+--   OJO: una FK auto-referencial garantiza que el padre existe, pero NO que la
+--   jerarquia sea un arbol. InnoDB acepta ciclos (A->B->C->A) y filas que son
+--   su propio padre. Para `menus` eso hay que validarlo en la aplicacion.
+--
+--
+-- LA FILA CENTINELA id = 0  -- EXCEPCION DELIBERADA
+--
+--   `usuarios`, `perfiles` y `canales` tienen una fila artificial con id = 0
+--   y nombre "(sin asignar)", creada por 20260814_3100. Existe porque el
+--   sistema legacy -- fuera de este repositorio -- escribe 0 como centinela en
+--   `sesiones`.`usuario`, `sesiones`.`perfil` y `senales`.`canal`. Sin esa
+--   fila las FK habrian rechazado el 99,85% de los INSERT de sesion y el 68%
+--   de la ingesta MQTT.
+--
+--   En el RESTO del esquema la convencion es la contraria: el 0 se convirtio a
+--   NULL. Si algun dia el legacy escribe NULL, migrar estas tres a la
+--   convencion general y eliminar las filas centinela.
+--
+--   El usuario centinela NO puede iniciar sesion: `usuario` = NULL (el login
+--   filtra por esa columna y NULL nunca matchea), `habilitado` = 'N' y
+--   `contrasena` vacia.
+--
+--   PENDIENTE: los listados que hacen SELECT sin filtrar muestran esas filas.
+--   Agregar `WHERE id <> 0` en `panel/api/usuarios.php` y equivalentes.
+--
+--
+-- Toda tabla y columna nueva debe crearse en InnoDB / utf8mb4_unicode_ci.
+-- El resto del esquema sigue relacionandose por soft FK (sin constraint).
+--
+-- Sin datos: solo estructura, vistas, rutinas y triggers.
 
 -- MySQL dump 10.13  Distrib 8.0.46, for Linux (x86_64)
 --
@@ -155,7 +210,15 @@ CREATE TABLE `adopciones` (
   `liberado` datetime DEFAULT NULL,
   `liberador` int DEFAULT NULL,
   `vigente` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_adopciones_dispositivo` (`dispositivo`),
+  KEY `fk_adopciones_dominio` (`dominio`),
+  KEY `fk_adopciones_adoptador` (`adoptador`),
+  KEY `fk_adopciones_liberador` (`liberador`),
+  CONSTRAINT `fk_adopciones_adoptador` FOREIGN KEY (`adoptador`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_adopciones_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_adopciones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_adopciones_liberador` FOREIGN KEY (`liberador`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -215,7 +278,9 @@ CREATE TABLE `aplicaciones` (
   `apisecret` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `usos` int DEFAULT NULL,
   `habilitada` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_aplicaciones_dominio` (`dominio`),
+  CONSTRAINT `fk_aplicaciones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -229,7 +294,7 @@ DROP TABLE IF EXISTS `articulos`;
 CREATE TABLE `articulos` (
   `id` int NOT NULL AUTO_INCREMENT,
   `tipo` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `categoria` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `categoria` int DEFAULT NULL,
   `marca` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `descripcion` mediumtext COLLATE utf8mb4_unicode_ci,
@@ -248,7 +313,9 @@ CREATE TABLE `articulos` (
   `web` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `visibilidad` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` tinyint(1) DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_articulos_categoria` (`categoria`),
+  CONSTRAINT `fk_articulos_categoria` FOREIGN KEY (`categoria`) REFERENCES `articuloscategorias` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -434,7 +501,19 @@ CREATE TABLE `botones` (
   `orden` smallint DEFAULT NULL,
   `habilitado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `request` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_botones_dominio` (`dominio`),
+  KEY `fk_botones_panel` (`panel`),
+  KEY `fk_botones_control` (`control`),
+  KEY `fk_botones_dispositivo` (`dispositivo`),
+  KEY `fk_botones_canal` (`canal`),
+  KEY `fk_botones_icono` (`icono`),
+  CONSTRAINT `fk_botones_canal` FOREIGN KEY (`canal`) REFERENCES `canales` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_botones_control` FOREIGN KEY (`control`) REFERENCES `controles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_botones_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_botones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_botones_icono` FOREIGN KEY (`icono`) REFERENCES `iconos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_botones_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -479,7 +558,11 @@ CREATE TABLE `canales` (
   `configuracion` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `opciones` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `reacciones` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_canales_dispositivo` (`dispositivo`),
+  KEY `fk_canales_modulo` (`modulo`),
+  CONSTRAINT `fk_canales_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_canales_modulo` FOREIGN KEY (`modulo`) REFERENCES `modulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -527,7 +610,9 @@ CREATE TABLE `carritos` (
   `items` int DEFAULT NULL,
   `total` decimal(11,2) DEFAULT NULL,
   `modificado` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_carritos_usuario` (`usuario`),
+  CONSTRAINT `fk_carritos_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -546,7 +631,11 @@ CREATE TABLE `carritositems` (
   `detalle` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `unitario` decimal(11,2) DEFAULT NULL,
   `monto` decimal(11,2) DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_carritositems_usuario` (`usuario`),
+  KEY `fk_carritositems_articulo` (`articulo`),
+  CONSTRAINT `fk_carritositems_articulo` FOREIGN KEY (`articulo`) REFERENCES `articulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_carritositems_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -561,7 +650,9 @@ CREATE TABLE `carteras` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `ejecutivo` int DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_carteras_ejecutivo` (`ejecutivo`),
+  CONSTRAINT `fk_carteras_ejecutivo` FOREIGN KEY (`ejecutivo`) REFERENCES `usuarios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -586,7 +677,9 @@ CREATE TABLE `casos` (
   `vencimiento` datetime DEFAULT NULL,
   `cierre` datetime DEFAULT NULL,
   `estado` tinyint(1) DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_casos_autor` (`autor`),
+  CONSTRAINT `fk_casos_autor` FOREIGN KEY (`autor`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -615,7 +708,11 @@ CREATE TABLE `chips` (
   `vencimiento` date DEFAULT NULL,
   `estado` smallint DEFAULT NULL,
   `comentario` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_chips_dominio` (`dominio`),
+  KEY `fk_chips_articulo` (`articulo`),
+  CONSTRAINT `fk_chips_articulo` FOREIGN KEY (`articulo`) REFERENCES `articulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_chips_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -660,7 +757,9 @@ CREATE TABLE `clientes` (
   `cuit` varchar(13) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `talonario` int DEFAULT NULL,
   `medio` int DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_clientes_talonario` (`talonario`),
+  CONSTRAINT `fk_clientes_talonario` FOREIGN KEY (`talonario`) REFERENCES `talonarios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -759,7 +858,15 @@ CREATE TABLE `comprobantes` (
   `comentarios` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `medio` int DEFAULT NULL,
   `estado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_comprobantes_talonario` (`talonario`),
+  KEY `fk_comprobantes_contrato` (`contrato`),
+  KEY `fk_comprobantes_cliente` (`cliente`),
+  KEY `fk_comprobantes_medio` (`medio`),
+  CONSTRAINT `fk_comprobantes_cliente` FOREIGN KEY (`cliente`) REFERENCES `clientes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_comprobantes_contrato` FOREIGN KEY (`contrato`) REFERENCES `contratos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_comprobantes_medio` FOREIGN KEY (`medio`) REFERENCES `medios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_comprobantes_talonario` FOREIGN KEY (`talonario`) REFERENCES `talonarios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -781,7 +888,11 @@ CREATE TABLE `comprobantesrenglones` (
   `unitario` decimal(11,2) DEFAULT NULL,
   `monto` decimal(11,2) DEFAULT NULL,
   `estado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_renglones_comprobante` (`comprobante`),
+  KEY `fk_renglones_articulo` (`articulo`),
+  CONSTRAINT `fk_renglones_articulo` FOREIGN KEY (`articulo`) REFERENCES `articulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_renglones_comprobante` FOREIGN KEY (`comprobante`) REFERENCES `comprobantes` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -840,7 +951,7 @@ CREATE TABLE `contratos` (
   `dominio` int DEFAULT NULL,
   `tipo` varchar(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `plan` int DEFAULT NULL,
-  `promo` varchar(5) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `promo` int DEFAULT NULL,
   `desde` date DEFAULT NULL,
   `hasta` date DEFAULT NULL,
   `registro` datetime DEFAULT NULL,
@@ -853,7 +964,15 @@ CREATE TABLE `contratos` (
   `remitir` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `remitido` datetime DEFAULT NULL,
   `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_contratos_cliente` (`cliente`),
+  KEY `fk_contratos_dominio` (`dominio`),
+  KEY `fk_contratos_plan` (`plan`),
+  KEY `fk_contratos_promo` (`promo`),
+  CONSTRAINT `fk_contratos_cliente` FOREIGN KEY (`cliente`) REFERENCES `clientes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_contratos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_contratos_plan` FOREIGN KEY (`plan`) REFERENCES `planes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_contratos_promo` FOREIGN KEY (`promo`) REFERENCES `articulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -875,7 +994,13 @@ CREATE TABLE `controles` (
   `orden` int DEFAULT NULL,
   `habilitado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `parametros` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_controles_dominio` (`dominio`),
+  KEY `fk_controles_panel` (`panel`),
+  KEY `fk_controles_dispositivo` (`dispositivo`),
+  CONSTRAINT `fk_controles_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_controles_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_controles_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -914,7 +1039,9 @@ CREATE TABLE `dashboards` (
   `dominio` int DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_dashboards_dominio` (`dominio`),
+  CONSTRAINT `fk_dashboards_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -980,7 +1107,21 @@ CREATE TABLE `dispositivos` (
   `monitoreoSiguiente` datetime DEFAULT NULL,
   `coordenadas` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `indicadores` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_dispositivos_agente` (`agente`),
+  KEY `fk_dispositivos_dominio` (`dominio`),
+  KEY `fk_dispositivos_transceptor` (`transceptor`),
+  KEY `fk_dispositivos_modelo` (`modelo`),
+  KEY `fk_dispositivos_producto` (`producto`),
+  KEY `fk_dispositivos_chip` (`chip`),
+  KEY `fk_dispositivos_adopcion` (`adopcion`),
+  CONSTRAINT `fk_dispositivos_adopcion` FOREIGN KEY (`adopcion`) REFERENCES `adopciones` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dispositivos_agente` FOREIGN KEY (`agente`) REFERENCES `agentes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dispositivos_chip` FOREIGN KEY (`chip`) REFERENCES `chips` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dispositivos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dispositivos_modelo` FOREIGN KEY (`modelo`) REFERENCES `modelos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dispositivos_producto` FOREIGN KEY (`producto`) REFERENCES `productos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dispositivos_transceptor` FOREIGN KEY (`transceptor`) REFERENCES `transceptores` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1046,7 +1187,9 @@ CREATE TABLE `dispositivosparametros` (
   `variable` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `valor` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `enviado` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_dispositivosparametros_dispositivo` (`dispositivo`),
+  CONSTRAINT `fk_dispositivosparametros_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1161,7 +1304,13 @@ CREATE TABLE `dominios` (
   `paneles` int DEFAULT NULL,
   `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_dominios_agente` (`agente`),
+  KEY `fk_dominios_cliente` (`cliente`),
+  KEY `fk_dominios_contrato` (`contrato`),
+  CONSTRAINT `fk_dominios_agente` FOREIGN KEY (`agente`) REFERENCES `agentes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dominios_cliente` FOREIGN KEY (`cliente`) REFERENCES `clientes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_dominios_contrato` FOREIGN KEY (`contrato`) REFERENCES `contratos` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1177,7 +1326,9 @@ CREATE TABLE `dominiosguardias` (
   `dominio` int DEFAULT NULL,
   `usuario` int DEFAULT NULL,
   `correo` varchar(250) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_dominiosguardias_dominio` (`dominio`),
+  CONSTRAINT `fk_dominiosguardias_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1198,7 +1349,9 @@ CREATE TABLE `dominiosmedios` (
   `baja` datetime DEFAULT NULL,
   `validado` smallint DEFAULT NULL,
   `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_dominiosmedios_dominio` (`dominio`),
+  CONSTRAINT `fk_dominiosmedios_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1249,10 +1402,12 @@ DROP TABLE IF EXISTS `empaques`;
 CREATE TABLE `empaques` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `modelo` smallint DEFAULT NULL,
+  `modelo` int DEFAULT NULL,
   `version` smallint DEFAULT NULL,
   `estado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_empaques_modelo` (`modelo`),
+  CONSTRAINT `fk_empaques_modelo` FOREIGN KEY (`modelo`) REFERENCES `modelos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1330,7 +1485,7 @@ CREATE TABLE `entradas` (
   `id` int NOT NULL AUTO_INCREMENT,
   `uuid` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `fecha` date DEFAULT NULL,
-  `categoria` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `categoria` int DEFAULT NULL,
   `orden` int DEFAULT NULL,
   `autor` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `volanta` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1342,7 +1497,9 @@ CREATE TABLE `entradas` (
   `imagen` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `visibilidad` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `metadatos` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_entradas_categoria` (`categoria`),
+  CONSTRAINT `fk_entradas_categoria` FOREIGN KEY (`categoria`) REFERENCES `entradascategorias` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1371,10 +1528,12 @@ DROP TABLE IF EXISTS `envases`;
 CREATE TABLE `envases` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `modelo` smallint DEFAULT NULL,
+  `modelo` int DEFAULT NULL,
   `version` smallint DEFAULT NULL,
   `estado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_envases_modelo` (`modelo`),
+  CONSTRAINT `fk_envases_modelo` FOREIGN KEY (`modelo`) REFERENCES `modelos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1403,10 +1562,12 @@ DROP TABLE IF EXISTS `etiquetas`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `etiquetas` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `equipo` int DEFAULT NULL,
+  `dispositivo` int DEFAULT NULL,
   `impresion` smallint DEFAULT NULL,
   `impresa` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_etiquetas_dispositivo` (`dispositivo`),
+  CONSTRAINT `fk_etiquetas_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1420,11 +1581,13 @@ DROP TABLE IF EXISTS `exhibidores`;
 CREATE TABLE `exhibidores` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `modelo` smallint DEFAULT NULL,
+  `modelo` int DEFAULT NULL,
   `version` smallint DEFAULT NULL,
   `estado` smallint DEFAULT NULL,
   `metadatos` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_exhibidores_modelo` (`modelo`),
+  CONSTRAINT `fk_exhibidores_modelo` FOREIGN KEY (`modelo`) REFERENCES `modelos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1475,7 +1638,11 @@ CREATE TABLE `gadgets` (
   `orden` smallint DEFAULT NULL,
   `visible` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `parametros` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_gadgets_dominio` (`dominio`),
+  KEY `fk_gadgets_dashboard` (`dashboard`),
+  CONSTRAINT `fk_gadgets_dashboard` FOREIGN KEY (`dashboard`) REFERENCES `dashboards` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_gadgets_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1507,86 +1674,6 @@ CREATE TABLE `generaciones` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `periodo` int DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `grupos___`
---
-
-DROP TABLE IF EXISTS `grupos___`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `grupos___` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `numero` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `claveOperador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `claveAdministrador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `plan` int DEFAULT NULL,
-  `cliente` int DEFAULT NULL,
-  `contrato` int DEFAULT NULL,
-  `usuarios` int DEFAULT NULL,
-  `dispositivos` int DEFAULT NULL,
-  `usos` int DEFAULT NULL,
-  `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `grupos___2`
---
-
-DROP TABLE IF EXISTS `grupos___2`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `grupos___2` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `numero` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `claveOperador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `claveAdministrador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `plan` int DEFAULT NULL,
-  `cliente` int DEFAULT NULL,
-  `contrato` int DEFAULT NULL,
-  `autoadministrado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `usuarios` int DEFAULT NULL,
-  `dispositivos` int DEFAULT NULL,
-  `usos` int DEFAULT NULL,
-  `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `grupos_copy1`
---
-
-DROP TABLE IF EXISTS `grupos_copy1`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `grupos_copy1` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `numero` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `claveOperador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `claveAdministrador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `plan` int DEFAULT NULL,
-  `cliente` int DEFAULT NULL,
-  `contrato` int DEFAULT NULL,
-  `autoadministrado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `usuarios` int DEFAULT NULL,
-  `dispositivos` int DEFAULT NULL,
-  `usos` int DEFAULT NULL,
-  `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -1704,7 +1791,11 @@ CREATE TABLE `invitaciones` (
   `emitida` datetime DEFAULT NULL,
   `abierta` datetime DEFAULT NULL,
   `estado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_invitaciones_dominio` (`dominio`),
+  KEY `fk_invitaciones_emisor` (`emisor`),
+  CONSTRAINT `fk_invitaciones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_invitaciones_emisor` FOREIGN KEY (`emisor`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1783,7 +1874,11 @@ CREATE TABLE `llaves` (
   `utilizada` datetime DEFAULT NULL,
   `usos` int DEFAULT NULL,
   `habilitada` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_llaves_dominio` (`dominio`),
+  KEY `fk_llaves_generador` (`generador`),
+  CONSTRAINT `fk_llaves_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_llaves_generador` FOREIGN KEY (`generador`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1861,7 +1956,9 @@ CREATE TABLE `mensajes` (
   `programado` datetime DEFAULT NULL,
   `enviado` datetime DEFAULT NULL,
   `estado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_mensajes_usuario` (`usuario`),
+  CONSTRAINT `fk_mensajes_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1883,7 +1980,9 @@ CREATE TABLE `menus` (
   `ventana` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `inicio` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `estado` tinyint(1) DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_menus_padre` (`padre`),
+  CONSTRAINT `fk_menus_padre` FOREIGN KEY (`padre`) REFERENCES `menus` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2032,7 +2131,9 @@ CREATE TABLE `notificaciones` (
   `destino` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `leida` smallint DEFAULT NULL,
   `visible` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_notificaciones_dominio` (`dominio`),
+  CONSTRAINT `fk_notificaciones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2053,7 +2154,15 @@ CREATE TABLE `pagos` (
   `medio` int DEFAULT NULL,
   `operacion` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `estado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_pagos_dominio` (`dominio`),
+  KEY `fk_pagos_contrato` (`contrato`),
+  KEY `fk_pagos_comprobante` (`comprobante`),
+  KEY `fk_pagos_medio` (`medio`),
+  CONSTRAINT `fk_pagos_comprobante` FOREIGN KEY (`comprobante`) REFERENCES `comprobantes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_pagos_contrato` FOREIGN KEY (`contrato`) REFERENCES `contratos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_pagos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_pagos_medio` FOREIGN KEY (`medio`) REFERENCES `medios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2086,7 +2195,9 @@ CREATE TABLE `paneles` (
   `dominio` int DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_paneles_dominio` (`dominio`),
+  CONSTRAINT `fk_paneles_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2200,7 +2311,9 @@ CREATE TABLE `planes` (
   `dispositivos` int DEFAULT NULL,
   `usos` int DEFAULT NULL,
   `orden` int DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_planes_articulo` (`articulo`),
+  CONSTRAINT `fk_planes_articulo` FOREIGN KEY (`articulo`) REFERENCES `articulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2260,7 +2373,9 @@ CREATE TABLE `prospectos` (
   `interes` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `estado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `cartera` int DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_prospectos_cartera` (`cartera`),
+  CONSTRAINT `fk_prospectos_cartera` FOREIGN KEY (`cartera`) REFERENCES `carteras` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2334,7 +2449,15 @@ CREATE TABLE `registros` (
   `dispositivo` int DEFAULT NULL,
   `canal` int DEFAULT NULL,
   `estado` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_registros_usuario` (`usuario`),
+  KEY `fk_registros_dominio` (`dominio`),
+  KEY `fk_registros_dispositivo` (`dispositivo`),
+  KEY `fk_registros_canal` (`canal`),
+  CONSTRAINT `fk_registros_canal` FOREIGN KEY (`canal`) REFERENCES `canales` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_registros_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_registros_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_registros_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2377,7 +2500,13 @@ CREATE TABLE `senales` (
   `topic` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `mensaje` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `estado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_senales_transceptor` (`transceptor`),
+  KEY `fk_senales_dispositivo` (`dispositivo`),
+  KEY `fk_senales_canal` (`canal`),
+  CONSTRAINT `fk_senales_canal` FOREIGN KEY (`canal`) REFERENCES `canales` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_senales_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_senales_transceptor` FOREIGN KEY (`transceptor`) REFERENCES `transceptores` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2413,7 +2542,13 @@ CREATE TABLE `sesiones` (
   `iniciada` datetime DEFAULT NULL,
   `usada` datetime DEFAULT NULL,
   `expira` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_sesiones_terminal` (`terminal`),
+  KEY `fk_sesiones_usuario` (`usuario`),
+  KEY `fk_sesiones_perfil` (`perfil`),
+  CONSTRAINT `fk_sesiones_perfil` FOREIGN KEY (`perfil`) REFERENCES `perfiles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sesiones_terminal` FOREIGN KEY (`terminal`) REFERENCES `terminales` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sesiones_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2431,7 +2566,11 @@ CREATE TABLE `sucesos` (
   `tipo` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `fecha` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `detalle` varchar(2000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_sucesos_dominio` (`dominio`),
+  KEY `fk_sucesos_usuario` (`usuario`),
+  CONSTRAINT `fk_sucesos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_sucesos_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2473,7 +2612,9 @@ CREATE TABLE `talonarios` (
   `fondo` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `terminos` varchar(5000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `estado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_talonarios_empresa` (`empresa`),
+  CONSTRAINT `fk_talonarios_empresa` FOREIGN KEY (`empresa`) REFERENCES `empresas` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2528,47 +2669,6 @@ CREATE TABLE `tareas_ejecuciones` (
   KEY `idx_tareas_ej_estado` (`estado`),
   KEY `idx_tareas_ej_inicio` (`inicio`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `teclados___`
---
-
-DROP TABLE IF EXISTS `teclados___`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `teclados___` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nombre` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `usuario` int DEFAULT NULL,
-  `equipo` int DEFAULT NULL,
-  `particion` int DEFAULT NULL,
-  `visible` smallint DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
-  `pantalla` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `mensaje` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `duracion` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tecnicos___`
---
-
-DROP TABLE IF EXISTS `tecnicos___`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `tecnicos___` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `identificador` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `usuario` int DEFAULT NULL,
-  `nivel` smallint DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2647,7 +2747,11 @@ CREATE TABLE `usos` (
   `dispositivo` int DEFAULT NULL,
   `entrantes` int DEFAULT NULL,
   `salientes` int DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `fk_usos_dominio` (`dominio`),
+  KEY `fk_usos_dispositivo` (`dispositivo`),
+  CONSTRAINT `fk_usos_dispositivo` FOREIGN KEY (`dispositivo`) REFERENCES `dispositivos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_usos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2703,7 +2807,9 @@ CREATE TABLE `usuariosgrupos` (
   `dominio` int DEFAULT NULL,
   `nombre` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_usuariosgrupos_dominio` (`dominio`),
+  CONSTRAINT `fk_usuariosgrupos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2722,7 +2828,11 @@ CREATE TABLE `utilizaciones` (
   `usuarios` int DEFAULT NULL,
   `dispositivos` int DEFAULT NULL,
   `usos` int DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_utilizaciones_dominio` (`dominio`),
+  KEY `fk_utilizaciones_plan` (`plan`),
+  CONSTRAINT `fk_utilizaciones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_utilizaciones_plan` FOREIGN KEY (`plan`) REFERENCES `planes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2782,7 +2892,11 @@ CREATE TABLE `widgets` (
   `estado` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `actualizado` datetime DEFAULT NULL,
   `usado` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_widgets_dominio` (`dominio`),
+  KEY `fk_widgets_panel` (`panel`),
+  CONSTRAINT `fk_widgets_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_widgets_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

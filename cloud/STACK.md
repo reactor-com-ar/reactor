@@ -172,10 +172,16 @@ raíz del repositorio:
 3. `docker compose up -d --force-recreate` en el servidor. `--force-recreate` es obligatorio: Docker bind-montea `.env.production` por inodo, y al reemplazarlo hay que recrear el contenedor para que PHP lea el nuevo.
 4. `docker compose exec -T php-apache php /opt/app/reactor/scripts/migrate.php` aplica migraciones.
 
-**Banner de nueva versión:** el frontend pollea `api/version` y
-muestra `.version-banner` si el `version.txt` del servidor cambió
-respecto al que cargó al iniciar. El `style.css` se incluye con
-`?v=<?= time() ?>` para evitar caché.
+**Banner de nueva versión:** el frontend pollea `api/version.php`
+cada 60 s y compara la respuesta con `document.body.dataset.version`
+(inyectado desde `index.php` a partir de `cloud/version.txt`). Si
+difiere, muestra una barra azul (`--info`) full-width al tope del
+`<body>` con el texto "Hay una nueva versión disponible." y un botón
+"Actualizar ahora" que dispara `window.location.reload()`. Cuando el
+banner queda visible, se agrega `body.has-banner` para que
+`.layout` compense los 44 px extra y no aparezca scroll de más.
+Los assets (`style.css`, `app.js`, favicons) se sirven con
+`?v=<contenido de version.txt>` para forzar cache-busting al recargar.
 
 ## 10. Convenciones de código
 

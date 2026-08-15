@@ -2889,17 +2889,28 @@
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
-                    ${viewGrid([
-                        viewCardHalf('Código',        `<code>#${usr.id}</code>`),
-                        viewCardHalf('Nombre',        escape(usr.nombre)),
-                        viewCardHalf('Email',         escape(usr.email)),
-                        viewCardHalf('Celular',       usr.celular ? escape(usr.celular) : `<span class="muted">—</span>`),
-                        viewCardHalf('Rol',           rolBadge(usr.rol)),
-                        viewCardHalf('Estado',        estadoVal),
-                        viewCardHalf('Último login',  escape(formatDate(usr.last_login_at))),
-                        viewCardHalf('Creado',        escape(formatDate(usr.created_at))),
-                        viewCardHalf('Actualizado',   escape(formatDate(usr.updated_at))),
-                    ])}
+                    <div class="modal-tabs" role="tablist">
+                        <button class="modal-tab active" data-tab="general" role="tab">General</button>
+                        <button class="modal-tab"        data-tab="perfiles" role="tab">Perfiles</button>
+                    </div>
+                    <div class="modal-tabpanel" data-panel="general">
+                        ${viewGrid([
+                            viewCardHalf('Código',        `<code>#${usr.id}</code>`),
+                            viewCardHalf('Nombre',        escape(usr.nombre)),
+                            viewCardHalf('Email',         escape(usr.email)),
+                            viewCardHalf('Celular',       usr.celular ? escape(usr.celular) : `<span class="muted">—</span>`),
+                            viewCardHalf('Rol',           rolBadge(usr.rol)),
+                            viewCardHalf('Estado',        estadoVal),
+                            viewCardHalf('Último login',  escape(formatDate(usr.last_login_at))),
+                            viewCardHalf('Creado',        escape(formatDate(usr.created_at))),
+                            viewCardHalf('Actualizado',   escape(formatDate(usr.updated_at))),
+                        ])}
+                    </div>
+                    <div class="modal-tabpanel" data-panel="perfiles" hidden>
+                        <div data-role="perfiles-body">
+                            <div style="text-align:center;padding:24px"><div class="spin"></div></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-ghost" data-act="close">Cerrar</button>
@@ -2914,6 +2925,59 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const tabs    = backdrop.querySelectorAll('.modal-tab');
+        const panels  = backdrop.querySelectorAll('.modal-tabpanel');
+        const perfBody = backdrop.querySelector('[data-role="perfiles-body"]');
+        let perfLoaded = false;
+
+        async function loadPerfiles() {
+            if (perfLoaded) return;
+            perfLoaded = true;
+            try {
+                const data = await api('profiles.php?usuario_id=' + encodeURIComponent(usr.id));
+                perfBody.innerHTML = perfilesUsuarioTableBody(data.perfiles || []);
+            } catch (e) {
+                perfLoaded = false;
+                perfBody.innerHTML = errorBox(e.message);
+            }
+        }
+
+        tabs.forEach(t => t.addEventListener('click', () => {
+            const target = t.dataset.tab;
+            tabs.forEach(x => x.classList.toggle('active', x === t));
+            panels.forEach(p => p.hidden = p.dataset.panel !== target);
+            if (target === 'perfiles') loadPerfiles();
+        }));
+    }
+
+    function perfilesUsuarioTableBody(perfiles) {
+        if (!perfiles.length) {
+            return `<div class="table-empty">Este usuario no tiene perfiles asociados.</div>`;
+        }
+        const rows = perfiles.map(p => `
+            <tr>
+                <td><span class="td-id">#${p.id}</span></td>
+                <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
+                <td>${perfilRolBadge(p.rol)}</td>
+                <td>${formatDate(p.created_at)}</td>
+            </tr>
+        `).join('');
+        return `
+            <div class="table-card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Dominio</th>
+                            <th>Rol</th>
+                            <th>Creado</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
     }
 
     function openUserModal(usr) {
@@ -7134,4 +7198,43 @@
         try { done(document.execCommand('copy')); } catch (_) { done(false); }
         ta.remove();
     }
+
+    /* ---------- Polling de versión --------------------------------
+     * Cada 60s consulta api/version.php y compara con la versión que
+     * el body traía al cargar la página. Si difiere, muestra el
+     * banner azul de "Hay una nueva versión disponible" y agrega
+     * body.has-banner para que .layout compense los 44px del banner.
+     * Una vez detectada la nueva versión, deja de pollear. */
+    (function startVersionPolling() {
+        const banner = document.getElementById('version-banner');
+        const btn    = document.getElementById('version-banner-btn');
+        if (!banner || !btn) return;
+
+        const baseline = (document.body && document.body.dataset.version) || '';
+        if (!baseline) return;
+
+        btn.addEventListener('click', () => window.location.reload());
+
+        let done = false;
+        const show = () => {
+            banner.removeAttribute('hidden');
+            document.body.classList.add('has-banner');
+            done = true;
+        };
+
+        setInterval(async () => {
+            if (done) return;
+            try {
+                const res = await fetch('api/version.php', {
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                });
+                if (!res.ok) return;
+                const body = await res.json();
+                const v = body && body.data && body.data.version;
+                if (v && v !== baseline) show();
+            } catch (_) { /* noop */ }
+        }, 60_000);
+    })();
 })();

@@ -97,6 +97,60 @@ Estructura obligatoria de toda pantalla de cloud:
 .content { flex: 1; padding: 24px; overflow-y: auto; }
 ```
 
+Justo antes de `.layout`, el `<body>` incluye el banner de nueva
+versión (ver §3-bis). Cuando está oculto no ocupa espacio.
+
+## 3-bis. Banner de nueva versión
+
+Barra azul (`--info`, `#3b82f6`) full-width que aparece al tope del
+`<body>` cuando `cloud/version.txt` cambió respecto al valor que la
+página cargó al abrirse. Empuja el chrome hacia abajo (no es overlay)
+y se muestra en todas las rutas — su lugar es el `<body>`, por
+fuera de `.layout`.
+
+Markup obligatorio (siempre presente en `index.php`, arranca oculto):
+
+```html
+<body data-version="<?= htmlspecialchars($cacheBust) ?>">
+  <div class="version-banner" id="version-banner" role="status" hidden>
+    <span class="version-banner-text">Hay una nueva versión disponible.</span>
+    <button type="button" class="version-banner-btn" id="version-banner-btn">Actualizar ahora</button>
+  </div>
+  <div class="layout"> … </div>
+</body>
+```
+
+Reglas visuales:
+
+- **Fondo `var(--info)`, texto `#fff`, alto 44 px, `justify-content: center`.**
+- Botón blanco con texto `var(--info)`, `border-radius: 6px`, sin
+  borde. Al hover, fondo `#e5e7eb`.
+- Texto exacto: `Hay una nueva versión disponible.`
+- Botón exacto: `Actualizar ahora`.
+
+Interacción (implementada en `app.js`):
+
+- Al cargar la página, el body trae `data-version="<contenido de version.txt>"`.
+- Cada 60 s, `fetch('api/version.php')` compara con esa baseline.
+- Si difiere: se quita el atributo `hidden` del banner y se agrega
+  `body.has-banner`, que ajusta `.layout` a `min-height: calc(100vh - 44px)`
+  para no generar scroll extra.
+- El botón dispara `window.location.reload()`.
+- Una vez mostrado, se deja de pollear (la nueva versión ya está
+  detectada, no hace falta seguir chequeando).
+
+Reglas duras:
+
+- **No** convertir el banner en overlay `fixed`: siempre empuja el
+  contenido.
+- **No** cambiar los textos ("Hay una nueva versión disponible." y
+  "Actualizar ahora") sin actualizar también `panel/`, que usa el
+  mismo mecanismo.
+- **No** usar un color distinto de `--info`: es el único acento
+  cromático de la app que compite con el rojo institucional, así se
+  reconoce inmediatamente como "aviso del sistema" y no como parte
+  del chrome de marca.
+
 ## 4. Sidebar
 
 El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus elementos hijos **no usan los tokens `--text` / `--muted` / `--border`**: usan `#fff` para texto y `rgba(0,0,0,.18-.28)` para hover / activo / bordes. El contraste se calcula contra el rojo, no contra el gris del resto de la app.
@@ -1189,6 +1243,8 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 - El modal de Consultar muestra **todos los campos** de la entidad (no solo los del listado). Es la única vista donde el usuario ve la fila completa sin pasar al modo edición.
 - Valores nulos / vacíos van como `<span class="muted">—</span>` o `<span class="muted">Sin descripción</span>` dentro del `view-card-value`.
 - JSON / payloads dentro de `<pre>`; no usar `.json-editor` (es para edición, no para read-only).
+
+**Pestañas dentro del modal de Consultar (opcional).** Cuando la entidad tiene relaciones importantes con otras tablas (ej.: usuarios ↔ perfiles), el modal de Consultar puede dividirse en pestañas usando `.modal-tabs` / `.modal-tab` / `.modal-tabpanel`. La primera pestaña se llama siempre **`General`** y contiene el `view-grid` con todos los campos de la entidad; las pestañas siguientes muestran cada relación en una tabla `.table-card` de solo lectura (sin columna `Acciones`, sin menú contextual — las acciones se hacen desde el módulo de la relación, no desde acá). El primer ejemplo es Consultar usuario → `General` + `Perfiles` (lista de dominios y rol por dominio). Cada pestaña de relación lazy-loads su contenido en el primer click al tab correspondiente para no penalizar la apertura del modal.
 
 ## 26. Editor JSON (textarea monoespaciado)
 

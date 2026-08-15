@@ -3,12 +3,17 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/env.php';
 require_once __DIR__ . '/lib/auth_check.php';
+require_once __DIR__ . '/lib/sesion.php';
 
 $currentUser = authUser();
 if ($currentUser === null) {
     header('Location: login.php');
     exit;
 }
+
+// Datos de alcance de la sesion (dominio, perfil). Se inyectan en la pagina
+// para que el front los tenga en el arranque, sin un request extra.
+$sesion = sessionContext() ?? [];
 
 $appName     = 'Reactor Panel';
 $versionFile = __DIR__ . '/version.txt';
@@ -32,7 +37,12 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= htmlspecialchars($cacheBust) ?>">
 </head>
-<body>
+<body data-version="<?= htmlspecialchars($cacheBust, ENT_QUOTES) ?>">
+
+<div class="version-banner" id="version-banner" role="status" hidden>
+    <span class="version-banner-text">Hay una nueva versión disponible.</span>
+    <button type="button" class="version-banner-btn" id="version-banner-btn">Actualizar ahora</button>
+</div>
 
 <div class="layout">
 
@@ -55,6 +65,62 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     </a>
                 </div>
             </div>
+
+            <!-- Menu portado del legacy. Los sub-items todavia no tienen
+                 modulo: se muestran, pero no navegan (clase .nav-soon). -->
+            <div class="nav-group-wrap" data-group="inventario">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🔌</span>
+                    <span class="nav-group-label">Inventario</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">🏳️</span> Dominio
+                    </a>
+                    <a href="#/usuarios" data-route="usuarios" class="nav-item nav-sub-item">
+                        <span class="nav-icon">👥</span> Usuarios
+                    </a>
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">📟</span> Dispositivos
+                    </a>
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">💳</span> Chips
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="historial">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🕘</span>
+                    <span class="nav-group-label">Historial</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">🔑</span> Invitaciones
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="cuenta">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <span class="nav-icon">🚩</span>
+                    <span class="nav-group-label">Cuenta</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">📄</span> Facturas
+                    </a>
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">🧾</span> Recibos
+                    </a>
+                    <a href="#" class="nav-item nav-sub-item nav-soon">
+                        <span class="nav-icon">🧮</span> Facturación
+                    </a>
+                </div>
+            </div>
         </nav>
     </aside>
 
@@ -73,6 +139,7 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     <i class="fa-solid fa-caret-down" style="font-size:.7rem"></i>
                 </button>
                 <div class="user-dropdown" id="user-dropdown">
+                    <a href="#" class="user-dropdown-item" id="btn-perfil">Perfil</a>
                     <a href="#" class="user-dropdown-item" id="btn-logout">Cerrar sesión</a>
                 </div>
             </div>
@@ -84,6 +151,10 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
 </div>
 
 <div class="toast" id="toast"></div>
+
+<script id="panel-sesion" type="application/json">
+<?= json_encode($sesion, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
+</script>
 
 <script src="assets/js/app.js?v=<?= htmlspecialchars($cacheBust) ?>"></script>
 </body>

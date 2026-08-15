@@ -50,7 +50,12 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= htmlspecialchars($cacheBust) ?>">
 </head>
-<body>
+<body data-version="<?= htmlspecialchars($cacheBust, ENT_QUOTES) ?>">
+
+<div class="version-banner" id="version-banner" role="status" hidden>
+    <span class="version-banner-text">Hay una nueva versión disponible.</span>
+    <button type="button" class="version-banner-btn" id="version-banner-btn">Actualizar ahora</button>
+</div>
 
 <div class="layout">
 

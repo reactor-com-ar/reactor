@@ -23,16 +23,24 @@ try {
 
 function handleList(): void
 {
-    $stmt = db()->query(
-        'SELECT p.id, p.usuario_id, p.dominio_id, p.rol,
-                p.created_at, p.updated_at,
-                u.nombre AS usuario_nombre, u.email AS usuario_email, u.activo AS usuario_activo,
-                d.nombre AS dominio_nombre
-         FROM perfiles p
-         JOIN usuarios u ON u.id = p.usuario_id
-         JOIN dominios d ON d.id = p.dominio_id
-         ORDER BY u.nombre ASC, d.nombre ASC'
-    );
+    $usuarioId = isset($_GET['usuario_id']) ? (int) $_GET['usuario_id'] : 0;
+
+    $sql = 'SELECT p.id, p.usuario_id, p.dominio_id, p.rol,
+                   p.created_at, p.updated_at,
+                   u.nombre AS usuario_nombre, u.email AS usuario_email, u.activo AS usuario_activo,
+                   d.nombre AS dominio_nombre
+            FROM perfiles p
+            JOIN usuarios u ON u.id = p.usuario_id
+            JOIN dominios d ON d.id = p.dominio_id';
+    $params = [];
+    if ($usuarioId > 0) {
+        $sql .= ' WHERE p.usuario_id = :uid';
+        $params[':uid'] = $usuarioId;
+    }
+    $sql .= ' ORDER BY u.nombre ASC, d.nombre ASC';
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
 
     $perfiles = array_map(static function (array $r): array {
         $r['usuario_id']     = (int) $r['usuario_id'];

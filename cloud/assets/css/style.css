@@ -70,6 +70,41 @@ a { color: inherit; text-decoration: none; }
 
 .content { flex: 1; padding: 24px; overflow-y: auto; }
 
+/* Banner de nueva versión disponible.
+ * Va como primer hijo del <body>, por fuera de .layout: cuando está
+ * visible empuja el chrome hacia abajo (no es overlay). El polling
+ * de app.js le agrega/quita el atributo [hidden] y la clase
+ * body.has-banner, que compensa los 44px extra en .layout para que
+ * no aparezca scroll de más. */
+.version-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--info);
+    color: #fff;
+    font-size: .9rem;
+    font-weight: 500;
+    text-align: center;
+    min-height: 44px;
+}
+.version-banner[hidden]  { display: none; }
+.version-banner-text     { color: #fff; }
+.version-banner-btn      {
+    background: #fff;
+    color: var(--info);
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: .82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .12s;
+}
+.version-banner-btn:hover { background: #e5e7eb; }
+body.has-banner .layout   { min-height: calc(100vh - 44px); }
+
 /* ---------- 4. Sidebar ---------- */
 /* El sidebar está pintado en el rojo institucional, por eso sus
  * elementos hijos ignoran los tokens --text/--muted/--border y usan
@@ -627,6 +662,19 @@ tbody tr.row-clickable { cursor: pointer; }
 
 /* Variante ancha para editores monoespaciados (JSON, logs, etc.). */
 .modal.modal-wide { max-width: 760px; }
+
+/* Tabs dentro de un modal (ej.: Consultar usuario → General / Perfiles). */
+.modal-tabs        { display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+                     margin: 0; padding: 0; }
+.modal-tab         { background: none; border: none; cursor: pointer;
+                     font-family: inherit; font-size: .85rem; font-weight: 600;
+                     color: var(--muted); padding: 10px 14px;
+                     border-bottom: 2px solid transparent; margin-bottom: -1px;
+                     display: inline-flex; align-items: center; gap: 8px;
+                     transition: color .15s, border-color .15s; }
+.modal-tab:hover   { color: var(--text); }
+.modal-tab.active  { color: var(--primary); border-bottom-color: var(--primary); }
+.modal-tabpanel[hidden] { display: none; }
 
 /* Editor JSON: textarea monoespaciado, altura amplia, no envuelve lineas. */
 .json-editor {

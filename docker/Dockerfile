@@ -13,8 +13,8 @@ RUN mkdir -p /var/log/reactor/cloud/ejecuciones \
 # Permitir que los .htaccess tomen efecto
 RUN sed -i 's|AllowOverride None|AllowOverride All|g' /etc/apache2/apache2.conf
 
-# Apache escucha en 8086 (cloud) y 8087 (panel). Puertos fijos, mismo
-# interno=externo, mismo dev=prod. El default ports.conf (Listen 80) se
+# Apache escucha en 8086 (cloud), 8087 (panel) y 8115 (app). Puertos fijos,
+# mismo interno=externo, mismo dev=prod. El default ports.conf (Listen 80) se
 # reemplaza, y el 000-default.conf se deshabilita porque cada app tiene su
 # propio vhost explicito en vhosts.conf.
 COPY ports.conf /etc/apache2/ports.conf
@@ -23,4 +23,4 @@ RUN a2dissite 000-default && a2ensite 010-reactor-vhosts
 
 WORKDIR /var/www/html
 
-EXPOSE 8086 8087
+EXPOSE 8086 8087 8115

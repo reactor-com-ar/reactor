@@ -1,0 +1,411 @@
+/* ------------------------------------------------------------------
+ * Reactor App (end-user) — mockup visual del panel de control
+ *
+ * Distinto al shell de cloud/panel (que son backoffice con chrome rojo
+ * institucional en TODA la L: sidebar + topbar). Aca replicamos el
+ * legacy end-user: TOPBAR roja + SIDEBAR gris oscuro + contenido
+ * oscuro con panels "de dispositivo" (display amarillo + botones).
+ * ------------------------------------------------------------------ */
+
+:root {
+    --primary:        #C11313;   /* rojo institucional (topbar) */
+    --primary-h:      #8e0e0e;
+
+    --sidebar-bg:     #37474F;   /* gris oscuro azulado (sidebar legacy) */
+    --sidebar-item:   rgba(255,255,255,.75);
+    --sidebar-hover:  rgba(0,0,0,.18);
+
+    --content-bg:     #1e1e1e;   /* fondo del area de contenido */
+    --content-tex:    rgba(255,255,255,.03);
+
+    --panel-bg:       #fdfdfd;   /* card blanco */
+    --panel-border:   #e5e5e5;
+    --panel-shadow:   0 2px 6px rgba(0,0,0,.35);
+
+    --display-yellow: #E6C200;   /* display "encendido" (online) */
+    --display-gray:   #918f88;   /* display "apagado" (offline) */
+    --display-text:   rgba(0,0,0,.7);
+
+    --btn-bg:         #f7f7f7;
+    --btn-border:     #e0e0e0;
+    --btn-hover:      #efefef;
+    --btn-text:       #333;
+
+    --text:           #f0f0f0;
+    --muted:          rgba(255,255,255,.65);
+
+    --radius:         10px;
+    --radius-lg:      14px;
+    --shadow:         0 1px 4px rgba(0,0,0,.45);
+    --shadow-lg:      0 8px 32px rgba(0,0,0,.65);
+
+    --topbar-h:       64px;
+    --sidebar-w:      220px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--content-bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow: hidden;   /* el scroll vive en .content */
+}
+
+/* -------- Version banner (mismo patron que cloud/panel) -------- */
+
+.version-banner {
+    background: #3b82f6;
+    color: #fff;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    font-size: .9rem;
+}
+.version-banner[hidden] { display: none; }
+.version-banner-btn {
+    background: #fff;
+    color: #3b82f6;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-weight: 600;
+    font-size: .85rem;
+    cursor: pointer;
+}
+.version-banner-btn:hover { background: #e5e7eb; }
+body.has-banner .layout { min-height: calc(100vh - 44px); }
+
+/* -------------------- Layout -------------------- */
+
+.layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    height: 100vh;
+}
+
+.main-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;   /* permite que .content scrollee dentro */
+}
+
+/* -------------------- Topbar (roja) -------------------- */
+
+.topbar {
+    background: var(--primary);
+    height: var(--topbar-h);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    box-shadow: var(--shadow);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 20;
+}
+.topbar-logo {
+    height: 30px;
+    width: auto;
+    display: block;
+}
+.topbar-hamburger {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    padding: 6px 10px;
+    cursor: pointer;
+    border-radius: 6px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.topbar-hamburger:hover { background: rgba(0,0,0,.18); }
+
+.topbar-spacer { flex: 1; }
+
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.topbar-action {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.2rem;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .15s;
+}
+.topbar-action:hover { background: rgba(0,0,0,.18); }
+.topbar-action.active { background: rgba(0,0,0,.28); }
+
+/* -------------------- Sidebar (gris oscuro) -------------------- */
+
+.sidebar {
+    width: var(--sidebar-w);
+    background: var(--sidebar-bg);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    border-right: 1px solid rgba(0,0,0,.25);
+    overflow-y: auto;
+    transition: transform .25s ease;
+}
+
+.sidebar-nav {
+    padding: 12px 0;
+    flex: 1;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    color: var(--sidebar-item);
+    font-size: .95rem;
+    text-decoration: none;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background .15s, color .15s;
+}
+.nav-item:hover {
+    background: var(--sidebar-hover);
+    color: #fff;
+}
+.nav-item.active {
+    background: rgba(0,0,0,.28);
+    color: #fff;
+    border-left-color: var(--primary);
+    font-weight: 600;
+}
+.nav-item i {
+    width: 20px;
+    text-align: center;
+    font-size: 1rem;
+}
+
+/* -------------------- Contenido -------------------- */
+
+.content {
+    flex: 1;
+    padding: 24px 20px 40px;
+    overflow-y: auto;
+    background:
+        radial-gradient(rgba(255,255,255,.04) 1px, transparent 1px) 0 0/22px 22px,
+        var(--content-bg);
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Nombre del dominio + panel */
+.dominio-nombre {
+    text-align: center;
+    font-size: 1.15rem;
+    color: rgba(255,255,255,.85);
+    padding: 14px 10px 8px;
+    letter-spacing: .01em;
+}
+.panel-nombre {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 8px;
+    background: rgba(0,0,0,.35);
+    color: rgba(255,255,255,.75);
+    font-size: .8rem;
+    margin-top: 6px;
+}
+
+/* Feed de panels */
+.panel-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    max-width: 720px;
+    margin: 18px auto 0;
+    padding: 0 4px;
+}
+
+/* -------------------- Panel (control card) -------------------- */
+
+.panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-lg);
+    padding: 10px;
+    box-shadow: var(--panel-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Display "pantalla" del control (encendido = amarillo, apagado = gris) */
+.display-pantalla {
+    background: var(--display-yellow);
+    color: var(--display-text);
+    border-radius: 8px;
+    padding: 10px 12px 14px;
+    box-shadow: inset 0 0 6px rgba(0,0,0,.35);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    min-height: 96px;
+}
+.display-pantalla.off {
+    background: var(--display-gray);
+}
+
+.display-status {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: .8rem;
+    font-weight: 500;
+    opacity: .85;
+}
+.display-status .left,
+.display-status .right {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.display-titulo {
+    /* Doto = pixel / dot-matrix (Google Fonts), fallback monospace */
+    font-family: "Doto", "Courier New", "Consolas", monospace;
+    font-weight: 700;
+    font-size: 1.3rem;
+    letter-spacing: .06em;
+    margin-top: 8px;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.canales-fila {
+    margin-top: 6px;
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+    flex-wrap: wrap;
+    min-height: 22px;
+}
+.canal-estado {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    font-size: .7rem;
+    font-weight: 700;
+    border-radius: 5px;
+    border: 1px solid rgba(0,0,0,.5);
+    color: rgba(0,0,0,.7);
+    background: rgba(0,0,0,0);
+    line-height: 1;
+}
+.canal-estado.on {
+    background: rgba(0,0,0,.10);
+}
+
+/* Botones del panel (uno por fila, ancho completo) */
+.tec-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.tec-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: var(--btn-bg);
+    color: var(--btn-text);
+    border: 1px solid var(--btn-border);
+    border-radius: 8px;
+    padding: 14px 12px;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    box-shadow: inset -1px -1px 1px 0 rgba(0,0,0,.08);
+    transition: background .12s, transform .06s;
+    font-family: inherit;
+    width: 100%;
+}
+.tec-btn:hover  { background: var(--btn-hover); }
+.tec-btn:active { transform: scale(.98); }
+.tec-btn i      { font-size: 1.1rem; color: #555; }
+
+/* -------------------- Toast -------------------- */
+
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(0,0,0,.85);
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 99px;
+    font-size: .85rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s, transform .2s;
+    z-index: 300;
+    box-shadow: var(--shadow-lg);
+}
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* -------------------- Overlay del sidebar (mobile) -------------------- */
+
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: var(--topbar-h) 0 0 0;
+    background: rgba(0,0,0,.5);
+    z-index: 15;
+}
+.sidebar-overlay.open { display: block; }
+
+/* -------------------- Responsive -------------------- */
+
+@media (max-width: 720px) {
+    :root { --sidebar-w: 240px; }
+
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: var(--topbar-h);
+        bottom: 0;
+        z-index: 25;
+        transform: translateX(-100%);
+        box-shadow: 6px 0 20px rgba(0,0,0,.4);
+    }
+    .sidebar.open { transform: translateX(0); }
+
+    .topbar { padding: 0 12px; gap: 8px; }
+    .topbar-action { padding: 8px 10px; font-size: 1.1rem; }
+    .topbar-logo { height: 26px; }
+
+    .content { padding: 16px 12px 32px; }
+
+    .dominio-nombre { font-size: 1rem; }
+}

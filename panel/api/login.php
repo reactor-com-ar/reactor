@@ -54,11 +54,21 @@ try {
         json_error('Usuario o contrasena incorrectos', 401);
     }
 
+    // Datos de alcance capturados al iniciar sesion: `dominio` es el que la
+    // cuenta tiene asignado EN ESE MOMENTO (usuarios.dominio) y es el que
+    // filtra toda la informacion del panel durante la sesion. Ver lib/sesion.php.
+    $cuenta = sessionCuentaDesdeDb((int) $row['id']);
+
     $usuarioPayload = [
-        'id'      => (int) $row['id'],
-        'usuario' => (string) $row['usuario'],
-        'nombre'  => (string) $row['nombre'],
-        'correo'  => (string) ($row['correo'] ?? ''),
+        'id'             => (int) $row['id'],
+        'usuario'        => (string) $row['usuario'],
+        'nombre'         => (string) $row['nombre'],
+        'correo'         => (string) ($row['correo'] ?? ''),
+        'dominio'        => $cuenta['dominio']        ?? null,
+        'dominio_nombre' => $cuenta['dominio_nombre'] ?? '',
+        'perfil'         => $cuenta['perfil']         ?? null,
+        'perfil_nombre'  => $cuenta['perfil_nombre']  ?? '',
+        'roles'          => $cuenta['roles']          ?? '',
     ];
 
     jwt_cookie_set(jwt_sign($usuarioPayload, JWT_TTL));

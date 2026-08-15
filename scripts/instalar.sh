@@ -134,16 +134,18 @@ if ! docker compose -p reactor up -d --build; then
     exit 1
 fi
 
-# --- Esperar que la app responda --------------------------------------------
+# --- Esperar que Apache responda --------------------------------------------
 # Aceptamos cualquier 2xx o 3xx: el cloud usa JWT con redirect a /login
 # cuando no hay cookie, asi que GET / responde 302, no 200. Lo que importa
-# es que Apache este sirviendo (no 000 / no 5xx).
+# es que Apache este sirviendo (no 000 / no 5xx). Pingueamos el vhost de
+# cloud como proxy de "Apache arriba"; si cloud responde, los otros dos
+# vhosts tambien estan levantados (mismo proceso Apache, mismo container).
 echo ""
-echo -e "${RED}==> Esperando a que la app responda en http://localhost:$APP_PORT ...${NC}"
+echo -e "${RED}==> Esperando a que Apache responda en http://localhost:$CLOUD_PORT ...${NC}"
 deadline=$(( $(date +%s) + 60 ))
 ok=false
 while [ "$(date +%s)" -lt "$deadline" ]; do
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:$APP_PORT/" 2>/dev/null || echo "000")
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:$CLOUD_PORT/" 2>/dev/null || echo "000")
     if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
         ok=true
         break
@@ -211,7 +213,9 @@ else
 fi
 
 echo ""
-echo -e "${GREEN}  Cloud   : http://localhost:$APP_PORT${NC}"
+echo -e "${GREEN}  Cloud   : http://localhost:$CLOUD_PORT${NC}"
+echo -e "${GREEN}  Panel   : http://localhost:$PANEL_PORT${NC}"
+echo -e "${GREEN}  App     : http://localhost:$APP_PORT${NC}"
 echo "  MySQL   : $DB_HOST:$DB_PORT  (externo / herramientas-mysql, db: $DB_NAME)"
 echo "  EMQX    : MQTT localhost:$MQTT_PORT / Dashboard http://localhost:$EMQX_DASHBOARD_PORT (admin / rf412F576xWUgvLs)"
 echo ""

@@ -43,6 +43,28 @@ Al tocar cualquier archivo bajo `panel/assets/css/` o `panel/assets/js/` hay
 que incrementar `panel/version.txt` o el browser sirve caché vieja
 (los assets se cargan con `?v=<contenido de version.txt>`).
 
+## Contexto de sesión y filtrado por dominio (obligatorio)
+
+Al iniciar sesión (`api/login.php`) se capturan de la cuenta los datos de
+alcance y se guardan como claims del JWT: `dominio` (columna
+`usuarios.dominio` **en ese momento**), `dominio_nombre`, `perfil`,
+`perfil_nombre` y `roles`.
+
+- `lib/sesion.php` expone `sessionContext()`, `sessionDominioId()` y
+  `requireDominioId()`. Los endpoints usan **`requireDominioId()`** y
+  filtran **todos** sus queries por ese dominio — incluido el lookup por
+  id, para que nadie lea ni escriba un registro de otro dominio pasando
+  un id a mano.
+- Un token emitido por `cloud/` no trae estos claims (cloud no los firma).
+  `sessionContext()` cae a la base y los resuelve desde `usuarios`; el
+  campo `origen` dice si vinieron del token (`token`) o de la BD (`db`).
+- El front recibe el contexto inyectado por `index.php` en
+  `<script id="panel-sesion">` y lo lee en `app.js` como `sesion`. Es sólo
+  para mostrar (ej. de qué dominio es el listado) — **el filtro real
+  siempre lo aplica el backend**.
+- `dominio = null` significa "cuenta sin dominio asignado", **no** "ver
+  todo": `requireDominioId()` corta con 409.
+
 ## Módulos
 
 El shell está pensado para poblarse por módulos. Cada nuevo módulo se agrega

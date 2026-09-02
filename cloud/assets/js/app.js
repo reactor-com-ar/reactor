@@ -6,7 +6,6 @@
     const title            = document.getElementById('view-title');
     const navItems         = document.querySelectorAll('.nav-item[data-route]');
     const navGroupToggles  = document.querySelectorAll('.nav-group-toggle');
-    const btnRefresh       = document.getElementById('btn-refresh');
     const btnUser          = document.getElementById('btn-user');
     const userDropdown     = document.getElementById('user-dropdown');
     const btnLogout        = document.getElementById('btn-logout');
@@ -17,6 +16,7 @@
 
     let pendingDispositivosDominioFilter = null;
     let pendingSignalsDeviceFilter = null;
+    let pendingPerfilesUsuarioFilter = null;
 
     // Cleanup de la vista activa (timers, listeners globales). navigate() lo invoca
     // antes de renderizar la nueva vista; cada render que necesite cleanup lo asigna
@@ -82,8 +82,6 @@
     }
 
     /* ---------- Topbar ---------- */
-    btnRefresh.addEventListener('click', () => { navigate(); toast('Actualizado'); });
-
     btnUser.addEventListener('click', e => {
         e.stopPropagation();
         userDropdown.classList.toggle('open');
@@ -178,14 +176,25 @@
     // Construye los items estándar del menú contextual de fila (ABM.md §1.3).
     // `opts` define qué acciones estándar incluir (view/edit/delete) y permite
     // sumar items extra del módulo. Cada item: { act, label, icon, danger?, onSelect }.
+    // Orden resultante:
+    //   Consultar · extraAfterView · Editar · --- · extra · --- · Eliminar
+    // `extraAfterView` va pegado a Consultar (sin divisor) para acciones que son
+    // otra forma de "ver" el registro (ej.: "Listar perfiles" en Usuarios).
+    // Eliminar siempre queda último y siempre precedido por la línea separadora.
     function standardRowMenuItems(opts) {
         const items = [];
-        if (opts.view)   items.push({ act: 'view',   label: 'Consultar', icon: 'fa-eye',    onSelect: opts.onView });
-        if (opts.edit)   items.push({ act: 'edit',   label: 'Editar',    icon: 'fa-pencil', onSelect: opts.onEdit });
-        if (opts.delete) items.push({ act: 'delete', label: 'Eliminar',  icon: 'fa-trash',  danger: true, onSelect: opts.onDelete });
+        if (opts.view) items.push({ act: 'view', label: 'Consultar', icon: 'fa-eye', onSelect: opts.onView });
+        if (Array.isArray(opts.extraAfterView) && opts.extraAfterView.length) {
+            opts.extraAfterView.forEach(it => items.push(it));
+        }
+        if (opts.edit) items.push({ act: 'edit', label: 'Editar', icon: 'fa-pencil', onSelect: opts.onEdit });
         if (Array.isArray(opts.extra) && opts.extra.length) {
             if (items.length) items.push({ divider: true });
             opts.extra.forEach(it => items.push(it));
+        }
+        if (opts.delete) {
+            if (items.length) items.push({ divider: true });
+            items.push({ act: 'delete', label: 'Eliminar', icon: 'fa-trash', danger: true, onSelect: opts.onDelete });
         }
         return items;
     }
@@ -393,7 +402,7 @@
 
                 <div class="table-card dash-chart-card" id="signals-chart-card">
                     <div class="dash-table-header">
-                        <span>📈 Señales por minuto · últimas 24 h</span>
+                        <span><i class="fa-solid fa-chart-line"></i> Señales por minuto · últimas 24 h</span>
                         <div class="dash-live-controls">
                             <span class="dash-chart-summary" id="signals-chart-summary">
                                 <span class="dash-chart-metric">
@@ -426,13 +435,13 @@
                 <div class="dash-grid">
                     <div class="table-card">
                         <div class="dash-table-header">
-                            <span>📋 Últimos registros</span>
+                            <span><i class="fa-solid fa-clipboard-list"></i> Últimos registros</span>
                             <div class="dash-live-controls">
                                 <button type="button" class="btn-icon-sm" id="reg-card-refresh"
                                         title="Refrescar" aria-label="Refrescar registros">
                                     <i class="fa-solid fa-arrows-rotate"></i>
                                 </button>
-                                <a href="#/registros" class="dash-ver-mas">Ver todos →</a>
+                                <a href="#/registros" class="dash-ver-mas">Ver todos <i class="fa-solid fa-arrow-right"></i></a>
                             </div>
                         </div>
                         <div id="reg-card-body">${registrosDashboardTableBody(ultimosRegistros)}</div>
@@ -440,7 +449,7 @@
 
                     <div class="table-card dash-live-card" id="live-feed-card">
                         <div class="dash-table-header">
-                            <span>📡 Últimas señales</span>
+                            <span><i class="fa-solid fa-signal-stream"></i> Últimas señales</span>
                             <div class="dash-live-controls">
                                 <span class="dash-live-status" id="live-feed-status">
                                     <span class="live-dot"></span> En vivo · 500 ms
@@ -449,7 +458,7 @@
                                         title="Pausar" aria-label="Pausar feed">
                                     <i class="fa-solid fa-pause"></i>
                                 </button>
-                                <a href="#/signals" class="dash-ver-mas">Ver todas →</a>
+                                <a href="#/signals" class="dash-ver-mas">Ver todas <i class="fa-solid fa-arrow-right"></i></a>
                             </div>
                         </div>
                         <div id="live-feed-body"><div class="table-empty">Esperando señales…</div></div>
@@ -833,7 +842,7 @@
                 ${moduleHeader('Dispositivos', 'Inventario de dispositivos conectados a la plataforma, su dominio asignado y su última actividad.')}
                 ${abmToolbar({
                     idPrefix:         'dev',
-                    quickPlaceholder: 'Buscar UID, nombre, tipo, ubicación…',
+                    quickPlaceholder: 'Buscar UID, serial, nombre, tipo, ubicación…',
                     newLabel:         'Nuevo dispositivo',
                 })}
                 <div class="table-card" id="dev-table"></div>
@@ -851,7 +860,7 @@
         }
 
         const rows = dispositivos.map(d => `
-            <tr data-id="${d.id}">
+            <tr class="row-clickable" data-id="${d.id}">
                 <td><span class="td-id">#${d.id}</span></td>
                 <td><span class="td-id">${escape(d.uid)}</span></td>
                 <td class="td-nombre">${escape(d.nombre)}</td>
@@ -909,7 +918,7 @@
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
                 if (state.estado  && d.estado !== state.estado) return false;
                 if (state.dominio && String(d.dominio_id) !== state.dominio) return false;
-                if (q && !(d.uid + ' ' + d.nombre + ' ' + d.tipo + ' ' + (d.dominio_nombre || '') + ' ' + (d.ubicacion || ''))
+                if (q && !(d.uid + ' ' + (d.serial || '') + ' ' + d.nombre + ' ' + d.tipo + ' ' + (d.dominio_nombre || '') + ' ' + (d.ubicacion || ''))
                     .toLowerCase().includes(q)) return false;
                 return true;
             });
@@ -941,6 +950,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(d), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openDeviceViewModal(d));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(d), { x: e.clientX, y: e.clientY });
@@ -1395,7 +1406,7 @@
         }
 
         const rows = chips.map(c => `
-            <tr data-id="${c.id}">
+            <tr class="row-clickable" data-id="${c.id}">
                 <td><span class="td-id">#${c.id}</span></td>
                 <td class="td-nombre">${escape(c.operador)}</td>
                 <td>${escape(c.numero)}</td>
@@ -1481,6 +1492,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(c), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openChipViewModal(c));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
@@ -1856,7 +1869,7 @@
         }
 
         const rows = transceptores.map(t => `
-            <tr data-id="${t.id}">
+            <tr class="row-clickable" data-id="${t.id}">
                 <td><span class="td-id">#${t.id}</span></td>
                 <td class="td-nombre">${escape(t.nombre ?? '—')}</td>
                 <td>${escape(t.host ?? '—')}</td>
@@ -1933,6 +1946,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(t), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openTransceptorViewModal(t));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(t), { x: e.clientX, y: e.clientY });
@@ -2253,7 +2268,7 @@
         }
 
         const rows = dominios.map(d => `
-            <tr data-id="${d.id}">
+            <tr class="row-clickable" data-id="${d.id}">
                 <td><span class="td-id">#${d.id}</span></td>
                 <td class="td-nombre">${escape(d.nombre)}</td>
                 <td>${escape(d.descripcion ?? '—')}</td>
@@ -2330,6 +2345,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(dom), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openDomainViewModal(dom));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(dom), { x: e.clientX, y: e.clientY });
@@ -2692,7 +2709,7 @@
         }
 
         const rows = usuarios.map(u => `
-            <tr data-id="${u.id}">
+            <tr class="row-clickable" data-id="${u.id}">
                 <td><span class="td-id">#${u.id}</span></td>
                 <td class="td-nombre">${escape(u.nombre)}</td>
                 <td>${escape(u.email)}</td>
@@ -2768,6 +2785,10 @@
                 view:   true, onView:   () => openUserViewModal(u),
                 edit:   true, onEdit:   () => openUserModal(u),
                 delete: true, onDelete: () => confirmDeleteUser(u),
+                extraAfterView: [
+                    { act: 'go-profiles', label: 'Listar perfiles', icon: 'fa-id-badge',
+                      onSelect: () => { pendingPerfilesUsuarioFilter = u.id; window.location.hash = '#/profiles'; } },
+                ],
             });
         }
         function wireRowActions() {
@@ -2779,6 +2800,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(u), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openUserViewModal(u));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(u), { x: e.clientX, y: e.clientY });
@@ -2936,7 +2959,14 @@
             perfLoaded = true;
             try {
                 const data = await api('profiles.php?usuario_id=' + encodeURIComponent(usr.id));
-                perfBody.innerHTML = perfilesUsuarioTableBody(data.perfiles || []);
+                const perfiles = data.perfiles || [];
+                perfBody.innerHTML = perfilesUsuarioTableBody(perfiles);
+                // Click sobre un perfil -> Consultar perfil, apilado sobre este modal.
+                perfBody.querySelectorAll('tbody tr[data-id]').forEach(tr => {
+                    const p = perfiles.find(x => x.id === +tr.dataset.id);
+                    if (!p) return;
+                    tr.addEventListener('click', () => openProfileViewModal(p));
+                });
             } catch (e) {
                 perfLoaded = false;
                 perfBody.innerHTML = errorBox(e.message);
@@ -2956,7 +2986,7 @@
             return `<div class="table-empty">Este usuario no tiene perfiles asociados.</div>`;
         }
         const rows = perfiles.map(p => `
-            <tr>
+            <tr class="row-clickable" data-id="${p.id}">
                 <td><span class="td-id">#${p.id}</span></td>
                 <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
                 <td>${perfilRolBadge(p.rol)}</td>
@@ -3169,7 +3199,7 @@
 
     function perfilesDefaults() {
         return {
-            codigo: '', texto: '', dominio: '', rol: '',
+            codigo: '', texto: '', usuario: '', dominio: '', rol: '',
             orden:  'id', dir: 'desc', limit: 100,
         };
     }
@@ -3186,6 +3216,13 @@
             const usuarios  = usrData.usuarios;
             const dominios  = domData.dominios;
             const state     = perfilesDefaults();
+
+            // "Listar perfiles" desde el menú contextual de Usuarios deja el id
+            // del usuario acá antes de navegar a #/perfiles.
+            if (pendingPerfilesUsuarioFilter != null) {
+                state.usuario = String(pendingPerfilesUsuarioFilter);
+                pendingPerfilesUsuarioFilter = null;
+            }
 
             root.innerHTML = `
                 ${moduleHeader('Perfiles', 'Relación entre usuarios y dominios: qué rol tiene cada usuario sobre cada dominio.')}
@@ -3223,7 +3260,7 @@
         }
 
         const rows = perfiles.map(p => `
-            <tr data-id="${p.id}">
+            <tr class="row-clickable" data-id="${p.id}">
                 <td><span class="td-id">#${p.id}</span></td>
                 <td>
                     <div class="td-nombre">${escape(p.usuario_nombre)}</div>
@@ -3272,6 +3309,7 @@
             let filtered = allPerfiles.filter(p => {
                 if (Number.isFinite(codigo) && p.id !== codigo) return false;
                 if (state.rol     && p.rol !== state.rol) return false;
+                if (state.usuario && String(p.usuario_id) !== state.usuario) return false;
                 if (state.dominio && String(p.dominio_id) !== state.dominio) return false;
                 if (q && !(p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
                     .toLowerCase().includes(q)) return false;
@@ -3305,6 +3343,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(p), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openProfileViewModal(p));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(p), { x: e.clientX, y: e.clientY });
@@ -3318,13 +3358,16 @@
             quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
         });
 
-        btnFilt.addEventListener('click', () => openProfilesFiltersModal(state, allDominios, applyAndRender));
+        btnFilt.addEventListener('click', () => openProfilesFiltersModal(state, allUsuarios, allDominios, applyAndRender));
         btnNew.addEventListener('click',  () => openProfileModal(null, allUsuarios, allDominios));
 
         applyAndRender();
     }
 
-    function openProfilesFiltersModal(state, allDominios, onApply) {
+    function openProfilesFiltersModal(state, allUsuarios, allDominios, onApply) {
+        const usrOpts = ['<option value="">Todos los usuarios</option>'].concat(
+            allUsuarios.map(u => `<option value="${u.id}"${String(u.id) === state.usuario ? ' selected' : ''}>${escape(u.nombre)} (${escape(u.email)})</option>`)
+        ).join('');
         const domOpts = ['<option value="">Todos los dominios</option>'].concat(
             allDominios.map(d => `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`)
         ).join('');
@@ -3348,6 +3391,10 @@
                     <input type="search" id="prf-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
                 </div>
                 <div class="form-group">
+                    <label for="prf-fm-usuario">Usuario</label>
+                    <select id="prf-fm-usuario">${usrOpts}</select>
+                </div>
+                <div class="form-group">
                     <label for="prf-fm-dominio">Dominio</label>
                     <select id="prf-fm-dominio">${domOpts}</select>
                 </div>
@@ -3355,6 +3402,7 @@
                     <label for="prf-fm-rol">Rol</label>
                     <select id="prf-fm-rol">${rolOpts}</select>
                 </div>
+                <div class="form-group"></div>
                 <div class="form-group">
                     <label for="prf-fm-limit">Límite</label>
                     <input type="number" id="prf-fm-limit" min="1" max="1000" value="${state.limit}">
@@ -3379,6 +3427,7 @@
             onApply(modal) {
                 state.codigo  = modal.querySelector('#prf-fm-codigo').value.trim();
                 state.texto   = modal.querySelector('#prf-fm-texto').value.trim();
+                state.usuario = modal.querySelector('#prf-fm-usuario').value;
                 state.dominio = modal.querySelector('#prf-fm-dominio').value;
                 state.rol     = modal.querySelector('#prf-fm-rol').value;
                 state.orden   = modal.querySelector('#prf-fm-orden').value;
@@ -3390,6 +3439,7 @@
                 const d = perfilesDefaults();
                 modal.querySelector('#prf-fm-codigo').value  = d.codigo;
                 modal.querySelector('#prf-fm-texto').value   = d.texto;
+                modal.querySelector('#prf-fm-usuario').value = d.usuario;
                 modal.querySelector('#prf-fm-dominio').value = d.dominio;
                 modal.querySelector('#prf-fm-rol').value     = d.rol;
                 modal.querySelector('#prf-fm-orden').value   = d.orden;
@@ -3916,7 +3966,7 @@
         }
 
         const rows = senales.map(s => `
-            <tr data-id="${s.id}">
+            <tr class="row-clickable" data-id="${s.id}">
                 <td><span class="td-id">#${s.id}</span></td>
                 <td><span class="td-id">${formatDate(s.fecha)}</span></td>
                 <td>
@@ -4033,6 +4083,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(s), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openSignalViewModal(s));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(s), { x: e.clientX, y: e.clientY });
@@ -4390,7 +4442,7 @@
         }
 
         const rows = registros.map(r => `
-            <tr data-id="${r.id}">
+            <tr class="row-clickable" data-id="${r.id}">
                 <td><span class="td-id">#${r.id}</span></td>
                 <td><span class="td-id">${formatDate(r.fecha)}</span></td>
                 <td>
@@ -4499,6 +4551,8 @@
                     e.stopPropagation();
                     openRowMenu(rowMenuFor(r), e.currentTarget);
                 });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openRegistroViewModal(r));
                 tr.addEventListener('contextmenu', e => {
                     e.preventDefault();
                     openRowMenu(rowMenuFor(r), { x: e.clientX, y: e.clientY });
@@ -4678,13 +4732,15 @@
     /* ---------- Views: Herramientas ---------- */
     // Orden alfabético por título (crear_modulo_herramientas). Cuando agregues
     // una tarjeta nueva, insertala en el lugar que le corresponda por título.
+    // `icon` es el nombre del ícono FontAwesome (sin el prefijo `fa-solid`),
+    // no un emoji: el emoji renderiza distinto en cada SO y no hereda el color.
     const toolsCatalog = [
-        { icon: '🧩', title: 'Editor de parámetros',   desc: 'Variables runtime (variable / valor) que el resto del sistema lee.', action: abrirEditorParametros },
-        { icon: '🗄️', title: 'Explorador DB',           desc: 'Recorré las tablas de la base del entorno actual, ojeá su estructura y los últimos registros.', action: abrirExploradorDB },
-        { icon: '📁', title: 'Explorador S3',           desc: 'Navegá, subí, descargá y eliminá carpetas y archivos del bucket del entorno actual.', action: abrirExploradorS3 },
-        { icon: '📜', title: 'Migrador DB',            desc: 'Aplicá las migraciones pendientes de cloud/sql/migrations/ contra la BD del entorno actual.', action: abrirMigraciones },
-        { icon: '⏰', title: 'Programador de tareas',   desc: 'Administrá los procesos automáticos programados (tabla tareas) y revisá el historial + log en vivo de cada ejecución.', action: abrirTareas },
-        { icon: '📰', title: 'Visor de sucesos',       desc: 'Recorré el log de actividad (tabla sucesos_log) que los distintos módulos van registrando al trabajar.', action: abrirVisorSucesos },
+        { icon: 'fa-puzzle-piece', title: 'Editor de parámetros',   desc: 'Variables runtime (variable / valor) que el resto del sistema lee.', action: abrirEditorParametros },
+        { icon: 'fa-database',     title: 'Explorador DB',           desc: 'Recorré las tablas de la base del entorno actual, ojeá su estructura y los últimos registros.', action: abrirExploradorDB },
+        { icon: 'fa-folder-open',  title: 'Explorador S3',           desc: 'Navegá, subí, descargá y eliminá carpetas y archivos del bucket del entorno actual.', action: abrirExploradorS3 },
+        { icon: 'fa-scroll',       title: 'Migrador DB',            desc: 'Aplicá las migraciones pendientes de cloud/sql/migrations/ contra la BD del entorno actual.', action: abrirMigraciones },
+        { icon: 'fa-clock',        title: 'Programador de tareas',   desc: 'Administrá los procesos automáticos programados (tabla tareas) y revisá el historial + log en vivo de cada ejecución.', action: abrirTareas },
+        { icon: 'fa-newspaper',    title: 'Visor de sucesos',       desc: 'Recorré el log de actividad (tabla sucesos_log) que los distintos módulos van registrando al trabajar.', action: abrirVisorSucesos },
     ];
 
     function renderTools(root) {
@@ -4692,7 +4748,7 @@
             <div class="tile-grid">
                 ${toolsCatalog.map((t, i) => `
                     <button type="button" class="tile-card" data-tool-idx="${i}">
-                        <span class="tile-icon">${t.icon}</span>
+                        <span class="tile-icon"><i class="fa-solid ${t.icon}"></i></span>
                         <span class="tile-title">${escape(t.title)}</span>
                         <span class="tile-desc">${escape(t.desc)}</span>
                     </button>
@@ -4741,7 +4797,7 @@
             <div class="modal" role="dialog" aria-modal="true" style="max-width:880px">
                 <div class="modal-header">
                     <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-size:1.2rem">🧩</span>
+                        <i class="fa-solid fa-puzzle-piece" style="font-size:1.2rem"></i>
                         <span>Editor de parámetros</span>
                         <span id="paramResumen" class="modal-subtitle"></span>
                     </div>
@@ -4752,7 +4808,7 @@
                         <div class="toolbar-left" style="gap:8px;flex-wrap:wrap">
                             <div class="search-wrap">
                                 <input class="search-input" type="search" id="paramSearch"
-                                       placeholder="🔍 Buscar variable, valor, comentario…">
+                                       placeholder="Buscar variable, valor, comentario…">
                                 <button class="search-clear" id="paramSearchClear" style="display:none">×</button>
                             </div>
                             <button class="btn btn-ghost btn-sm" data-act="refresh" title="Refrescar">
@@ -4858,7 +4914,7 @@
             renderParametros(_paramFiltroAplicado());
             actualizarResumenParametros();
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
 
@@ -4956,7 +5012,7 @@
             <div class="modal" role="dialog" aria-modal="true" style="max-width:560px">
                 <div class="modal-header">
                     <div class="modal-title" style="display:flex;align-items:center;gap:8px">
-                        <span style="font-size:1.2rem">🧩</span>
+                        <i class="fa-solid fa-puzzle-piece" style="font-size:1.2rem"></i>
                         <span>${isEdit ? 'Editar parámetro' : 'Nuevo parámetro'}</span>
                     </div>
                     <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
@@ -5112,7 +5168,7 @@
     //   GET  api/migraciones_get.php?nombre=X  -> preview del contenido SQL
     //   POST api/migraciones_apply.php {nombre} -> aplicar una migración
     //
-    // En producción el confirm se refuerza (título con ⚠, copy con
+    // En producción el confirm se refuerza (título con fa-triangle-exclamation, copy con
     // "(PRODUCCIÓN)", label "Aplicar en prod", danger:true). La aplicación
     // masiva es secuencial: si una falla, corta el loop y toastea
     // "corrida parcial".
@@ -5134,7 +5190,7 @@
             <div class="modal" role="dialog" aria-modal="true" style="max-width:960px">
                 <div class="modal-header">
                     <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-size:1.2rem">📜</span>
+                        <i class="fa-solid fa-scroll" style="font-size:1.2rem"></i>
                         <span>Migrador DB</span>
                         <span class="badge badge-info" id="migrDbName" style="font-family:monospace">—</span>
                         <span class="badge" id="migrEnvBadge" style="font-family:monospace">—</span>
@@ -5237,7 +5293,7 @@
             renderMigraciones(_migradorCache);
             actualizarResumenMigraciones();
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="6" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="table-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
             actualizarResumenMigraciones(0, 0, 0, 0);
         } finally {
             _migradorCargando = false;
@@ -5262,7 +5318,7 @@
         tbody.innerHTML = ordenadas.map(m => {
             let badge;
             if (m.estado === 'aplicada' && m.hash_drift) {
-                badge = `<span class="badge badge-warn" title="El archivo cambió después de aplicarse">⚠ drift</span>`;
+                badge = `<span class="badge badge-warn" title="El archivo cambió después de aplicarse"><i class="fa-solid fa-triangle-exclamation"></i> drift</span>`;
             } else if (m.estado === 'aplicada') {
                 badge = `<span class="badge badge-success">aplicada</span>`;
             } else {
@@ -5305,9 +5361,11 @@
         const drift     = _migradorCache.filter(m => m.hash_drift).length;
 
         const resumen = _migradorCtx.listado.querySelector('#migrResumen');
+        // innerHTML (no textContent) para poder meter el ícono de aviso del
+        // drift. Todo lo interpolado son enteros de `.length`, no texto libre.
         let txt = `${total} archivo${total === 1 ? '' : 's'} · ${aplicadas} aplicada${aplicadas === 1 ? '' : 's'} · ${pendientes} pendiente${pendientes === 1 ? '' : 's'}`;
-        if (drift > 0) txt += ` · ⚠ ${drift} con drift de hash`;
-        resumen.textContent = txt;
+        if (drift > 0) txt += ` · <i class="fa-solid fa-triangle-exclamation"></i> ${drift} con drift de hash`;
+        resumen.innerHTML = txt;
 
         const btn = _migradorCtx.listado.querySelector('#migrBtnAplicarPendientes');
         if (pendientes === 0) {
@@ -5335,7 +5393,7 @@
             <div class="modal modal-wide" role="dialog" aria-modal="true">
                 <div class="modal-header">
                     <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-size:1.2rem">📜</span>
+                        <i class="fa-solid fa-scroll" style="font-size:1.2rem"></i>
                         <span>Migración</span>
                         <span class="modal-subtitle"><code style="font-family:monospace" id="migrPreviewNombre">${escape(nombre)}</code></span>
                     </div>
@@ -5379,14 +5437,15 @@
             const registro = _migradorCache.find(m => m.nombre === nombre);
             if (registro && registro.estado === 'pendiente') btnApli.style.display = '';
         } catch (e) {
-            ta.value = '✗ ' + e.message;
+            // `ta` es un <textarea>: sólo texto plano, no admite el <i> de FA.
+            ta.value = 'Error: ' + e.message;
         }
     }
 
     function aplicarMigracionConConfirmacion(nombre) {
         const esProd  = _migradorEnv === 'production';
         const marker  = esProd ? ' (PRODUCCIÓN)' : '';
-        const titulo  = esProd ? '⚠ Aplicar en PRODUCCIÓN' : 'Aplicar migración';
+        const titulo  = esProd ? 'Aplicar en PRODUCCIÓN' : 'Aplicar migración';
         const mensaje = `Vas a aplicar «${nombre}» contra la base ${_migradorDatabase || '?'}${marker}. `
                       + `Las sentencias DDL no se pueden deshacer. ¿Continuar?`;
         confirmarMigrador(titulo, mensaje, esProd ? 'Aplicar en prod' : 'Aplicar', esProd, () => {
@@ -5414,7 +5473,7 @@
 
         const esProd  = _migradorEnv === 'production';
         const marker  = esProd ? ' (PRODUCCIÓN)' : '';
-        const titulo  = esProd ? '⚠ Aplicar en PRODUCCIÓN' : 'Aplicar migraciones pendientes';
+        const titulo  = esProd ? 'Aplicar en PRODUCCIÓN' : 'Aplicar migraciones pendientes';
         const mensaje = `Vas a aplicar ${pendientes.length} migración(es) contra la base `
                       + `${_migradorDatabase || '?'}${marker} en orden alfabético. `
                       + `Si una falla, se detiene la corrida y las anteriores quedan aplicadas. ¿Continuar?`;
@@ -5458,9 +5517,12 @@
         const backdrop = document.createElement('div');
         backdrop.className = 'confirm-backdrop';
         const cls = danger ? 'btn-danger' : 'btn-primary';
+        // El titulo va escapado, asi que el icono de aviso se antepone acá:
+        // `danger` es true exactamente cuando el destino es produccion.
+        const icono = danger ? '<i class="fa-solid fa-triangle-exclamation"></i> ' : '';
         backdrop.innerHTML = `
             <div class="confirm-box">
-                <div class="confirm-title">${escape(titulo)}</div>
+                <div class="confirm-title">${icono}${escape(titulo)}</div>
                 <div class="confirm-msg">${escape(mensaje)}</div>
                 <div class="confirm-actions">
                     <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
@@ -5550,7 +5612,7 @@
             <div class="modal" role="dialog" aria-modal="true" style="max-width:1100px">
                 <div class="modal-header">
                     <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-size:1.2rem">📰</span>
+                        <i class="fa-solid fa-newspaper" style="font-size:1.2rem"></i>
                         <span>Visor de sucesos</span>
                         <span id="sucesosResumen" class="modal-subtitle"></span>
                     </div>
@@ -5560,7 +5622,7 @@
                     <div class="toolbar" style="margin-bottom:0">
                         <div class="toolbar-left" style="gap:8px;flex-wrap:wrap">
                             <div class="search-wrap">
-                                <input class="search-input" type="search" id="sucesosSearch" placeholder="🔍 Buscar origen, detalle…">
+                                <input class="search-input" type="search" id="sucesosSearch" placeholder="Buscar origen, detalle…">
                                 <button class="search-clear" id="sucesosSearchClear" style="display:none">×</button>
                             </div>
                             <div id="sucesosTipoChips" style="display:flex;gap:6px;flex-wrap:wrap">
@@ -5711,7 +5773,7 @@
             }
             renderSucesos(_sucesosCache);
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
 
@@ -5753,7 +5815,7 @@
             <div class="modal" role="dialog" aria-modal="true" style="max-width:780px">
                 <div class="modal-header">
                     <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-size:1.2rem">📰</span>
+                        <i class="fa-solid fa-newspaper" style="font-size:1.2rem"></i>
                         <span>Suceso</span>
                         <span class="modal-subtitle">#${s.id}</span>
                     </div>
@@ -5864,7 +5926,7 @@
           <div class="modal db-exp-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
               <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="font-size:1.2rem">🗄️</span>
+                <i class="fa-solid fa-database" style="font-size:1.2rem"></i>
                 <span>Explorador DB</span>
                 <span class="badge badge-info" id="dbExpDbName" style="font-family:monospace">—</span>
                 <span class="badge" id="dbExpEnvBadge" style="font-family:monospace">—</span>
@@ -5994,7 +6056,7 @@
             dbExpRenderTablas();
         } catch (e) {
             _dbExpBackdrop.querySelector('#dbExpTablesTbody').innerHTML =
-                `<tr><td colspan="4" class="db-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+                `<tr><td colspan="4" class="db-exp-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
     function dbExpRenderTablas() {
@@ -6048,7 +6110,7 @@
             dbExpRenderColumnas(data.columnas || []);
         } catch (e) {
             _dbExpBackdrop.querySelector('#dbExpColsTbody').innerHTML =
-                `<tr><td colspan="7" class="db-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+                `<tr><td colspan="7" class="db-exp-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
     function dbExpRenderColumnas(cols) {
@@ -6085,7 +6147,7 @@
             dbExpPintarRegistros();
         } catch (e) {
             _dbExpBackdrop.querySelector('#dbExpRecsTbody').innerHTML =
-                `<tr><td class="db-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+                `<tr><td class="db-exp-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
     function dbExpPintarRegistros() {
@@ -6158,13 +6220,13 @@
         const puedeNull = dbExpNullableCols.includes(col);
         const cur = original == null ? '' : String(original);
         td.classList.add('db-exp-cell-editing');
-        const nullBtn = puedeNull ? `<button class="btn-icon-sm" data-act="null" title="NULL">⊘</button>` : '';
+        const nullBtn = puedeNull ? `<button class="btn-icon-sm" data-act="null" title="NULL"><i class="fa-solid fa-ban"></i></button>` : '';
         td.innerHTML = `
             <div class="db-exp-edit-wrap">
               <input class="db-exp-edit-input" value="${escape(cur)}">
               <div class="db-exp-edit-actions">
-                <button class="btn-icon-sm" data-act="save" title="Guardar">✓</button>
-                <button class="btn-icon-sm" data-act="cancel" title="Cancelar">✗</button>
+                <button class="btn-icon-sm" data-act="save" title="Guardar"><i class="fa-solid fa-check"></i></button>
+                <button class="btn-icon-sm" data-act="cancel" title="Cancelar"><i class="fa-solid fa-xmark"></i></button>
                 ${nullBtn}
               </div>
             </div>`;
@@ -6222,7 +6284,7 @@
           <div class="modal s3-exp-modal" role="dialog" aria-modal="true">
             <div class="modal-header">
               <div class="modal-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="font-size:1.2rem">☁️</span>
+                <i class="fa-solid fa-folder-open" style="font-size:1.2rem"></i>
                 <span>Explorador S3</span>
                 <span class="badge badge-info" id="s3ExpBucket" style="font-family:monospace">—</span>
               </div>
@@ -6315,7 +6377,7 @@
             s3ExpRenderTabla(s3ExpPrefix);
         } catch (e) {
             _s3ExpBackdrop.querySelector('#s3ExpTbody').innerHTML =
-                `<tr><td colspan="5" class="s3-exp-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+                `<tr><td colspan="5" class="s3-exp-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         } finally {
             s3ExpCargando = false;
         }
@@ -6489,7 +6551,7 @@
           <div class="modal" role="dialog" aria-modal="true" style="max-width:1080px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden">
             <div class="modal-header" style="flex-shrink:0">
               <div class="modal-title" style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:1.2rem">⏰</span>
+                <i class="fa-solid fa-clock" style="font-size:1.2rem"></i>
                 <span>Programador de tareas</span>
               </div>
               <button class="btn-icon-sm" data-act="close">×</button>
@@ -6566,7 +6628,7 @@
             tareasCache = data.tareas || [];
             renderTareas(tareasCache);
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
     function tareaBadgeEstado(estado) {
@@ -6663,7 +6725,7 @@
         bd.innerHTML = `
           <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
             <div class="modal-header">
-              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><span style="font-size:1.2rem">⏰</span><span>${isEdit ? 'Editar tarea' : 'Nueva tarea'}</span></div>
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><i class="fa-solid fa-clock" style="font-size:1.2rem"></i><span>${isEdit ? 'Editar tarea' : 'Nueva tarea'}</span></div>
               <button class="btn-icon-sm" data-act="close">×</button>
             </div>
             <div class="modal-body">
@@ -6728,7 +6790,9 @@
             const sel = _tareasFormBackdrop.querySelector('#formTareaScript');
             let opts = `<option value="">— elegí un script —</option>` + scripts.map(s => `<option value="${escape(s)}" ${s === actual ? 'selected' : ''}>${escape(s)}</option>`).join('');
             if (actual && !scripts.includes(actual)) {
-                opts += `<option value="${escape(actual)}" selected>⚠️ ${escape(actual)} (no está en cloud/jobs/)</option>`;
+                // Un <option> es texto plano: no admite el <i> de FontAwesome,
+                // asi que el aviso va redactado en la propia etiqueta.
+                opts += `<option value="${escape(actual)}" selected>${escape(actual)} — falta: no está en cloud/jobs/</option>`;
             }
             sel.innerHTML = opts;
         } catch (e) {
@@ -6782,7 +6846,7 @@
         bd.innerHTML = `
           <div class="modal" role="dialog" aria-modal="true" style="max-width:1000px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden">
             <div class="modal-header" style="flex-shrink:0">
-              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><span style="font-size:1.2rem">📜</span><span>Ejecuciones de ${escape(ejecucionesTareaSel.nombre)}</span></div>
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><i class="fa-solid fa-scroll" style="font-size:1.2rem"></i><span>Ejecuciones de ${escape(ejecucionesTareaSel.nombre)}</span></div>
               <button class="btn-icon-sm" data-act="close">×</button>
             </div>
             <div class="modal-body" style="gap:12px;flex:1;overflow:hidden;min-height:0;display:flex;flex-direction:column">
@@ -6842,7 +6906,7 @@
             ejecucionesCache = data.ejecuciones || [];
             renderEjecuciones(ejecucionesCache);
         } catch (e) {
-            tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger)">✗ ${escape(e.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty" style="color:var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> ${escape(e.message)}</td></tr>`;
         }
     }
     function renderEjecuciones(rows) {
@@ -6914,7 +6978,7 @@
         bd.innerHTML = `
           <div class="modal" role="dialog" aria-modal="true" style="max-width:960px">
             <div class="modal-header">
-              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><span style="font-size:1.2rem">🖥️</span><span>Log ejecución #${ejecucionId}</span><span class="badge badge-info" id="terminalBadge">corriendo</span></div>
+              <div class="modal-title" style="display:flex;align-items:center;gap:8px"><i class="fa-solid fa-desktop" style="font-size:1.2rem"></i><span>Log ejecución #${ejecucionId}</span><span class="badge badge-info" id="terminalBadge">corriendo</span></div>
               <button class="btn-icon-sm" data-act="close">×</button>
             </div>
             <div class="modal-body"><pre id="terminalOutput" class="terminal-live"></pre></div>
@@ -6993,7 +7057,7 @@
             </div>`;
         bd.innerHTML = `
           <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
-            <div class="modal-header"><div class="modal-title" style="display:flex;align-items:center;gap:8px"><span>🧮</span><span>Constructor de cron</span></div><button class="btn-icon-sm" data-act="close">×</button></div>
+            <div class="modal-header"><div class="modal-title" style="display:flex;align-items:center;gap:8px"><i class="fa-solid fa-calculator"></i><span>Constructor de cron</span></div><button class="btn-icon-sm" data-act="close">×</button></div>
             <div class="modal-body">
               ${campoRow('min', 'Minuto (0-59)',  partes[0])}
               ${campoRow('hor', 'Hora (0-23)',    partes[1])}
@@ -7110,7 +7174,7 @@
         root.innerHTML = `
             <div class="table-card">
                 <div class="table-empty">
-                    <div style="font-size:2rem;margin-bottom:8px">🚧</div>
+                    <div style="font-size:2rem;margin-bottom:8px"><i class="fa-solid fa-person-digging"></i></div>
                     <div>Módulo en construcción.</div>
                 </div>
             </div>
@@ -7122,7 +7186,7 @@
         return `
             <div class="table-card">
                 <div class="table-empty" style="color:var(--danger)">
-                    <div style="font-size:2rem;margin-bottom:8px">⚠️</div>
+                    <div style="font-size:2rem;margin-bottom:8px"><i class="fa-solid fa-triangle-exclamation"></i></div>
                     <div>Error: ${escape(msg)}</div>
                 </div>
             </div>

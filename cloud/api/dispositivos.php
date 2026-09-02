@@ -40,6 +40,7 @@ function handleList(): void
         "SELECT d.id,
                 d.uuid                                 AS uid,
                 d.nombre,
+                d.serial,
                 ''                                     AS tipo,
                 d.coordenadas                          AS ubicacion,
                 CASE

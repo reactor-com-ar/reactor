@@ -206,18 +206,18 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
 ```html
 <nav class="sidebar-nav">
   <a href="#/dashboard" class="nav-item active">
-    <span class="nav-icon">📊</span> Dashboard
+    <i class="fa-solid fa-gauge-high nav-icon"></i> Dashboard
   </a>
 
   <div class="nav-group-wrap" data-group="inventario">
     <button type="button" class="nav-item nav-group-toggle">
-      <span class="nav-icon">📦</span>
+      <i class="fa-solid fa-boxes-stacked nav-icon"></i>
       <span class="nav-group-label">Inventario</span>
       <span class="nav-group-arrow">+</span>
     </button>
     <div class="nav-sub">
       <a href="#/dispositivos" class="nav-item nav-sub-item">
-        <span class="nav-icon">🛰️</span> Dispositivos
+        <i class="fa-solid fa-microchip nav-icon"></i> Dispositivos
       </a>
     </div>
   </div>
@@ -227,6 +227,8 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
 ## 5. Topbar
 
 El topbar comparte el rojo institucional con el sidebar (`background: var(--primary)`). Por eso sus hijos siguen la misma regla del §4: `#fff` u opacidades de blanco para texto, negros translúcidos para estados. **No** usar `--text` / `--muted` / `--border` dentro del topbar — esos tokens están calibrados para gris.
+
+**Contenido fijo:** a la izquierda el `hamburger` (solo en mobile) + `.topbar-title` con el nombre de la vista; a la derecha, **únicamente** el `.topbar-username` con su `.user-dropdown`. No se agregan acciones globales al lado del nombre de usuario — en particular **no hay botón "Refrescar" en el topbar**: cada módulo/herramienta expone su propio refresco en su toolbar o en el header de su card.
 
 El `.user-dropdown`, en cambio, se despliega *bajo* el topbar sobre el área gris del contenido, así que sí usa los tokens grises normales.
 
@@ -339,7 +341,7 @@ No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como 
   <div class="toolbar-left">
     <div class="search-wrap">
       <input type="search" id="dev-quick" class="search-input"
-             placeholder="Buscar UID, nombre, tipo, ubicación…">
+             placeholder="Buscar UID, serial, nombre, tipo, ubicación…">
       <button type="button" class="search-clear" data-act="quick-clear" title="Limpiar búsqueda">×</button>
     </div>
     <button type="button" class="btn btn-secondary btn-sm" id="dev-filters">
@@ -486,7 +488,7 @@ Estructura:
 ```html
 <div class="table-card dash-live-card" id="live-feed-card">
   <div class="dash-table-header">
-    <span>📡 Últimas señales</span>
+    <span><i class="fa-solid fa-signal-stream"></i> Últimas señales</span>
     <div class="dash-live-controls">
       <span class="dash-live-status" id="live-feed-status">
         <span class="live-dot"></span> En vivo · 500 ms
@@ -650,7 +652,7 @@ Estructura:
 ```html
 <div class="table-card dash-chart-card" id="signals-chart-card">
   <div class="dash-table-header">
-    <span>📈 Señales por minuto · últimas 24 h</span>
+    <span><i class="fa-solid fa-chart-line"></i> Señales por minuto · últimas 24 h</span>
     <div class="dash-live-controls">
       <span class="dash-chart-summary" id="signals-chart-summary">
         <span class="dash-chart-metric">
@@ -944,9 +946,12 @@ Para celdas / tarjetas en carga: `<tr><td colspan="N" style="text-align:center;p
 
 ## 20. Iconografía
 
-- Para nav y headers de cards usar **emojis** (📊 📋 ⚠️ 💬 👥 📦 💰 🛒 🏷️ 🛵 ⚙️ 🔔). Son legibles, no requieren librería y se ven bien tanto sobre el rojo del sidebar como sobre los grises del contenido.
-- Para acciones por fila (editar / borrar / ver) usar **FontAwesome 6** (`<i class="fa-solid fa-pencil"></i>`).
-- No usar dos sistemas de iconos en el mismo lugar.
+**Un solo sistema de iconos en toda la app: FontAwesome 6 Pro, sin emojis.** Nav, headers de cards, tiles de Herramientas, headers de modal, botones de acción y estados vacíos usan todos `<i class="fa-solid fa-<nombre>"></i>`. El emoji quedó descartado por dos motivos: renderiza distinto en cada sistema operativo (y en varios sale a color, chocando con el rojo del chrome) y **no hereda `color` ni `font-size` del contexto**, así que no se puede teñir de blanco sobre el sidebar ni de `--danger` en un estado de error.
+
+- **Paquete autohospedado, no CDN.** El paquete Pro 6.5.1 vive en `assets/fontawesome/`; `index.php` y `login.php` enlazan `all.min.css` + las cuatro hojas `sharp-*` desde ahí, con cache-bust propio por `filemtime` (independiente de `version.txt`, para que un bump de assets no rebaje los ~350 KB de la fuente). Ver `assets/fontawesome/README.md`. Es la misma copia que usa `panel/`.
+- **Al agregar un módulo o herramienta**, elegir el ícono de `assets/fontawesome/icons.json` y verificar que exista en solid (la clave `"c"` de la entrada contiene `s`). Al disponer de la licencia Pro también sirven los íconos sin `"f": 1` — hoy el único en uso es `fa-signal-stream` (Señales).
+- **Dónde el ícono NO puede ir**, porque el destino es texto plano y no admite markup: el `placeholder` de un `<input>`, el texto de un `<option>`, el `value` de un `<textarea>` y cualquier asignación a `textContent`. En esos casos el aviso se redacta en palabras (`"— falta: no está en cloud/jobs/"`), no se sustituye por un glifo Unicode.
+- **`×` y `+` no son iconografía y se quedan como están**: el `×` de los botones de cierre y de `search-clear`, y el `+` de `.nav-group-arrow` (que rota 45° al abrir). Son glifos tipográficos del layout, no íconos semánticos, y ya están dimensionados por CSS.
 
 ## 21. Menú de acciones (dropdown dentro de modal)
 
@@ -1184,6 +1189,7 @@ th.action-col, td.action-col { width: 1%; white-space: nowrap; text-align: cente
 - Cada `<td>` de acción tiene la clase `action-col` para forzar ancho mínimo y centrado.
 - Los módulos **read-only** (eventos, logs, señales) usan solo la columna **Consultar**; no incluyen Editar / Eliminar.
 - Tooltip exacto (`title="Consultar" / "Editar" / "Eliminar"`) para que el ícono sea legible sin contexto.
+- **Click izquierdo en la fila → acción por defecto (Consultar).** Opt-in por módulo: `<tr class="row-clickable">` (§10) + listener de `click` en la fila que abre el modal de Consultar. El botón hamburguesa hace `stopPropagation()` para no dispararlo. Activo en todos los listados ABM: **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Usuarios y Perfiles** (más la solapa Perfiles del modal de Consultar de Usuarios). El click derecho sigue abriendo el menú contextual completo.
 
 ## 25. ABM: tarjetas de consulta (read-only)
 
@@ -1245,6 +1251,8 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 - JSON / payloads dentro de `<pre>`; no usar `.json-editor` (es para edición, no para read-only).
 
 **Pestañas dentro del modal de Consultar (opcional).** Cuando la entidad tiene relaciones importantes con otras tablas (ej.: usuarios ↔ perfiles), el modal de Consultar puede dividirse en pestañas usando `.modal-tabs` / `.modal-tab` / `.modal-tabpanel`. La primera pestaña se llama siempre **`General`** y contiene el `view-grid` con todos los campos de la entidad; las pestañas siguientes muestran cada relación en una tabla `.table-card` de solo lectura (sin columna `Acciones`, sin menú contextual — las acciones se hacen desde el módulo de la relación, no desde acá). El primer ejemplo es Consultar usuario → `General` + `Perfiles` (lista de dominios y rol por dominio). Cada pestaña de relación lazy-loads su contenido en el primer click al tab correspondiente para no penalizar la apertura del modal.
+
+Las filas de una pestaña de relación son **clickeables** (`<tr class="row-clickable" data-id="…">`, §10): el click izquierdo abre el **modal de Consultar de la entidad relacionada**, apilado encima del modal actual (`.modal-backdrop` comparte `z-index:100`, así que el último montado queda arriba). Al cerrarlo, el modal de origen sigue abierto y con la pestaña activa. Se reutiliza el mismo `openXxxViewModal()` que usa el módulo de la relación — no se duplica el markup de tarjetas. Ejemplo vigente: Consultar usuario → pestaña `Perfiles` → click en una fila → **Consultar perfil**.
 
 ## 26. Editor JSON (textarea monoespaciado)
 
@@ -1399,12 +1407,12 @@ Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterriz
 ```html
 <div class="tile-grid">
   <button type="button" class="tile-card">
-    <span class="tile-icon">🛰️</span>
+    <span class="tile-icon"><i class="fa-solid fa-microchip"></i></span>
     <span class="tile-title">Simulador de señales</span>
     <span class="tile-desc">Genera y envía señales sintéticas para probar la ingesta.</span>
   </button>
   <a href="#/tools/webhooks" class="tile-card">
-    <span class="tile-icon">📤</span>
+    <span class="tile-icon"><i class="fa-solid fa-upload"></i></span>
     <span class="tile-title">Test de webhooks</span>
     <span class="tile-desc">Envía payloads JSON a un endpoint externo.</span>
   </a>
@@ -1437,7 +1445,7 @@ Grilla de **tarjetas-botón** para pantallas que funcionan como menú de aterriz
 
 ## 28. Herramientas: Editor de parámetros
 
-Utilidad de **Herramientas** (§27) que gestiona la tabla `parametros` (`id / variable / valor / comentario`, esquema legacy compartido con las apps históricas de Reactor — no la tocamos, solo la editamos). El tile es `🧩 Editor de parámetros`. Cada fila es una variable runtime que otras partes del sistema leen para configurarse sin redeploy.
+Utilidad de **Herramientas** (§27) que gestiona la tabla `parametros` (`id / variable / valor / comentario`, esquema legacy compartido con las apps históricas de Reactor — no la tocamos, solo la editamos). El tile es `fa-puzzle-piece` / **Editor de parámetros**. Cada fila es una variable runtime que otras partes del sistema leen para configurarse sin redeploy.
 
 Sigue el patrón "modal-gestor + sub-modal de form" común a las utilidades ABM chicas del panel, pero con dos desviaciones respecto de un ABM normal (`ABM.md`):
 
@@ -1451,7 +1459,7 @@ Estas dos desviaciones vienen de la skill `crear_editor_de_parametros` y se apli
   <div class="modal" style="max-width:880px">
     <div class="modal-header">
       <div class="modal-title">
-        🧩 Editor de parámetros
+        [fa-puzzle-piece] Editor de parámetros
         <span class="modal-subtitle">15 parámetros</span>
       </div>
       <button class="btn-icon-sm" data-act="close">×</button>
@@ -1460,7 +1468,7 @@ Estas dos desviaciones vienen de la skill `crear_editor_de_parametros` y se apli
       <div class="toolbar" style="margin-bottom:0">
         <div class="toolbar-left">
           <div class="search-wrap">
-            <input class="search-input" type="search" placeholder="🔍 Buscar variable, valor, comentario…">
+            <input class="search-input" type="search" placeholder="Buscar variable, valor, comentario…">
             <button class="search-clear">×</button>
           </div>
           <button class="btn btn-ghost btn-sm" data-act="refresh"><i class="fa-solid fa-rotate"></i></button>
@@ -1472,7 +1480,7 @@ Estas dos desviaciones vienen de la skill `crear_editor_de_parametros` y se apli
         </div>
       </div>
       <div class="table-card">
-        <table> … Código / Variable / Valor / Comentario / Acciones (☰) … </table>
+        <table> … Código / Variable / Valor / Comentario / Acciones (`fa-bars`) … </table>
       </div>
     </div>
     <div class="modal-footer">
@@ -1486,7 +1494,7 @@ Estas dos desviaciones vienen de la skill `crear_editor_de_parametros` y se apli
 - **Modal 880px inline** (`style="max-width:880px"`). No hay `.editor-parametros-*` — los anchos específicos van inline.
 - **Toolbar interna**: buscador rápido client-side + botón refrescar (ghost, ícono) a la izquierda; botón primario `+ Nuevo parámetro` a la derecha. Sin botón `Filtros` — dataset chico.
 - **Búsqueda client-side sobre el cache**: el endpoint devuelve el listado completo (`SELECT * FROM parametros ORDER BY variable`). El filtro por substring vive en el front (debounce 150ms).
-- **Sin Consulta.** La columna `Acciones` tiene un único botón hamburguesa (☰) que abre el menú contextual con el orden fijo del skill: **Editar · Copiar variable · --- · Eliminar** (Eliminar al final con `danger:true`). Sin ícono de "ver".
+- **Sin Consulta.** La columna `Acciones` tiene un único botón hamburguesa (`fa-bars`) que abre el menú contextual con el orden fijo del skill: **Editar · Copiar variable · --- · Eliminar** (Eliminar al final con `danger:true`). Sin ícono de "ver".
 - **Row click → Editar**: `<tr class="row-clickable">` con listener que ignora clicks originados en `<button>` (para no conflictuar con el botón hamburguesa). Reusa el estilo del §Visor de sucesos.
 - **Sub-modal de Alta/Edición**: `.modal` chico (max-width 560px) con 3 campos: `Variable` (input monospace, `maxlength:255`), `Valor` (textarea monospace, `maxlength:255`), `Comentario` (input opcional, `maxlength:1024`). Validación client-side de `Variable` con regex `^[A-Za-z0-9_.\-]+$` — feedback inmediato en `.field-error`. El backend re-valida longitudes (`api/parametros.php`).
 - **Focus del form**: en alta, `Variable` (autofoco + select); en edición, `Valor` (la variable ya suele ser conocida — el usuario viene a cambiar el valor).
@@ -1500,18 +1508,18 @@ Estas dos desviaciones vienen de la skill `crear_editor_de_parametros` y se apli
 
 Utilidad de **Herramientas** (§27) que lista los archivos `.sql` de `cloud/sql/migrations/` cruzados contra el ledger `migraciones` de la BD del entorno actual, y permite aplicarlos uno por uno o en lote. Reemplaza al antiguo "Migraciones" (consola SSE) por un modelo más discreto — cada migración se ve, se previsualiza y se aplica con un click.
 
-El tile vive en el `tile-grid` de Herramientas (`📜 Migrador DB`). Al click abre un **modal ancho** (max-width **960px**) con dos badges en el header (nombre de la BD activa + entorno coloreado por `APP_ENV`), toolbar con refrescar + resumen textual (`N archivos · M aplicadas · K pendientes`) + botón primario **Aplicar todas las pendientes**, y una tabla con columnas `Estado / Archivo / Tamaño / Hash / Aplicada / Acciones`. La tabla vive dentro de un `.table-card` con `max-height:52vh; overflow-y:auto` y los `<th>` con `position:sticky; top:0; background:var(--bg)` — solo scrollea la lista.
+El tile vive en el `tile-grid` de Herramientas (`fa-scroll` / **Migrador DB**). Al click abre un **modal ancho** (max-width **960px**) con dos badges en el header (nombre de la BD activa + entorno coloreado por `APP_ENV`), toolbar con refrescar + resumen textual (`N archivos · M aplicadas · K pendientes`) + botón primario **Aplicar todas las pendientes**, y una tabla con columnas `Estado / Archivo / Tamaño / Hash / Aplicada / Acciones`. La tabla vive dentro de un `.table-card` con `max-height:52vh; overflow-y:auto` y los `<th>` con `position:sticky; top:0; background:var(--bg)` — solo scrollea la lista.
 
 Las filas **no son clickeables** — las acciones se disparan desde los botones explícitos de la columna `Acciones` (**Ver SQL** siempre; **Aplicar** solo cuando el estado es pendiente). "Ver SQL" abre un segundo modal (`.modal-wide`) con el contenido del archivo en un `<textarea class="json-editor" readonly>`; si la migración está pendiente, el footer del preview trae el botón `Aplicar` inline.
 
-Cada `apply` (individual o masivo) pasa por un confirm reforzado en producción: título con ⚠, copy con `(PRODUCCIÓN)`, label `Aplicar en prod` y CTA rojo (`btn-danger`). En `development` es `btn-primary` con label `Aplicar`. Los toasts de error usan `toast(msg, { error:true, duration:10000 })` porque los mensajes crudos del motor SQL suelen ser largos.
+Cada `apply` (individual o masivo) pasa por un confirm reforzado en producción: título con `fa-triangle-exclamation`, copy con `(PRODUCCIÓN)`, label `Aplicar en prod` y CTA rojo (`btn-danger`). En `development` es `btn-primary` con label `Aplicar`. Los toasts de error usan `toast(msg, { error:true, duration:10000 })` porque los mensajes crudos del motor SQL suelen ser largos.
 
 ```html
 <div class="modal-backdrop open">
   <div class="modal" style="max-width:960px">
     <div class="modal-header">
       <div class="modal-title">
-        📜 Migrador DB
+        [fa-scroll] Migrador DB
         <span class="badge badge-info" style="font-family:monospace">reactor_dev</span>
         <span class="badge badge-success" style="font-family:monospace">development</span>
       </div>
@@ -1543,7 +1551,7 @@ Cada `apply` (individual o masivo) pasa por un confirm reforzado en producción:
 - **Doble badge en header**: `badge-info` con nombre de BD (monospace) + badge coloreado por entorno: `badge-success` en dev, `badge-danger` en prod, `badge-warn` en cualquier otro valor.
 - **Sin CSS propio**: la herramienta reusa `.modal-backdrop`, `.modal`, `.modal-wide` (para el preview), `.toolbar`, `.table-card`, `.badge*`, `.json-editor`, `.btn*` ya definidos. Solo agrega `tbody tr.row-clickable { cursor: pointer }` (que no usa el migrador pero sí el visor de sucesos, §30).
 - **Orden del listado**: pendientes arriba en orden ascendente (mismo orden en que se aplican); aplicadas debajo por `id` DESC (última aplicada arriba). No ordenar aplicadas por nombre — una migración de fecha vieja aplicada tarde tiene que aparecer arriba, no en el medio.
-- **Estado**: badge `badge-info` para `pendiente`, `badge-success` para `aplicada`, `badge-warn` con emoji `⚠` para `aplicada` con `hash_drift` (el archivo cambió después de aplicarse).
+- **Estado**: badge `badge-info` para `pendiente`, `badge-success` para `aplicada`, `badge-warn` con `fa-triangle-exclamation` para `aplicada` con `hash_drift` (el archivo cambió después de aplicarse).
 - **Hash**: se muestran los primeros 8 chars, con el hash completo en el `title` del `<td>`.
 - **Sin CSS propio** para el preview: `.modal-wide` (760px) + `.json-editor` para el textarea SQL; botón `Aplicar` solo visible cuando la migración está pendiente.
 - **Confirm reforzado en prod**: usar el helper local `confirmarMigrador(titulo, msg, ctaLabel, danger, onOk)` — `confirmDialog` estándar hardcodea el label "Eliminar" y no sirve acá.
@@ -1554,7 +1562,7 @@ Cada `apply` (individual o masivo) pasa por un confirm reforzado en producción:
 
 Utilidad de **Herramientas** (§27) que muestra el log de actividad de los módulos del panel cloud (`sucesos_log` — no confundir con la tabla legacy `sucesos` compartida con las apps históricas). El panel solo lee: la escritura vive en `api/lib/sucesos.php` (`registrarSuceso()`), invocada desde el resto de los endpoints cuando pasa algo notable.
 
-El tile es `📰 Visor de sucesos`. El modal es **ancho** (max-width **1100px**) con toolbar que combina buscador rápido + **chips de filtro por tipo** (Todos · Info · Alerta · Error, en ese orden, con Error último) + rango de fechas (`Desde` / `Hasta`) + selector de `Límite` (100 / 200 / 500 / 1000 / 2000, default 200) + refrescar. La tabla lista `ID / Fecha / Origen / Tipo / Detalle`; las filas son clickeables (`row-clickable`) y abren un **modal de detalle** (max-width 780px) con Fecha + Tipo (ícono + etiqueta) en `form-row`, Origen en fila propia, y Detalle en un `<textarea readonly>` monoespaciado grande.
+El tile es `fa-newspaper` / **Visor de sucesos**. El modal es **ancho** (max-width **1100px**) con toolbar que combina buscador rápido + **chips de filtro por tipo** (Todos · Info · Alerta · Error, en ese orden, con Error último) + rango de fechas (`Desde` / `Hasta`) + selector de `Límite` (100 / 200 / 500 / 1000 / 2000, default 200) + refrescar. La tabla lista `ID / Fecha / Origen / Tipo / Detalle`; las filas son clickeables (`row-clickable`) y abren un **modal de detalle** (max-width 780px) con Fecha + Tipo (ícono + etiqueta) en `form-row`, Origen en fila propia, y Detalle en un `<textarea readonly>` monoespaciado grande.
 
 **Iconos + colores por tipo** (fijos, no cambiar por proyecto):
 - **Info** → `fa-circle-info` en `var(--info)`.
@@ -1568,7 +1576,7 @@ Se usan en los chips, en la celda `Tipo` del listado y en el modal de detalle.
   <div class="modal" style="max-width:1100px">
     <div class="modal-header">
       <div class="modal-title">
-        📰 Visor de sucesos
+        [fa-newspaper] Visor de sucesos
         <span class="modal-subtitle">200 de 12.345 registros</span>
       </div>
       <button class="btn-icon-sm" data-act="close">×</button>
@@ -1576,7 +1584,7 @@ Se usan en los chips, en la celda `Tipo` del listado y en el modal de detalle.
     <div class="modal-body">
       <div class="toolbar" style="margin-bottom:0">
         <div class="toolbar-left">
-          <div class="search-wrap"><input class="search-input" type="search" placeholder="🔍 Buscar origen, detalle…"></div>
+          <div class="search-wrap"><input class="search-input" type="search" placeholder="Buscar origen, detalle…"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="filter-chip active">Todos</button>
             <button class="filter-chip"><i class="fa-solid fa-circle-info" style="color:var(--info)"></i> Info</button>
@@ -1614,9 +1622,9 @@ Se usan en los chips, en la celda `Tipo` del listado y en el modal de detalle.
 
 ## 31. Herramientas: Explorador DB
 
-Utilidad de **Herramientas** que recorre las tablas de la BD del entorno activo. Modal a pantalla casi completa (`max-width:1080px; height:calc(100vh - 64px)`), dos vistas: **listado de tablas** (tabla clickeable con `Tabla / Filas (aprox.) / Engine`) y **detalle** con tabs `Registros` (default) y `Campos`. Breadcrumbs `🗄️ <db> / <tabla>` navegan entre vistas.
+Utilidad de **Herramientas** que recorre las tablas de la BD del entorno activo. Modal a pantalla casi completa (`max-width:1080px; height:calc(100vh - 64px)`), dos vistas: **listado de tablas** (tabla clickeable con `Tabla / Filas (aprox.) / Engine`) y **detalle** con tabs `Registros` (default) y `Campos`. Breadcrumbs `<db> / <tabla>` navegan entre vistas.
 
-**Pestaña Registros**: selector de `Límite` (10 / 50 / 100 / 200 / 500, default 50), buscador client-side sobre lo cargado, orden fijo `PK DESC`. **Doble click** en celdas editables abre editor inline con ✓ / ✗ y `⊘ NULL` cuando la columna lo permite. Se bloquea la edición de columnas PK, `auto_increment` y de tablas sin PK — visualmente con `cursor:not-allowed` y color muteado.
+**Pestaña Registros**: selector de `Límite` (10 / 50 / 100 / 200 / 500, default 50), buscador client-side sobre lo cargado, orden fijo `PK DESC`. **Doble click** en celdas editables abre editor inline con `fa-check` / `fa-xmark` y `fa-ban` (NULL) cuando la columna lo permite. Se bloquea la edición de columnas PK, `auto_increment` y de tablas sin PK — visualmente con `cursor:not-allowed` y color muteado.
 
 **Pestaña Campos**: `# / Campo / Tipo / Null / Clave / Default / Extra`. Badges: `PRI→PK warn`, `UNI→UQ info`, `MUL→IDX`. `Default null` como `NULL` muteado; `Extra` y valores no nulos en `<code>`.
 
@@ -1626,7 +1634,7 @@ Utilidad de **Herramientas** que recorre las tablas de la BD del entorno activo.
 
 ## 32. Herramientas: Explorador S3
 
-Utilidad de **Herramientas** que navega el bucket S3 del entorno activo como un file manager. Modal `max-width:980px; height:calc(100vh - 24px)`; header con badge `badge-info` del bucket activo; toolbar con **breadcrumbs 🏠 raíz / ...** a la izquierda y a la derecha, en orden estricto: **Refrescar · Buscador · Subir · Nueva carpeta**. Tabla `[ícono] / Nombre / Tamaño / Modificado / Acciones` con la fila `..` cuando hay `prefix` activo, ordenada por `Modificado DESC`.
+Utilidad de **Herramientas** que navega el bucket S3 del entorno activo como un file manager. Modal `max-width:980px; height:calc(100vh - 24px)`; header con badge `badge-info` del bucket activo; toolbar con **breadcrumbs `raíz / ...`** a la izquierda y a la derecha, en orden estricto: **Refrescar · Buscador · Subir · Nueva carpeta**. Tabla `[ícono] / Nombre / Tamaño / Modificado / Acciones` con la fila `..` cuando hay `prefix` activo, ordenada por `Modificado DESC`.
 
 **Menú contextual** (usa `openRowMenu` estándar): `Abrir / Descargar` · `Copiar URL pública` · --- · `Eliminar` (rojo). Los dos primeros se ocultan para carpetas. **Eliminar carpeta** siempre pasa por `confirmDialog` con copy explícito de "TODO su contenido de forma recursiva".
 

@@ -79,8 +79,14 @@ function handleList(): void
         $where[] = "UPPER(COALESCE(u.habilitado,'')) NOT IN ('S','1','Y')";
     }
     if ($q !== '') {
-        $where[]      = '(u.usuario LIKE :q OR u.nombre LIKE :q OR u.correo LIKE :q OR u.celular LIKE :q)';
-        $params[':q'] = '%' . $q . '%';
+        // Un placeholder por columna: con EMULATE_PREPARES=false, PDO no admite
+        // repetir el mismo nombre en un statement (SQLSTATE HY093).
+        $ors = [];
+        foreach (['u.usuario', 'u.nombre', 'u.correo', 'u.celular'] as $i => $columna) {
+            $ors[]             = $columna . ' LIKE :q' . $i;
+            $params[':q' . $i] = '%' . $q . '%';
+        }
+        $where[] = '(' . implode(' OR ', $ors) . ')';
     }
 
     $sql = 'SELECT u.id, u.uuid, u.nombre, u.usuario, u.correo, u.celular,

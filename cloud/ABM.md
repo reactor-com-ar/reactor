@@ -16,12 +16,18 @@ Las columnas del listado deben respetar este orden:
 3. **Columna `Acciones`, al final:**
    - Una sola columna llamada **`Acciones`** que contiene un botón con **ícono hamburguesa** (`fa-bars`).
    - El click sobre el botón **y** el **click derecho** sobre cualquier punto de la fila abren el **mismo menú contextual**, posicionado en el punto de activación.
+   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Usuarios y Perfiles** (más la solapa Perfiles del modal de Consultar de Usuarios).
    - El menú contextual debe incluir, como mínimo y en este orden:
      - **Consultar** — ícono de ojo (`fa-eye`).
      - **Editar** — ícono de lápiz (`fa-pencil`).
      - **Eliminar** — ícono de tacho (`fa-trash`), en estilo de peligro.
+   - **`Eliminar` va siempre al final del menú y siempre precedido por la línea separadora.** Ninguna acción se ubica por debajo de Eliminar.
    - Los módulos read-only (señales, registros, etc.) omiten Editar y Eliminar — el menú sólo trae Consultar.
-   - El menú puede incluir acciones extra propias del módulo (ej.: "Ver dispositivos asociados", "Copiar ID"), después de las acciones estándar y separadas por divisor si corresponde.
+   - El menú puede incluir acciones extra propias del módulo (ej.: "Ver dispositivos asociados", "Listar perfiles", "Copiar ID"). Hay dos ubicaciones posibles:
+     - **Pegadas a `Consultar`, sin divisor**, cuando la acción es otra forma de *ver* el registro (ej.: Usuarios → "Listar perfiles" va inmediatamente debajo de Consultar, antes de Editar).
+     - **Al final del bloque no destructivo, separadas por divisor**, para el resto (copiar valores, navegaciones secundarias).
+   - Orden completo resultante: `Consultar · [extras de consulta] · Editar · --- · [extras generales] · --- · Eliminar`.
+   - **Acciones de navegación cruzada** (listar los registros relacionados en su propio módulo): dejan el id en una variable `pendingXxxFilter` del scope de la app y navegan con `window.location.hash = '#/<ruta>'`. El módulo destino consume ese pending en su `render*()`, lo vuelca al `state` del filtro correspondiente y lo limpia. El filtro usado tiene que existir además como campo del **Modal de Filtros** del módulo destino, para que el usuario vea por qué la lista viene acotada y pueda limpiarlo. Ejemplos: Dominios → "Ver dispositivos asociados" (`#/dispositivos`, filtro `Dominio`), Usuarios → "Listar perfiles" (`#/profiles`, filtro `Usuario`).
 
 ### Límite de resultados
 - Por defecto: **100**.

@@ -45,8 +45,18 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <meta name="msapplication-config" content="favicon/browserconfig.xml?v=<?= htmlspecialchars($cacheBust) ?>">
     <meta name="theme-color" content="#C11313">
 
-    <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <?php
+    // Font Awesome 6.5.1 Pro autohospedado (assets/fontawesome/). `all.min.css`
+    // trae las familias Classic (solid/regular/light/thin), Duotone y Brands;
+    // las cuatro hojas `sharp-*` agregan los @font-face de la familia Sharp,
+    // que `all.min.css` mapea pero no declara.
+    $faVer = @filemtime(__DIR__ . '/assets/fontawesome/css/all.min.css') ?: $cacheBust;
+    ?>
+    <link rel="stylesheet" href="assets/fontawesome/css/all.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-solid.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-regular.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-light.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-thin.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= htmlspecialchars($cacheBust) ?>">
 </head>
@@ -66,95 +76,98 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
         </div>
 
         <nav class="sidebar-nav">
+            <!-- Iconografia del menu: FontAwesome solid autohospedado
+                 (assets/fontawesome/), no emojis. `.nav-icon` da el ancho fijo
+                 de 20px que alinea todas las etiquetas en la misma columna. -->
             <div class="nav-group-wrap" data-group="inicio">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🏠</span>
+                    <i class="fa-solid fa-house nav-icon"></i>
                     <span class="nav-group-label">Inicio</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/dashboard" data-route="dashboard" class="nav-item nav-sub-item active">
-                        <span class="nav-icon">📊</span> Dashboard
+                        <i class="fa-solid fa-gauge-high nav-icon"></i> Dashboard
                     </a>
                 </div>
             </div>
 
             <div class="nav-group-wrap" data-group="propiedad">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🏢</span>
+                    <i class="fa-solid fa-building nav-icon"></i>
                     <span class="nav-group-label">Propiedad</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/dominios" data-route="dominios" class="nav-item nav-sub-item">
-                        <span class="nav-icon">🗂️</span> Dominios
+                        <i class="fa-solid fa-flag nav-icon"></i> Dominios
                     </a>
                 </div>
             </div>
 
             <div class="nav-group-wrap" data-group="inventario">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">📦</span>
+                    <i class="fa-solid fa-boxes-stacked nav-icon"></i>
                     <span class="nav-group-label">Inventario</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/dispositivos" data-route="dispositivos" class="nav-item nav-sub-item">
-                        <span class="nav-icon">🛰️</span> Dispositivos
+                        <i class="fa-solid fa-microchip nav-icon"></i> Dispositivos
                     </a>
                     <a href="#/chips" data-route="chips" class="nav-item nav-sub-item">
-                        <span class="nav-icon">📶</span> Chips
+                        <i class="fa-solid fa-sim-card nav-icon"></i> Chips
                     </a>
                     <a href="#/transceptores" data-route="transceptores" class="nav-item nav-sub-item">
-                        <span class="nav-icon">📻</span> Transceptores
+                        <i class="fa-solid fa-walkie-talkie nav-icon"></i> Transceptores
                     </a>
                 </div>
             </div>
 
             <div class="nav-group-wrap" data-group="registros">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">📋</span>
+                    <i class="fa-solid fa-clipboard-list nav-icon"></i>
                     <span class="nav-group-label">Registros</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/signals" data-route="signals" class="nav-item nav-sub-item">
-                        <span class="nav-icon">📡</span> Señales
+                        <i class="fa-solid fa-signal-stream nav-icon"></i> Señales
                     </a>
                     <a href="#/registros" data-route="registros" class="nav-item nav-sub-item">
-                        <span class="nav-icon">📜</span> Registros
+                        <i class="fa-solid fa-scroll nav-icon"></i> Registros
                     </a>
                     <a href="#/alerts" data-route="alerts" class="nav-item nav-sub-item">
-                        <span class="nav-icon">🔔</span> Alertas
+                        <i class="fa-solid fa-bell nav-icon"></i> Alertas
                     </a>
                 </div>
             </div>
 
             <div class="nav-group-wrap" data-group="seguridad">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🔐</span>
+                    <i class="fa-solid fa-shield-halved nav-icon"></i>
                     <span class="nav-group-label">Seguridad</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/users" data-route="users" class="nav-item nav-sub-item">
-                        <span class="nav-icon">👥</span> Usuarios
+                        <i class="fa-solid fa-users nav-icon"></i> Usuarios
                     </a>
                     <a href="#/profiles" data-route="profiles" class="nav-item nav-sub-item">
-                        <span class="nav-icon">🪪</span> Perfiles
+                        <i class="fa-solid fa-id-card nav-icon"></i> Perfiles
                     </a>
                 </div>
             </div>
 
             <div class="nav-group-wrap" data-group="administracion">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🛠️</span>
+                    <i class="fa-solid fa-screwdriver-wrench nav-icon"></i>
                     <span class="nav-group-label">Administración</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/tools" data-route="tools" class="nav-item nav-sub-item">
-                        <span class="nav-icon">🧪</span> Herramientas
+                        <i class="fa-solid fa-toolbox nav-icon"></i> Herramientas
                     </a>
                 </div>
             </div>
@@ -168,13 +181,12 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <div class="main">
         <div class="topbar">
             <div class="topbar-left">
-                <button class="hamburger" id="hamburger" aria-label="Abrir menú">☰</button>
+                <button class="hamburger" id="hamburger" aria-label="Abrir menú">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
                 <div class="topbar-title" id="view-title">Dashboard</div>
             </div>
             <div class="topbar-user">
-                <button class="btn btn-ghost btn-sm" id="btn-refresh" title="Refrescar">
-                    <i class="fa-solid fa-arrows-rotate"></i>
-                </button>
                 <div class="topbar-user-wrap">
                     <button class="topbar-username" id="btn-user">
                         <i class="fa-solid fa-circle-user"></i>

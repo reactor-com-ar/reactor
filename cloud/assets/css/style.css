@@ -147,7 +147,10 @@ body.has-banner .layout   { min-height: calc(100vh - 44px); }
 }
 .nav-item:hover  { background: rgba(0,0,0,.18); color: #fff; }
 .nav-item.active { background: rgba(0,0,0,.28); color: #fff; border-left-color: #fff; font-weight: 600; }
-.nav-icon { font-size: 1.1rem; width: 20px; text-align: center; }
+/* Iconos del menu: FontAwesome solid, no emojis. El ancho fijo alinea todas
+ * las etiquetas en la misma columna sin importar el glifo. */
+.nav-icon               { font-size: 1rem; width: 20px; text-align: center; flex-shrink: 0; }
+.nav-sub-item .nav-icon { font-size: .9rem; }
 
 /* Grupos colapsables del sidebar.
  * Vive dentro del rojo institucional, asi que tampoco usa --text/--muted/--border:

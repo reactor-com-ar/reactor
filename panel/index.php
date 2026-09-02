@@ -32,8 +32,18 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=<?= htmlspecialchars($cacheBust) ?>">
     <meta name="theme-color" content="#C11313">
 
-    <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <?php
+    // Font Awesome 6.5.1 Pro autohospedado (assets/fontawesome/). `all.min.css`
+    // trae las familias Classic (solid/regular/light/thin), Duotone y Brands;
+    // las cuatro hojas `sharp-*` agregan los @font-face de la familia Sharp,
+    // que `all.min.css` mapea pero no declara.
+    $faVer = @filemtime(__DIR__ . '/assets/fontawesome/css/all.min.css') ?: $cacheBust;
+    ?>
+    <link rel="stylesheet" href="assets/fontawesome/css/all.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-solid.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-regular.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-light.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
+    <link rel="stylesheet" href="assets/fontawesome/css/sharp-thin.min.css?v=<?= htmlspecialchars((string) $faVer) ?>">
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= htmlspecialchars($cacheBust) ?>">
 </head>
@@ -53,71 +63,81 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
         </div>
 
         <nav class="sidebar-nav">
-            <div class="nav-group-wrap open" data-group="inicio">
+            <!-- Iconografia del menu: FontAwesome solid autohospedado
+                 (assets/fontawesome/), no emojis. `.nav-icon` da el ancho fijo
+                 de 20px que alinea todas las etiquetas en la misma columna.
+
+                 TODAS las categorias arrancan con `.open`: el menu se ve
+                 desplegado por completo al entrar. Colapsar es una accion
+                 del usuario (no se persiste), y `setActiveLink()` de app.js
+                 reabre la categoria de la ruta activa. -->
+            <div class="nav-group-wrap open" data-group="general">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🏠</span>
-                    <span class="nav-group-label">Inicio</span>
+                    <i class="fa-solid fa-house nav-icon"></i>
+                    <span class="nav-group-label">General</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
                     <a href="#/dashboard" data-route="dashboard" class="nav-item nav-sub-item active">
-                        <span class="nav-icon">📊</span> Dashboard
+                        <i class="fa-solid fa-gauge-high nav-icon"></i> Dashboard
                     </a>
                 </div>
             </div>
 
-            <!-- Menu portado del legacy. Los sub-items todavia no tienen
-                 modulo: se muestran, pero no navegan (clase .nav-soon). -->
-            <div class="nav-group-wrap" data-group="inventario">
+            <!-- Menu portado del legacy. -->
+            <div class="nav-group-wrap open" data-group="inventario">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🔌</span>
+                    <i class="fa-solid fa-boxes-stacked nav-icon"></i>
                     <span class="nav-group-label">Inventario</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">🏳️</span> Dominio
+                    <a href="#/dominio" data-route="dominio" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-flag nav-icon"></i> Dominio
                     </a>
                     <a href="#/usuarios" data-route="usuarios" class="nav-item nav-sub-item">
-                        <span class="nav-icon">👥</span> Usuarios
+                        <i class="fa-solid fa-users nav-icon"></i> Usuarios
                     </a>
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">📟</span> Dispositivos
+                    <a href="#/dispositivos" data-route="dispositivos" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-microchip nav-icon"></i> Dispositivos
                     </a>
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">💳</span> Chips
+                    <a href="#/chips" data-route="chips" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-sim-card nav-icon"></i> Chips
                     </a>
                 </div>
             </div>
 
-            <div class="nav-group-wrap" data-group="historial">
+            <div class="nav-group-wrap open" data-group="historial">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🕘</span>
+                    <i class="fa-solid fa-clock-rotate-left nav-icon"></i>
                     <span class="nav-group-label">Historial</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">🔑</span> Invitaciones
+                    <a href="#/actividad" data-route="actividad" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-clipboard-list nav-icon"></i> Actividad
+                    </a>
+                    <a href="#/invitaciones" data-route="invitaciones" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-envelope-open-text nav-icon"></i> Invitaciones
                     </a>
                 </div>
             </div>
 
-            <div class="nav-group-wrap" data-group="cuenta">
+            <div class="nav-group-wrap open" data-group="cuenta">
                 <button type="button" class="nav-item nav-group-toggle">
-                    <span class="nav-icon">🚩</span>
+                    <i class="fa-solid fa-wallet nav-icon"></i>
                     <span class="nav-group-label">Cuenta</span>
                     <span class="nav-group-arrow">+</span>
                 </button>
                 <div class="nav-sub">
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">📄</span> Facturas
+                    <a href="#/facturas" data-route="facturas" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-file-invoice-dollar nav-icon"></i> Facturas
                     </a>
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">🧾</span> Recibos
+                    <a href="#/recibos" data-route="recibos" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-receipt nav-icon"></i> Recibos
                     </a>
-                    <a href="#" class="nav-item nav-sub-item nav-soon">
-                        <span class="nav-icon">🧮</span> Facturación
+                    <a href="#/facturacion" data-route="facturacion" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-calculator nav-icon"></i> Facturación
                     </a>
                 </div>
             </div>
@@ -129,7 +149,9 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <div class="main">
         <div class="topbar">
             <div class="topbar-left">
-                <button class="hamburger" id="hamburger" aria-label="Abrir menú">☰</button>
+                <button class="hamburger" id="hamburger" aria-label="Abrir menú">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
                 <div class="topbar-title" id="view-title">Dashboard</div>
             </div>
             <div class="topbar-user">
@@ -139,7 +161,10 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     <i class="fa-solid fa-caret-down" style="font-size:.7rem"></i>
                 </button>
                 <div class="user-dropdown" id="user-dropdown">
-                    <a href="#" class="user-dropdown-item" id="btn-perfil">Perfil</a>
+                    <a href="#" class="user-dropdown-item" id="btn-dominio">
+                        <i class="fa-solid fa-recycle"></i>Cambiar dominio
+                    </a>
+                    <a href="#" class="user-dropdown-item" id="btn-perfil">Mi cuenta</a>
                     <a href="#" class="user-dropdown-item" id="btn-logout">Cerrar sesión</a>
                 </div>
             </div>

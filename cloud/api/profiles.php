@@ -23,18 +23,32 @@ try {
 
 function handleList(): void
 {
+    // Esquema real (db/schema.sql -> tabla `perfiles`): las FK son `usuario` y `dominio`
+    // (no `usuario_id` / `dominio_id`), `rol` es un int que apunta a `roles.id` (no un
+    // slug) y no existen `created_at` ni `updated_at`. En `usuarios` el email es `correo`
+    // y el estado es `habilitado`. Se aliasa todo a los nombres que ya usa el front para
+    // no tocar el JS. Los JOIN son LEFT porque `usuario` / `dominio` / `rol` admiten NULL.
     $usuarioId = isset($_GET['usuario_id']) ? (int) $_GET['usuario_id'] : 0;
 
-    $sql = 'SELECT p.id, p.usuario_id, p.dominio_id, p.rol,
-                   p.created_at, p.updated_at,
-                   u.nombre AS usuario_nombre, u.email AS usuario_email, u.activo AS usuario_activo,
-                   d.nombre AS dominio_nombre
+    $sql = 'SELECT p.id,
+                   p.usuario    AS usuario_id,
+                   p.dominio    AS dominio_id,
+                   p.rol        AS rol_id,
+                   r.nombre     AS rol,
+                   NULL         AS created_at,
+                   NULL         AS updated_at,
+                   u.nombre     AS usuario_nombre,
+                   u.correo     AS usuario_email,
+                   u.habilitado AS usuario_habilitado,
+                   d.nombre     AS dominio_nombre
             FROM perfiles p
-            JOIN usuarios u ON u.id = p.usuario_id
-            JOIN dominios d ON d.id = p.dominio_id';
+            LEFT JOIN usuarios u ON u.id = p.usuario
+            LEFT JOIN dominios d ON d.id = p.dominio
+            LEFT JOIN roles    r ON r.id = p.rol
+            WHERE p.id > 0';
     $params = [];
     if ($usuarioId > 0) {
-        $sql .= ' WHERE p.usuario_id = :uid';
+        $sql .= ' AND p.usuario = :uid';
         $params[':uid'] = $usuarioId;
     }
     $sql .= ' ORDER BY u.nombre ASC, d.nombre ASC';
@@ -43,9 +57,17 @@ function handleList(): void
     $stmt->execute($params);
 
     $perfiles = array_map(static function (array $r): array {
+        $hab = strtoupper((string) ($r['usuario_habilitado'] ?? ''));
+        $rol = (string) ($r['rol'] ?? '');
         $r['usuario_id']     = (int) $r['usuario_id'];
         $r['dominio_id']     = (int) $r['dominio_id'];
-        $r['usuario_activo'] = (int) $r['usuario_activo'] === 1;
+        $r['rol_id']         = (int) $r['rol_id'];
+        $r['rol']            = $rol !== '' ? $rol : 'Sin rol';
+        $r['usuario_nombre'] = (string) ($r['usuario_nombre'] ?? '');
+        $r['usuario_email']  = (string) ($r['usuario_email']  ?? '');
+        $r['dominio_nombre'] = (string) ($r['dominio_nombre'] ?? '');
+        $r['usuario_activo'] = in_array($hab, ['S', '1', 'Y'], true);
+        unset($r['usuario_habilitado']);
         return $r;
     }, $stmt->fetchAll());
 
@@ -55,8 +77,9 @@ function handleList(): void
         'operador'  => 0,
     ];
     foreach ($perfiles as $p) {
-        if ($p['rol'] === 'admin')    $resumen['admin']++;
-        if ($p['rol'] === 'operador') $resumen['operador']++;
+        $rol = mb_strtolower($p['rol']);
+        if (str_starts_with($rol, 'admin'))    $resumen['admin']++;
+        if (str_starts_with($rol, 'operador')) $resumen['operador']++;
     }
 
     json_ok(['perfiles' => $perfiles, 'resumen' => $resumen]);

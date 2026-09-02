@@ -122,55 +122,84 @@ body.has-banner .layout   { min-height: calc(100vh - 44px); }
 }
 .sidebar-logo-mark { display: block; width: auto; height: 24px; max-width: 100%; object-fit: contain; }
 
-.sidebar-nav { padding: 8px 0 12px; flex: 1; }
+.sidebar-nav { padding: 12px 0; flex: 1; min-height: 0; overflow-y: auto; }
 
+/* El realce (hover / activo) es una PASTILLA, no una franja de lado a lado:
+ * margen lateral de 10px + esquinas redondeadas, para que el fondo blanco
+ * quede despegado de los dos bordes del sidebar. El padding compensa el
+ * margen (10 + 13 = 23px) para que el texto no se mueva respecto de la
+ * version de franja completa. */
 .nav-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 20px;
+    padding: 10px 13px;
+    margin: 2px 10px;
+    border-radius: 10px;
     font-size: .9rem;
     color: rgba(255,255,255,.85);
     cursor: pointer;
-    border-left: 3px solid transparent;
     transition: background .15s, color .15s;
     text-decoration: none;
 }
-.nav-item:hover  { background: rgba(0,0,0,.18); color: #fff; }
-.nav-item.active { background: rgba(0,0,0,.28); color: #fff; border-left-color: #fff; font-weight: 600; }
-.nav-icon        { font-size: 1.1rem; width: 20px; text-align: center; }
+/* Hover y activo se pintan con BLANCO translucido, no con negro: sobre el
+ * rojo del chrome el negro ensucia y engorda el menu, el blanco lo aclara.
+ * Es el analogo de --primary-soft de cas/admin, invertido para fondo rojo.
+ * El activo NO lleva border-left: con la pastilla despegada del borde, la
+ * barra blanca quedaba cortada por el radio. Lo marcan el fondo mas fuerte
+ * y el peso 600. */
+.nav-item:hover  { background: rgba(255,255,255,.10); color: #fff; }
+.nav-item.active { background: rgba(255,255,255,.18); color: #fff; font-weight: 600; }
+/* Iconos del sidebar: FontAwesome solid, no emojis. El ancho fijo alinea
+ * todas las etiquetas en la misma columna; 1rem (y .9rem en los sub-items)
+ * porque un glifo FA llena mucho mas el em que el emoji que reemplaza y a
+ * 1.1rem compite con el texto de .9rem. */
+.nav-icon        { font-size: 1rem; width: 20px; text-align: center; flex-shrink: 0; }
+.nav-sub-item .nav-icon { font-size: .9rem; }
 
-/* Grupos colapsables */
+/* Grupos colapsables.
+ * La categoria NO es un item mas del menu: es un ROTULO de seccion. Va en
+ * tipografia chica, mayuscula, bold y blanco atenuado, y no toma fondo ni
+ * siquiera en hover (solo aclara el texto). Asi todo el peso visual queda
+ * en los sub-items, que son lo unico navegable. Portado del sidebar de
+ * cas/admin, adaptado al chrome rojo. */
 .nav-group-wrap  { display: block; }
 .nav-group-toggle {
-    width: 100%;
+    width: auto;                 /* con los 10px de margen lateral de .nav-item, un 100% desbordaria */
     background: none;
     border: none;
     text-align: left;
     cursor: pointer;
     font-family: inherit;
-    color: rgba(255,255,255,.85);
+    font-size: .7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: rgba(255,255,255,.6);
+    justify-content: space-between;
 }
+.nav-group-toggle:hover { background: transparent; color: #fff; }
 .nav-group-label { flex: 1; }
 .nav-group-arrow {
     margin-left: auto;
-    font-size: 1rem;
+    font-size: .8rem;
     font-weight: 700;
     line-height: 1;
-    color: rgba(255,255,255,.7);
+    color: rgba(255,255,255,.5);
     transition: transform .2s;
 }
 .nav-group-wrap.open .nav-group-arrow { transform: rotate(45deg); }   /* + -> x */
 
+/* El bloque de sub-items NO lleva fondo ni bordes propios: se apoya
+ * directo sobre el rojo del chrome. La sangria del texto (44px) alcanza
+ * para leer la jerarquia; el recuadro oscuro solo agregaba ruido. */
 .nav-sub {
     display: none;
-    background: rgba(0,0,0,.18);
-    border-top: 1px solid rgba(0,0,0,.2);
-    border-bottom: 1px solid rgba(0,0,0,.2);
+    padding: 2px 0 10px;
 }
 .nav-group-wrap.open .nav-sub { display: block; }
-.nav-sub-item                 { padding-left: 44px; font-size: .85rem; }
-.nav-sub-item.active          { background: rgba(0,0,0,.32); }
+/* 10px de margen + 34px de padding = los mismos 44px de sangria de siempre. */
+.nav-sub-item                 { padding-left: 34px; font-size: .85rem; font-weight: 500; }
 
 /* Los items sin modulo todavia (.nav-soon) NO llevan estilo propio: se ven
  * exactamente igual que el resto del menu (mismo brillo, mismo hover), tal
@@ -205,20 +234,25 @@ body.has-banner .layout   { min-height: calc(100vh - 44px); }
     border: 1px solid var(--border);
     border-radius: 10px;
     box-shadow: var(--shadow-lg);
-    min-width: 160px;
+    min-width: 190px;
     overflow: hidden;
     z-index: 200;
 }
 .user-dropdown.open { display: block; }
+/* Flex (no block) para que el item pueda llevar icono al lado del texto:
+   los que no lo llevan quedan igual que antes. */
 .user-dropdown-item {
-    display: block;
+    display: flex; align-items: center; gap: 10px;
     padding: 10px 16px;
     font-size: .85rem;
     color: var(--text);
     cursor: pointer;
+    white-space: nowrap;
     transition: background .15s;
 }
-.user-dropdown-item:hover { background: var(--bg); color: var(--primary); }
+.user-dropdown-item i { font-size: .9rem; color: var(--muted); width: 16px; text-align: center; }
+.user-dropdown-item:hover   { background: var(--bg); color: var(--primary); }
+.user-dropdown-item:hover i { color: var(--primary); }
 .user-dropdown-item + .user-dropdown-item { border-top: 1px solid var(--border); }
 
 /* ---------- 6. Botones ---------- */
@@ -294,6 +328,11 @@ textarea { resize: vertical; min-height: 60px; }
 /* ---------- 8a. ABM: contenedor del modulo ---------- */
 .section { display: block; }
 
+/* Icono de la tarjeta de ayuda del modulo (skill abm_design). Reemplaza al
+ * emoji que habia antes, por eso lleva color propio: un glifo FA monocromo
+ * en el gris del texto se pierde contra el parrafo que acompaña. */
+.module-help-icon { font-size: 1.6rem; line-height: 1; color: var(--primary); flex-shrink: 0; }
+
 /* ---------- 8b. ABM: toolbar del listado (skill abm_design §Buscador) ----
  * Izquierda: busqueda rapida + Filtros (solo icono, con badge) + Refrescar
  * (solo icono). Derecha: accion primaria "+ Nuevo <recurso>". */
@@ -302,7 +341,14 @@ textarea { resize: vertical; min-height: 60px; }
 .toolbar-right { display: flex; gap: 10px; }
 
 .search-wrap   { position: relative; display: inline-flex; align-items: center; }
-.search-wrap .search-input { width: 260px; padding-right: 30px; }
+.search-wrap .search-input { width: 260px; padding-left: 28px; padding-right: 30px; }
+/* La lupa no puede vivir en el `placeholder` (es texto plano, no acepta
+ * markup), asi que va como <i> absoluto dentro del wrap; `pointer-events:none`
+ * para que el click siga cayendo en el input. */
+.search-icon   {
+    position: absolute; left: 10px; pointer-events: none;
+    color: var(--muted); font-size: .8rem;
+}
 .search-clear  {
     position: absolute; right: 6px; background: none; border: none;
     cursor: pointer; color: var(--muted); font-size: 1.1rem;
@@ -399,6 +445,43 @@ th.action-col, td.action-col {
 .ctx-menu button.ctx-menu-danger:hover { background: rgba(230,42,42,.12); color: var(--danger); }
 .ctx-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
+/* ---------- 8e. Ficha unica: tarjeta de formulario en pantalla ----------
+ * Los ABM editan dentro de un modal, pero los modulos de ficha unica
+ * (Facturacion: un solo registro por dominio, sin listado) editan en la
+ * propia pantalla. La tarjeta usa el mismo tratamiento visual que
+ * .table-card para que ambos tipos de modulo se lean como el mismo sistema. */
+.form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+}
+.form-card + .form-card { margin-top: 16px; }
+.form-card-head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.form-card-title {
+    font-size: .95rem; font-weight: 700; color: var(--text); margin: 0;
+}
+.form-card-hint { font-size: .8rem; color: var(--muted); }
+.form-card-loading { padding: 24px 0; text-align: center; color: var(--muted); font-size: .88rem; }
+
+/* Pie de la tarjeta: acciones a la derecha, separadas por una linea. En
+ * lectura lleva "Editar"; en edicion, "Cancelar" + "Guardar". */
+.form-card-foot {
+    display: flex; justify-content: flex-end; gap: 10px;
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+/* Adentro de la tarjeta grande, cada campo es una tarjeta chica .view-card
+ * (las mismas del modal de Consultar). En modo edicion la tarjeta conserva
+ * su etiqueta y cambia el valor por un control que la ocupa entera: la
+ * distribucion es identica en los dos modos. */
+.view-card input, .view-card select, .view-card textarea { width: 100%; }
+
 /* ---------- 9. Badges ---------- */
 .badge         { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: .75rem; font-weight: 600; }
 .badge-info    { background: rgba(59,130,246,.18); color: #93c5fd; }
@@ -477,6 +560,7 @@ th.action-col, td.action-col {
     min-width: 0;
 }
 .view-card-half  { flex: 1 1 calc(50% - 6px); }
+.view-card-third { flex: 1 1 calc(33.333% - 8px); }
 .view-card-full  { flex: 1 1 100%; }
 .view-card-label {
     font-size: .75rem; font-weight: 600;
@@ -494,7 +578,7 @@ th.action-col, td.action-col {
 }
 
 @media (max-width: 640px) {
-    .view-card-half { flex: 1 1 100%; }
+    .view-card-half, .view-card-third { flex: 1 1 100%; }
 }
 
 /* ---------- 11c. Modal Entorno (visor de diagnostico) ----------
@@ -535,6 +619,158 @@ th.action-col, td.action-col {
 
 @media (max-width: 640px) {
     .env-table th { width: 42%; }
+}
+
+/* ---------- 11d. Modal Cambiar dominio ----------
+ * Lista de los perfiles de la cuenta. Cada fila es una tarjeta con el mismo
+ * fondo que las de 11b (10% mas oscuro que --surface): dominio arriba, rol
+ * abajo y badges a la derecha. El perfil activo se marca con el borde
+ * izquierdo en --primary.
+ *
+ * Las filas elegibles son <button> (cambian la sesion) y las informativas
+ * -- el dominio activo sin perfil -- son <div>: sin hover ni cursor, porque
+ * no hay nada que elegir. */
+/* Linea de contexto arriba del listado. El gap del .modal-body ya la separa. */
+.modal-note    { margin: 0; font-size: .82rem; color: var(--muted); line-height: 1.45; }
+
+.dominio-list  { display: flex; flex-direction: column; gap: 8px; }
+.dominio-item  {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border-radius: var(--radius);
+    border-left: 3px solid transparent;
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 12px;
+    min-width: 0;
+}
+.dominio-item.is-actual                    { border-left-color: var(--primary); }
+.dominio-item-icon                         { flex: 0 0 auto; font-size: .95rem; color: var(--muted); }
+.dominio-item.is-actual .dominio-item-icon { color: var(--primary); }
+.dominio-item-body   { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dominio-item-nombre { font-size: .9rem;  font-weight: 600; color: var(--text);  word-break: break-word; }
+.dominio-item-meta   { font-size: .78rem; color: var(--muted); word-break: break-word; }
+.dominio-item-tags   { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
+/* Reset del <button> + hover: el texto se alinea a la izquierda como en el
+   <div> y la fila entera es el area clickeable. */
+button.dominio-item {
+    width: 100%; text-align: left; font-family: inherit;
+    border: none; border-left: 3px solid transparent;
+    cursor: pointer; transition: background .15s;
+}
+button.dominio-item:hover { background: var(--row-hover); }
+button.dominio-item:hover .dominio-item-icon,
+button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
+
+/* Durante el POST de cambio de dominio: la lista queda inerte hasta que
+   termina la recarga, para que no se dispare un segundo cambio. */
+.dominio-list.is-busy { pointer-events: none; opacity: .55; }
+
+/* ---------- 11e. Pestañas dentro de un modal ----------
+ * Mismo patron que cloud (Consultar usuario -> General / Perfiles): la
+ * pestaña activa se marca con el acento --primary abajo. El panel oculto
+ * lleva [hidden], asi el DOM del contenido se conserva entre cambios. */
+.modal-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.modal-tab  {
+    background: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: .85rem; font-weight: 600;
+    color: var(--muted); padding: 10px 14px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: color .15s, border-color .15s;
+}
+.modal-tab:hover  { color: var(--text); }
+.modal-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.modal-tabpanel   { display: flex; flex-direction: column; gap: 16px; }
+.modal-tabpanel[hidden] { display: none; }
+/* Contenedor que un panel rellena por AJAX: repite la columna con gap del
+   panel para que el contenido cargado no quede pegado entre sí. */
+.modal-tabpanel-body { display: flex; flex-direction: column; gap: 16px; }
+
+/* ---------- 11f. Grafico de nivel de señal (Consultar dispositivo) ----------
+ * Barras horizontales, una por medicion, de la mas reciente a la mas vieja
+ * (el orden de todos los listados del panel). El largo es el % de la escala
+ * del producto: -90 dBm = 0%, -10 dBm = 100%, o sea 20 dBm cada 25%. Por eso
+ * las guias del track caen justo en -70 / -50 / -30.
+ *
+ * El color es una banda de calidad (buena / regular / debil), no una serie:
+ * nunca queda solo -- cada fila lleva ademas el ícono de la banda y el valor
+ * en dBm, y el largo de la barra ya dice lo mismo. */
+.senal-chart { display: flex; flex-direction: column; gap: 10px; }
+
+/* Sin scroll propio: el scroll es el del .modal-body, asi las filas y el eje
+   comparten exactamente el mismo ancho de columna (un scrollbar interno se
+   comeria unos pixeles de las filas y desalinearia los rotulos del eje). */
+.senal-rows { display: flex; flex-direction: column; gap: 2px; }
+.senal-row {
+    display: grid; grid-template-columns: 104px 1fr 86px;
+    align-items: center; gap: 10px;
+    padding: 3px 6px; border-radius: 6px;
+}
+.senal-row:hover { background: var(--row-hover); }
+.senal-row-fecha { font-size: .74rem; color: var(--muted); white-space: nowrap; }
+
+/* Track = la escala completa. Las guias son el grid del grafico: van al
+   fondo, en un blanco muy tenue, para no competir con la barra. */
+.senal-track {
+    position: relative; height: 14px; border-radius: 4px;
+    background:
+        linear-gradient(to right, rgba(255,255,255,.10) 1px, transparent 1px) 25% 0 / 25% 100% repeat-x,
+        color-mix(in srgb, var(--surface) 80%, #000);
+    overflow: hidden;
+}
+.senal-bar {
+    display: block; height: 100%;
+    border-radius: 0 4px 4px 0;
+    min-width: 3px;
+    transition: width .2s;
+}
+.senal-bar-buena   { background: var(--success); }
+.senal-bar-regular { background: var(--warn); }
+.senal-bar-debil   { background: var(--danger); }
+
+/* El ícono de la banda acompaña al valor en las filas y en las tarjetas del
+   resumen, asi que el color va suelto (no anidado bajo .senal-row-valor). */
+.senal-icon-buena   { color: var(--success); }
+.senal-icon-regular { color: var(--warn); }
+.senal-icon-debil   { color: var(--danger); }
+
+.senal-row-valor {
+    font-family: monospace; font-size: .78rem; color: var(--text);
+    display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+    white-space: nowrap;
+}
+.senal-row-valor i { font-size: .8rem; }
+
+/* Eje: las mismas cuatro guias del track, rotuladas en dBm. Se alinea con
+   la columna del track repitiendo la grilla de la fila. */
+.senal-axis {
+    display: grid; grid-template-columns: 104px 1fr 86px;
+    gap: 10px; padding: 0 6px;
+}
+/* Los rótulos van posicionados sobre la guía que rotulan (left: 0/25/50/75/
+   100%), no repartidos con space-between: como no miden todos lo mismo, el
+   reparto los correría de la línea. Los de las puntas se alinean por dentro
+   para no desbordar el track. */
+.senal-axis-scale {
+    grid-column: 2; position: relative; height: 12px;
+    font-size: .68rem; color: var(--muted); font-family: monospace;
+}
+.senal-axis-scale span             { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.senal-axis-scale span:first-child { transform: none; }
+.senal-axis-scale span:last-child  { transform: translateX(-100%); }
+
+/* Referencia de bandas. Va siempre: es lo que evita que el color sea el
+   único portador del significado. */
+.senal-legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    font-size: .74rem; color: var(--muted);
+}
+.senal-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.senal-legend-dot  { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+
+@media (max-width: 640px) {
+    .senal-row, .senal-axis { grid-template-columns: 78px 1fr 78px; }
+    .senal-row-fecha        { font-size: .7rem; }
 }
 
 /* ---------- 12. Toasts ---------- */
@@ -579,7 +815,45 @@ th.action-col, td.action-col {
     min-width: 120px;
 }
 .stat-label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* Variante del dashboard: el icono del modulo va como marca de agua grande
+ * contra el borde derecho. Solo la usa dashboardStat() -- los stats-bar de
+ * los ABM siguen con .stat-card pelada, sin icono.
+ *   - `overflow:hidden` recorta el glifo si la tarjeta queda angosta.
+ *   - `padding-right` reserva la banda del icono para que el numero nunca
+ *     se le monte encima.
+ *   - blanco translucido, NO var(--primary): el rojo institucional sobre
+ *     --surface (#242526) queda casi negro y el glifo no se lee. El alfa va
+ *     en el `color`, no en `opacity`, para dejar una sola perilla. */
+.stat-card-watermark { position: relative; overflow: hidden; padding-right: 96px; min-width: 180px; }
+.stat-icon {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 3.75rem;
+    line-height: 1;
+    color: rgba(255,255,255,.18);
+    pointer-events: none;
+    transition: color .15s;
+}
+
+/* Tarjeta clickeable: en el dashboard cada stat es un <a> al modulo que
+ * resume. `a` global ya trae color:inherit + text-decoration:none, aca solo
+ * falta la afordancia de que se puede clickear. */
+.stat-card-link { cursor: pointer; transition: border-color .15s, background .15s; }
+.stat-card-link:hover { border-color: var(--primary); background: var(--row-hover); }
+.stat-card-link:hover .stat-icon { color: rgba(255,255,255,.30); }
+.stat-card-link:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(193,19,19,.45);
+}
 .stat-value { font-size: 1.5rem; font-weight: 700; }
+/* En el dashboard el numero es el contenido principal de la pantalla (no un
+ * resumen al margen como en los ABM), asi que va mas grande. Solo la variante
+ * con marca de agua -- los stats-bar de los listados quedan como estan. */
+.stat-card-watermark .stat-value { font-size: 2.1rem; line-height: 1.15; }
 .stat-value.green  { color: var(--success); }
 .stat-value.orange { color: var(--primary); }
 .stat-value.red    { color: var(--danger); }

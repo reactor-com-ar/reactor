@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 /**
- * Conexion de un dispositivo: serie del nivel de senal reportado por el
- * propio equipo (esquema real en db/schema.sql -> `senales`).
+ * Conexion de un dispositivo: serie horaria del nivel de senal reportado
+ * por el propio equipo (esquema real en db/schema.sql -> `senales`).
  *
- *   GET api/dispositivo_conexion.php?id=N -> muestras + resumen + escala
+ *   GET api/dispositivo_conexion.php?id=N[&horas=24] -> serie + resumen
  *
  * MODULO DE SOLO LECTURA. `senales` es el historial inmutable de mensajes
  * del equipo: la escribe el motor MQTT, nunca el panel. Cualquier metodo
@@ -15,6 +15,12 @@ declare(strict_types=1);
  * ALCANCE: el dispositivo tiene que ser del dominio de la sesion
  * (requireDominioId()). Sin esa comprobacion, un id a mano expondria la
  * telemetria de un equipo de otro cliente.
+ *
+ * LA SERIE TIENE UN PUNTO POR HORA, REPORTE O NO EL EQUIPO. Las horas sin
+ * mediciones viajan con `dbm = null`: son parte del dato -- que un equipo
+ * deje de informar tres horas es exactamente lo que hay que poder ver --
+ * y el front las dibuja como un corte en la linea, no como una
+ * interpolacion entre los dos extremos.
  *
  * DE DONDE SALE EL NIVEL: `senales` no tiene columna de senal -- el valor
  * viaja adentro de `mensaje`, en el protocolo de etiquetas `CLAVE=valor`
@@ -37,13 +43,12 @@ declare(strict_types=1);
  * equipo tiene que leerse igual en el panel y en el back office viejo.
  *
  * ESCALA DE LA TABLA (medido en reactor_dev, 2026-09-02): `senales` tiene
- * ~863K filas vivas y un solo dispositivo puede aportar 348K. Los unicos
- * indices son la PK y las FKs, asi que el LIKE sobre `mensaje` se resuelve
- * fila por fila: sobre el dispositivo mas cargado, un equipo que no
- * reporta senal barria sus 348K filas (1,6 s medidos). Por eso la busqueda
- * corre dentro de una ventana de las ultimas MUESTRAS_VENTANA senales DE
- * ESE DISPOSITIVO (0,05 s medidos). La ventana es relativa al equipo, no
- * global: asi tambien funciona para los que reportan poco y hace meses.
+ * ~863K filas vivas, entran ~90K por semana y un solo dispositivo puede
+ * aportar 23K en 7 dias. Los unicos indices son la PK y las FKs: `fecha`
+ * NO esta indexada, asi que filtrar por rango de fechas sobre el indice de
+ * `dispositivo` obliga a mirar fila por fila todo el historial del equipo
+ * (348K filas / 1,6 s en el peor caso medido). Por eso la consulta lleva
+ * ademas una cota por PK -- ver pisoPorFecha().
  */
 
 require __DIR__ . '/bootstrap.php';
@@ -52,11 +57,19 @@ require __DIR__ . '/bootstrap.php';
 const SENAL_MAXIMO = -10;   // 100%
 const SENAL_MINIMO = -90;   //   0%
 
-/** Cuantas senales del dispositivo se miran hacia atras (acota el LIKE). */
-const MUESTRAS_VENTANA = 5000;
+/** Ventanas ofrecidas al front, en horas. La serie siempre es horaria. */
+const HORAS_OPCIONES = [24, 48, 168];
+const HORAS_DEFECTO  = 24;
 
-/** Cuantas mediciones devuelve como maximo (barras del grafico). */
-const MUESTRAS_LIMITE = 60;
+/**
+ * Colchon de ids que se le resta al piso calculado por fecha. `fecha` es
+ * monotona respecto de `id` en la practica (las senales se insertan a
+ * medida que llegan) pero no lo garantiza nada: inserciones concurrentes o
+ * un reloj corrido pueden desordenar unas pocas filas. Pasarse de largo
+ * hacia atras solo cuesta unas filas de scan; quedarse corto perderia
+ * mediciones, asi que el margen va siempre para el lado barato.
+ */
+const MARGEN_PISO = 2000;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -64,21 +77,24 @@ try {
     if ($method !== 'GET') {
         json_error('Metodo no permitido: la conexion es de solo lectura', 405);
     }
-    handleGet((int) ($_GET['id'] ?? 0));
+    handleGet((int) ($_GET['id'] ?? 0), (int) ($_GET['horas'] ?? HORAS_DEFECTO));
 } catch (Throwable $e) {
     json_error('Error al procesar la conexion del dispositivo: ' . $e->getMessage(), 500);
 }
 
-function handleGet(int $id): void
+function handleGet(int $id, int $horas): void
 {
     $dominio = requireDominioId();
     if ($id <= 0) {
         json_error('Codigo invalido', 422);
     }
+    if (!in_array($horas, HORAS_OPCIONES, true)) {
+        $horas = HORAS_DEFECTO;
+    }
 
     // El dispositivo tiene que existir DENTRO del dominio de la sesion.
     $own = db()->prepare(
-        'SELECT id, uuid, nombre, senal, enlace, conexion
+        'SELECT id, uuid, nombre, senal, enlace, conexion, latido
            FROM dispositivos WHERE id = :id AND dominio = :dom LIMIT 1'
     );
     $own->execute([':id' => $id, ':dom' => $dominio]);
@@ -87,7 +103,16 @@ function handleGet(int $id): void
         json_error('Dispositivo no encontrado en este dominio', 404);
     }
 
-    $muestras = muestras($id);
+    // La ventana arranca al principio de una hora y termina al final de la
+    // hora en curso: asi el ultimo punto es "lo que va de esta hora" y no
+    // un tramo cortado en un minuto arbitrario.
+    $ahora   = new DateTimeImmutable('now');
+    $hasta   = $ahora->setTime((int) $ahora->format('H'), 0, 0);
+    $desde   = $hasta->modify('-' . ($horas - 1) . ' hours');
+    $desdeDb = $desde->format('Y-m-d H:i:s');
+
+    $muestras = muestras($id, $desdeDb, pisoPorFecha($desdeDb));
+    $serie    = serie($muestras, $desde, $horas);
 
     json_ok([
         'dispositivo' => [
@@ -97,52 +122,71 @@ function handleGet(int $id): void
             'senal'    => nivel(nivelActual($dispositivo['senal'] ?? null)),
             'enlace'   => (int) ($dispositivo['enlace'] ?? 0) === 1,
             'conexion' => (string) ($dispositivo['conexion'] ?? ''),
+            'latido'   => (string) ($dispositivo['latido']   ?? ''),
         ],
-        'muestras' => $muestras,
-        'resumen'  => resumen($muestras),
-        'escala'   => ['maximo' => SENAL_MAXIMO, 'minimo' => SENAL_MINIMO],
-        'ventana'  => MUESTRAS_VENTANA,
-        'limite'   => MUESTRAS_LIMITE,
+        'serie'   => $serie,
+        'resumen' => resumen($muestras, $serie),
+        'escala'  => ['maximo' => SENAL_MAXIMO, 'minimo' => SENAL_MINIMO],
+        'horas'   => $horas,
+        'desde'   => $desdeDb,
+        'hasta'   => $hasta->modify('+1 hour')->format('Y-m-d H:i:s'),
+        'opciones' => HORAS_OPCIONES,
     ]);
 }
 
 /**
- * Ultimas mediciones de senal del dispositivo, de la mas reciente a la mas
- * vieja (el mismo orden que todos los listados del panel).
+ * Primer id de `senales` cuya fecha entra en la ventana, con margen.
  *
- * Se resuelve en dos pasos a proposito. El primero toma los ids de las
- * ultimas MUESTRAS_VENTANA senales del equipo: es un range scan puro sobre
- * el indice (dispositivo, id) -- las secundarias de InnoDB llevan la PK
- * detras -- y corta solo. Ese piso entra como cota en el segundo, que ya
- * si aplica los LIKE. Sin el piso, un equipo sin mediciones obliga a
- * recorrer todo su historial.
+ * Es una busqueda binaria sobre la PK: `fecha` no tiene indice, pero crece
+ * junto con `id`, asi que cada sonda es un lookup puntual por clave
+ * primaria (instantaneo) y en ~25 sondas se acota una tabla de 35M ids. El
+ * resultado NO se usa como filtro exacto -- de eso se encarga
+ * `fecha >= :desde` -- sino para que el rango del indice de `dispositivo`
+ * empiece cerca de la ventana en lugar de recorrer todo el historial del
+ * equipo.
  */
-function muestras(int $dispositivo): array
+function pisoPorFecha(string $desde): int
 {
-    $piso = db()->prepare(
-        'SELECT MIN(id) FROM (
-             SELECT id FROM senales WHERE dispositivo = :dis ORDER BY id DESC LIMIT ' . MUESTRAS_VENTANA . '
-         ) AS ventana'
-    );
-    $piso->execute([':dis' => $dispositivo]);
-    $desde = (int) $piso->fetchColumn();
-    if ($desde <= 0) {
-        return [];
+    $lo = (int) db()->query('SELECT MIN(id) FROM senales')->fetchColumn();
+    $hi = (int) db()->query('SELECT MAX(id) FROM senales')->fetchColumn();
+    if ($lo <= 0 || $hi <= 0) {
+        return 0;
     }
 
+    // Se busca el primer id cuya fecha ya no es anterior a la ventana.
+    $sonda = db()->prepare('SELECT fecha FROM senales WHERE id >= :probe ORDER BY id LIMIT 1');
+    while ($lo < $hi) {
+        $medio = intdiv($lo + $hi, 2);
+        $sonda->execute([':probe' => $medio]);
+        $fecha = (string) ($sonda->fetchColumn() ?: '');
+        // Sin fila o con fecha nula se busca hacia atras: un piso de menos
+        // solo cuesta scan, uno de mas se come mediciones.
+        if ($fecha !== '' && $fecha < $desde) {
+            $lo = $medio + 1;
+        } else {
+            $hi = $medio;
+        }
+    }
+
+    return max(0, $lo - MARGEN_PISO);
+}
+
+/** Mediciones crudas del equipo dentro de la ventana, de la mas vieja a la mas nueva. */
+function muestras(int $dispositivo, string $desde, int $piso): array
+{
     // Las dos formas del protocolo. `RET=WSN|...` NO contiene "WSN=", asi
     // que no alcanza con el primer LIKE: hacen falta los dos.
     $stmt = db()->prepare(
         'SELECT id, fecha, mensaje
            FROM senales
           WHERE dispositivo = :dis
-            AND id >= :desde
+            AND id >= :piso
+            AND fecha >= :desde
             AND sentido = \'E\'
             AND (mensaje LIKE \'%WSN=%\' OR mensaje LIKE \'RET=WSN|%\')
-          ORDER BY id DESC
-          LIMIT ' . MUESTRAS_LIMITE
+          ORDER BY id ASC'
     );
-    $stmt->execute([':dis' => $dispositivo, ':desde' => $desde]);
+    $stmt->execute([':dis' => $dispositivo, ':piso' => $piso, ':desde' => $desde]);
 
     $muestras = [];
     foreach ($stmt->fetchAll() as $fila) {
@@ -151,16 +195,47 @@ function muestras(int $dispositivo): array
         if ($dbm === null) {
             continue;   // El LIKE puede pescar un mensaje raro; se descarta.
         }
-        $muestras[] = [
-            'id'         => (int) $fila['id'],
-            'fecha'      => (string) ($fila['fecha'] ?? ''),
-            'dbm'        => $dbm,
-            'porcentaje' => porcentaje($dbm),
-            'reporte'    => reporteDelMensaje($mensaje),
-        ];
+        $muestras[] = ['fecha' => (string) ($fila['fecha'] ?? ''), 'dbm' => $dbm];
     }
 
     return $muestras;
+}
+
+/**
+ * Serie horaria completa: un punto por cada hora de la ventana, tenga
+ * mediciones o no. El valor de la hora es el PROMEDIO de lo que reporto el
+ * equipo en esa hora (un equipo activo informa decenas de veces por hora);
+ * `minimo` y `maximo` viajan aparte para poder mostrar la dispersion sin
+ * ensuciar la linea.
+ */
+function serie(array $muestras, DateTimeImmutable $desde, int $horas): array
+{
+    // Las mediciones se agrupan por su hora ('Y-m-d H:00:00').
+    $porHora = [];
+    foreach ($muestras as $m) {
+        $clave = substr($m['fecha'], 0, 13) . ':00:00';
+        $porHora[$clave][] = $m['dbm'];
+    }
+
+    $serie = [];
+    for ($i = 0; $i < $horas; $i++) {
+        $hora   = $desde->modify('+' . $i . ' hours');
+        $clave  = $hora->format('Y-m-d H:00:00');
+        $lote   = $porHora[$clave] ?? [];
+        $vacia  = $lote === [];
+        $prom   = $vacia ? null : (int) round(array_sum($lote) / count($lote));
+
+        $serie[] = [
+            'hora'       => $clave,
+            'dbm'        => $prom,
+            'porcentaje' => $prom === null ? null : porcentaje($prom),
+            'minimo'     => $vacia ? null : min($lote),
+            'maximo'     => $vacia ? null : max($lote),
+            'muestras'   => count($lote),
+        ];
+    }
+
+    return $serie;
 }
 
 /**
@@ -177,15 +252,6 @@ function nivelDelMensaje(string $mensaje): ?int
         return (int) $m[1];
     }
     return null;
-}
-
-/** Tipo de reporte que trajo la medicion: 'CNX', 'INI', 'WSN'... */
-function reporteDelMensaje(string $mensaje): string
-{
-    if (preg_match('/(?:^|\|)(?:REP|RET)=([A-Z]{2,4})/', $mensaje, $m)) {
-        return $m[1];
-    }
-    return '';
 }
 
 /**
@@ -220,26 +286,31 @@ function nivelActual(mixed $valor): ?int
     return preg_match('/^\s*(-?\d+)/', (string) ($valor ?? ''), $m) ? (int) $m[1] : null;
 }
 
-/** Estadisticas de la serie devuelta (no de todo el historial). */
-function resumen(array $muestras): array
+/**
+ * Estadisticas de la ventana. `promedio` / `mejor` / `peor` salen de las
+ * mediciones crudas, no de los promedios horarios: una hora con 40 lecturas
+ * y otra con 1 no pesan igual, y el minimo real se perderia dentro del
+ * promedio de su hora.
+ */
+function resumen(array $muestras, array $serie): array
 {
+    $conDato = count(array_filter($serie, static fn(array $p): bool => $p['dbm'] !== null));
+
     if ($muestras === []) {
         return [
-            'muestras' => 0,    'promedio' => null,
-            'mejor'    => null, 'peor'     => null, 'desde' => '', 'hasta' => '',
+            'muestras' => 0, 'horas' => count($serie), 'horas_con_dato' => 0,
+            'promedio' => null, 'mejor' => null, 'peor' => null,
         ];
     }
 
     $niveles = array_column($muestras, 'dbm');
 
-    // `muestras` viene de la mas reciente a la mas vieja: el periodo
-    // cubierto arranca en la ultima fila y termina en la primera.
     return [
-        'muestras' => count($muestras),
-        'promedio' => nivel((int) round(array_sum($niveles) / count($niveles))),
-        'mejor'    => nivel(max($niveles)),
-        'peor'     => nivel(min($niveles)),
-        'desde'    => (string) $muestras[count($muestras) - 1]['fecha'],
-        'hasta'    => (string) $muestras[0]['fecha'],
+        'muestras'       => count($muestras),
+        'horas'          => count($serie),
+        'horas_con_dato' => $conDato,
+        'promedio'       => nivel((int) round(array_sum($niveles) / count($niveles))),
+        'mejor'          => nivel(max($niveles)),
+        'peor'           => nivel(min($niveles)),
     ];
 }

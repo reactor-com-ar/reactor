@@ -102,6 +102,41 @@
             }
         },
         {
+            "label": "deploy + restart",
+            "type": "process",
+            "windows": {
+                "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+                "args": [
+                    "scripts/deploy.sh",
+                    "--restart"
+                ]
+            },
+            "linux": {
+                "command": "bash",
+                "args": [
+                    "scripts/deploy.sh",
+                    "--restart"
+                ]
+            },
+            "osx": {
+                "command": "bash",
+                "args": [
+                    "scripts/deploy.sh",
+                    "--restart"
+                ]
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "focus": true
+            }
+        },
+        {
             "label": "deploy + rebuild",
             "type": "process",
             "windows": {

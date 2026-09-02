@@ -33,6 +33,7 @@
         signals:   { title: 'Señales',              render: renderSignals,   group: 'registros'  },
         registros: { title: 'Historial de registros', render: renderRegistros, group: 'registros'  },
         alerts:    { title: 'Alertas',              render: renderStub,      group: 'registros'  },
+        adopciones: { title: 'Adopciones',          render: renderAdopciones, group: 'registros' },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'seguridad'  },
         profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'seguridad'  },
         tools:     { title: 'Herramientas',  render: renderTools,     group: 'administracion' },
@@ -937,7 +938,7 @@
         function rowMenuFor(d) {
             return standardRowMenuItems({
                 view:     true, onView:   () => openDeviceViewModal(d),
-                edit:     true, onEdit:   () => openDeviceModal(d, allDominios),
+                edit:     true, onEdit:   () => openDeviceModal(d),
                 delete:   true, onDelete: () => confirmDeleteDevice(d),
             });
         }
@@ -972,7 +973,7 @@
         });
 
         btnFilt.addEventListener('click', () => openDevicesFiltersModal(state, allDominios, applyAndRender));
-        btnNew.addEventListener('click',  () => openDeviceModal(null, allDominios));
+        btnNew.addEventListener('click',  () => openDeviceModal(null));
 
         applyAndRender();
     }
@@ -1052,40 +1053,130 @@
         });
     }
 
-    function openDeviceViewModal(dev) {
-        const cfgStr = dev.config_json
-            ? (typeof dev.config_json === 'object'
-                ? JSON.stringify(dev.config_json, null, 2)
-                : String(dev.config_json))
-            : '';
-        const cfgValue = cfgStr
-            ? `<pre>${escape(cfgStr)}</pre>`
-            : `<span class="muted">Sin configuración</span>`;
+    /* ---------- Consultar / Editar dispositivo ----------
+     * Los dos modales muestran las 35 columnas de `dispositivos`
+     * (db/schema.sql), agrupadas en secciones. El listado no las trae -- su
+     * query devuelve las derivaciones de la tabla (`uid`, `tipo`, `estado`,
+     * `ubicacion`) -- así que ambos modales piden el registro completo con
+     * `GET ?id=N` antes de abrir.
+     *
+     * Cloud es el back office INTERNO: acá los campos de telemetría (enlace,
+     * ip, senal, firmware, contadores, fechas de conexión/latido y las de
+     * monitoreo) también se editan, porque es la herramienta con la que se
+     * corrige un dato roto. En `panel/` son de sólo lectura. */
+
+    function devSection(titulo, icono, contenido) {
+        return `<div class="form-section">
+            <div class="form-section-title"><i class="fa-solid ${icono}"></i>${escape(titulo)}</div>
+            ${contenido}
+        </div>`;
+    }
+
+    // 'YYYY-MM-DD HH:MM:SS' -> 'YYYY-MM-DDTHH:MM' (valor de <input datetime-local>).
+    function toInputDateTime(value) {
+        const s = String(value ?? '').trim();
+        if (s === '' || s.startsWith('0000-00-00')) return '';
+        const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/);
+        return m ? `${m[1]}T${m[2] || '00:00'}` : '';
+    }
+
+    const DEV_DASH = '<span class="muted">—</span>';
+
+    // Trae el registro completo + catálogos. `id` null = alta (sólo catálogos).
+    async function fetchDevice(id) {
+        if (id == null) {
+            return { dispositivo: null, catalogos: (await api('dispositivos.php?catalogos=1')).catalogos };
+        }
+        return api('dispositivos.php?id=' + encodeURIComponent(id));
+    }
+
+    async function openDeviceViewModal(row) {
+        let dev;
+        try {
+            dev = (await fetchDevice(row.id)).dispositivo;
+        } catch (e) {
+            toast(e.message, 'error');
+            return;
+        }
+
+        const txt  = v => (v ? escape(v) : DEV_DASH);
+        const code = v => (v ? `<code>${escape(v)}</code>` : DEV_DASH);
+        const num  = v => (v === null || v === undefined ? DEV_DASH : String(v));
+        const fch  = v => (formatDate(v) ? escape(formatDate(v)) : DEV_DASH);
+        const ref  = (nombre, id) => (nombre ? escape(nombre) : (id ? `<code>#${id}</code>` : DEV_DASH));
+        const si   = (v, ok, no) => `<span class="badge ${v ? 'badge-success' : 'badge-warn'}">${v ? ok : no}</span>`;
 
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
             <div class="modal modal-wide" role="dialog" aria-modal="true">
                 <div class="modal-header">
-                    <div class="modal-title">Consultar dispositivo</div>
+                    <div class="modal-title">Consultar dispositivo
+                        <span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uuid)}</code></span>
+                    </div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
-                    ${viewGrid([
-                        viewCardHalf('Código',           `<code>#${dev.id}</code>`),
-                        viewCardHalf('UID',              `<code>${escape(dev.uid)}</code>`),
-                        viewCardHalf('Nombre',           escape(dev.nombre)),
-                        viewCardHalf('Tipo',             escape(dev.tipo)),
-                        viewCardHalf('Dominio',          `<span class="badge badge-info">${escape(dev.dominio_nombre)}</span>`),
-                        viewCardHalf('Estado',           statusBadge(dev.estado)),
-                        viewCardHalf('Ubicación',        dev.ubicacion ? escape(dev.ubicacion) : `<span class="muted">—</span>`),
-                        viewCardHalf('Última conexión',  escape(formatDate(dev.last_seen_at))),
-                        viewCardHalf('Creado',           escape(formatDate(dev.created_at))),
-                        viewCardFull('Configuración (JSON)', cfgValue),
-                    ])}
+                    ${devSection('Identificación', 'fa-fingerprint', viewGrid([
+                        viewCardHalf('Código',        `<code>#${dev.id}</code>`),
+                        viewCardHalf('Identificador', code(dev.uuid)),
+                        viewCardFull('Nombre',        txt(dev.nombre)),
+                        viewCardHalf('Serie',         txt(dev.serial)),
+                        viewCardHalf('Identidad',     txt(dev.identidad)),
+                        viewCardFull('Llave',         code(dev.llave)),
+                    ]))}
+                    ${devSection('Asignación', 'fa-sitemap', viewGrid([
+                        viewCardHalf('Dominio',     dev.dominio_nombre
+                            ? `<span class="badge badge-info">${escape(dev.dominio_nombre)}</span>`
+                            : ref('', dev.dominio)),
+                        viewCardHalf('Agente',      ref(dev.agente_nombre, dev.agente)),
+                        viewCardHalf('Modelo',      ref(dev.modelo_nombre, dev.modelo)),
+                        viewCardHalf('Producto',    ref(dev.producto_nombre, dev.producto)),
+                        viewCardHalf('Transceptor', ref(dev.transceptor_nombre, dev.transceptor)),
+                        viewCardHalf('Chip',        ref(dev.chip_nombre, dev.chip)),
+                    ]))}
+                    ${devSection('Red', 'fa-wifi', viewGrid([
+                        viewCardHalf('MAC',      code(dev.mac)),
+                        viewCardHalf('IP',       code(dev.ip)),
+                        viewCardHalf('Firmware', txt(dev.firmware)),
+                        viewCardHalf('Señal',    txt(dev.senal)),
+                    ]))}
+                    ${devSection('Estado', 'fa-toggle-on', viewGrid([
+                        viewCardHalf('Habilitado',        si(dev.habilitado, 'Habilitado', 'Deshabilitado')),
+                        viewCardHalf('Enlace',            si(dev.enlace, 'En línea', 'Fuera de línea')),
+                        viewCardHalf('Adoptado',          si(dev.adoptado, 'Sí', 'No')),
+                        viewCardHalf('Adopción',          dev.adopcion ? `<code>#${dev.adopcion}</code>` : DEV_DASH),
+                        viewCardHalf('Límite de señales', num(dev.senalesLimite)),
+                    ]))}
+                    ${devSection('Fechas', 'fa-calendar', viewGrid([
+                        viewCardHalf('Fabricación',     fch(dev.fabricacion)),
+                        viewCardHalf('Instalación',     fch(dev.instalacion)),
+                        viewCardHalf('Último inicio',   fch(dev.inicio)),
+                        viewCardHalf('Última conexión', fch(dev.conexion)),
+                        viewCardHalf('Último latido',   fch(dev.latido)),
+                    ]))}
+                    ${devSection('Contadores', 'fa-hashtag', viewGrid([
+                        viewCardHalf('Inicios',    num(dev.inicios)),
+                        viewCardHalf('Conexiones', num(dev.conexiones)),
+                        viewCardHalf('Latidos',    num(dev.latidos)),
+                    ]))}
+                    ${devSection('Monitoreo', 'fa-heart-pulse', viewGrid([
+                        viewCardHalf('Monitoreo', dev.monitoreo
+                            ? '<span class="badge badge-success">Activo</span>'
+                            : '<span class="badge badge-danger">Inactivo</span>'),
+                        viewCardHalf('Intervalo', num(dev.monitoreoIntervalo)),
+                        viewCardHalf('Último monitoreo',  fch(dev.monitoreoUltimo)),
+                        viewCardHalf('Próximo monitoreo', fch(dev.monitoreoSiguiente)),
+                        viewCardFull('Correos de monitoreo', txt(dev.monitoreoCorreos)),
+                    ]))}
+                    ${devSection('Ubicación', 'fa-location-dot', viewGrid([
+                        viewCardFull('Coordenadas', txt(dev.coordenadas)),
+                        viewCardFull('Indicadores', txt(dev.indicadores)),
+                    ]))}
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                    <button class="btn btn-ghost"   data-act="close">Cerrar</button>
+                    <button class="btn btn-primary" data-act="edit"><i class="fa-solid fa-pencil"></i> Editar</button>
                 </div>
             </div>
         `;
@@ -1097,18 +1188,16 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.querySelector('[data-act="edit"]').addEventListener('click', () => {
+            close();
+            openDeviceModal({ id: dev.id });
+        });
     }
-
-    const ESTADOS_DISPOSITIVO = [
-        { value: 'online',  label: 'Online'  },
-        { value: 'offline', label: 'Offline' },
-        { value: 'error',   label: 'Error'   },
-    ];
 
     function confirmDeleteDevice(dev) {
         confirmDialog(
             'Eliminar dispositivo',
-            `¿Eliminar el dispositivo ${dev.nombre} (UID ${dev.uid})? Se borrarán también sus señales asociadas. Esta acción no se puede deshacer.`,
+            `¿Eliminar el dispositivo ${dev.nombre} (identificador ${dev.uid})? Esta acción no se puede deshacer.`,
             async () => {
                 try {
                     await api('dispositivos.php?id=' + dev.id, { method: 'DELETE' });
@@ -1121,25 +1210,64 @@
         );
     }
 
-    function openDeviceModal(dev, allDominios) {
-        const isEdit = !!dev;
+    /**
+     * Alta / edición con las 35 columnas. `row` es null en el alta, o trae
+     * al menos el id en la edición: el registro completo lo pide fetchDevice.
+     */
+    async function openDeviceModal(row) {
+        const isEdit = !!row;
 
-        const domOpts = (isEdit ? '' : '<option value="">Elegí un dominio…</option>') +
-            allDominios.map(d =>
-                `<option value="${d.id}" ${dev?.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
+        let dev, cat;
+        try {
+            const data = await fetchDevice(isEdit ? row.id : null);
+            dev = data.dispositivo;
+            cat = data.catalogos;
+        } catch (e) {
+            toast(e.message, 'error');
+            return;
+        }
+
+        // <select> de un catálogo. `vacio` es la opción "sin asignar": en esta
+        // base el 0 es el centinela histórico de "sin asignar", así que la
+        // opción vacía vale '' y el backend la guarda como NULL.
+        const sel = (items, actual, vacio) =>
+            (vacio === null ? '' : `<option value="">${escape(vacio)}</option>`) +
+            (items || []).map(o =>
+                `<option value="${o.id}"${o.id === actual ? ' selected' : ''}>${escape(o.nombre)}</option>`
             ).join('');
 
-        const estadoOpts = ESTADOS_DISPOSITIVO.map(e =>
-            `<option value="${e.value}" ${(dev?.estado ?? 'offline') === e.value ? 'selected' : ''}>${escape(e.label)}</option>`
-        ).join('');
+        const txt = (name, label, max, extra = '') => `
+            <div class="form-group">
+                <label for="dev-${name}">${escape(label)}</label>
+                <input type="text" id="dev-${name}" maxlength="${max}" ${extra}
+                       value="${escape(dev?.[name] ?? '')}">
+                <div class="field-error" id="dev-${name}-err" style="display:none"></div>
+            </div>`;
 
-        const initialJson = dev?.config_json
-            ? JSON.stringify(dev.config_json, null, 2)
-            : '';
+        const numero = (name, label) => `
+            <div class="form-group">
+                <label for="dev-${name}">${escape(label)}</label>
+                <input type="number" id="dev-${name}" min="0" value="${dev?.[name] ?? ''}">
+            </div>`;
 
-        const titleSubtitle = isEdit
-            ? `<span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uid)}</code></span>`
-            : '';
+        const fecha = (name, label) => `
+            <div class="form-group">
+                <label for="dev-${name}">${escape(label)}</label>
+                <input type="datetime-local" id="dev-${name}" value="${toInputDateTime(dev?.[name])}">
+            </div>`;
+
+        // Los smallint booleanos van como toggle (DESIGN.md §17). Las dos
+        // etiquetas viajan en data-on / data-off y el listener las alterna.
+        const flag = (name, label, on, off) => `
+            <div class="form-group">
+                <label>${escape(label)}</label>
+                <label class="toggle-switch" style="margin-top:6px">
+                    <input type="checkbox" id="dev-${name}" ${dev?.[name] ? 'checked' : ''}>
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-label" data-on="${escape(on)}" data-off="${escape(off)}"
+                          >${escape(dev?.[name] ? on : off)}</span>
+                </label>
+            </div>`;
 
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
@@ -1148,66 +1276,129 @@
                 <div class="modal-header">
                     <div class="modal-title">
                         ${isEdit ? 'Editar dispositivo' : 'Nuevo dispositivo'}
-                        ${titleSubtitle}
+                        ${isEdit ? `<span class="modal-subtitle">${escape(dev.nombre)} · <code>${escape(dev.uuid)}</code></span>` : ''}
                     </div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="dev-dominio">Dominio</label>
-                            <select id="dev-dominio">${domOpts}</select>
-                            <div class="field-error" id="dev-dominio-err" style="display:none"></div>
+                    ${devSection('Identificación', 'fa-fingerprint', `
+                        <div class="form-row">
+                            ${txt('uuid', 'Identificador (UUID) *', 16, 'placeholder="Letras, números y . _ -" spellcheck="false"')}
+                            ${txt('serial', 'Serie', 50)}
+                        </div>
+                        ${txt('nombre', 'Nombre *', 255)}
+                        <div class="form-row">
+                            ${txt('identidad', 'Identidad', 50)}
+                            ${txt('llave', 'Llave', 50)}
+                        </div>
+                    `)}
+
+                    ${devSection('Asignación', 'fa-sitemap', `
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="dev-dominio">Dominio *</label>
+                                <select id="dev-dominio">${sel(cat.dominios, dev?.dominio ?? null, isEdit ? null : 'Elegí un dominio…')}</select>
+                                <div class="field-error" id="dev-dominio-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="dev-agente">Agente</label>
+                                <select id="dev-agente">${sel(cat.agentes, dev?.agente ?? null, 'Sin asignar')}</select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="dev-modelo">Modelo</label>
+                                <select id="dev-modelo">${sel(cat.modelos, dev?.modelo ?? null, 'Sin asignar')}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="dev-producto">Producto</label>
+                                <select id="dev-producto">${sel(cat.productos, dev?.producto ?? null, 'Sin asignar')}</select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="dev-transceptor">Transceptor</label>
+                                <select id="dev-transceptor">${sel(cat.transceptores, dev?.transceptor ?? null, 'Sin asignar')}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="dev-chip">Chip</label>
+                                <select id="dev-chip">${sel(cat.chips, dev?.chip ?? null, 'Sin asignar')}</select>
+                            </div>
+                        </div>
+                    `)}
+
+                    ${devSection('Red', 'fa-wifi', `
+                        <div class="form-row">
+                            ${txt('mac', 'MAC', 50)}
+                            ${txt('ip', 'IP', 50)}
+                        </div>
+                        <div class="form-row">
+                            ${txt('firmware', 'Firmware', 50)}
+                            ${txt('senal', 'Señal (dBm)', 50)}
+                        </div>
+                    `)}
+
+                    ${devSection('Estado', 'fa-toggle-on', `
+                        <div class="form-row">
+                            ${flag('habilitado', 'Habilitado', 'Habilitado', 'Deshabilitado')}
+                            ${flag('enlace', 'Enlace', 'En línea', 'Fuera de línea')}
+                        </div>
+                        <div class="form-row">
+                            ${flag('adoptado', 'Adoptado', 'Sí', 'No')}
+                            <div class="form-group">
+                                <label for="dev-adopcion">Adopción</label>
+                                <select id="dev-adopcion">${sel(cat.adopciones, dev?.adopcion ?? null, 'Sin adopción')}</select>
+                            </div>
+                        </div>
+                        ${numero('senalesLimite', 'Límite de señales')}
+                    `)}
+
+                    ${devSection('Fechas', 'fa-calendar', `
+                        <div class="form-row">
+                            ${fecha('fabricacion', 'Fabricación')}
+                            ${fecha('instalacion', 'Instalación')}
+                        </div>
+                        <div class="form-row form-row-3">
+                            ${fecha('inicio', 'Último inicio')}
+                            ${fecha('conexion', 'Última conexión')}
+                            ${fecha('latido', 'Último latido')}
+                        </div>
+                    `)}
+
+                    ${devSection('Contadores', 'fa-hashtag', `
+                        <div class="form-row form-row-3">
+                            ${numero('inicios', 'Inicios')}
+                            ${numero('conexiones', 'Conexiones')}
+                            ${numero('latidos', 'Latidos')}
+                        </div>
+                    `)}
+
+                    ${devSection('Monitoreo', 'fa-heart-pulse', `
+                        <div class="form-row">
+                            ${flag('monitoreo', 'Monitoreo', 'Activo', 'Inactivo')}
+                            ${numero('monitoreoIntervalo', 'Intervalo (minutos)')}
+                        </div>
+                        <div class="form-row">
+                            ${fecha('monitoreoUltimo', 'Último monitoreo')}
+                            ${fecha('monitoreoSiguiente', 'Próximo monitoreo')}
                         </div>
                         <div class="form-group">
-                            <label for="dev-estado">Estado</label>
-                            <select id="dev-estado">${estadoOpts}</select>
+                            <label for="dev-monitoreoCorreos">Correos de monitoreo</label>
+                            <textarea id="dev-monitoreoCorreos" rows="2" spellcheck="false"
+                                      placeholder="Separados por coma, punto y coma o espacio">${escape(dev?.monitoreoCorreos ?? '')}</textarea>
+                            <div class="field-error" id="dev-monitoreoCorreos-err" style="display:none"></div>
                         </div>
-                    </div>
-                    <div class="form-row">
+                    `)}
+
+                    ${devSection('Ubicación', 'fa-location-dot', `
+                        ${txt('coordenadas', 'Coordenadas', 255, 'placeholder="lat, lng"')}
                         <div class="form-group">
-                            <label for="dev-uid">UID</label>
-                            <input type="text" id="dev-uid" maxlength="64"
-                                   value="${escape(dev?.uid ?? '')}"
-                                   placeholder="RX-0001" required>
-                            <div class="field-error" id="dev-uid-err" style="display:none"></div>
+                            <label for="dev-indicadores">Indicadores</label>
+                            <textarea id="dev-indicadores" rows="2" spellcheck="false">${escape(dev?.indicadores ?? '')}</textarea>
                         </div>
-                        <div class="form-group">
-                            <label for="dev-tipo">Tipo</label>
-                            <input type="text" id="dev-tipo" maxlength="60"
-                                   value="${escape(dev?.tipo ?? '')}"
-                                   placeholder="temperature / humidity / actuator…" required>
-                            <div class="field-error" id="dev-tipo-err" style="display:none"></div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="dev-nombre">Nombre</label>
-                        <input type="text" id="dev-nombre" maxlength="120"
-                               value="${escape(dev?.nombre ?? '')}" required>
-                        <div class="field-error" id="dev-nombre-err" style="display:none"></div>
-                    </div>
-                    <div class="form-group">
-                        <label for="dev-ubicacion">Ubicación</label>
-                        <input type="text" id="dev-ubicacion" maxlength="120"
-                               value="${escape(dev?.ubicacion ?? '')}"
-                               placeholder="Opcional">
-                    </div>
-                    <div class="form-group">
-                        <label for="dev-config-json">
-                            Configuración (JSON libre — vacío equivale a limpiar; la estructura la valida el firmware)
-                        </label>
-                        <textarea id="dev-config-json"
-                                  class="json-editor"
-                                  spellcheck="false"
-                                  autocomplete="off"
-                                  placeholder='{ "channels": [] }'>${escape(initialJson)}</textarea>
-                        <div class="field-error" id="dev-config-err" style="display:none"></div>
-                    </div>
+                    `)}
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-ghost" data-act="format" style="margin-right:auto">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> Formatear JSON
-                    </button>
                     <button class="btn btn-ghost"   data-act="close">Cancelar</button>
                     <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear dispositivo'}</button>
                 </div>
@@ -1220,98 +1411,70 @@
             backdrop.classList.remove('open');
             setTimeout(() => backdrop.remove(), 200);
         };
-
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        const domSel      = backdrop.querySelector('#dev-dominio');
-        const estadoSel   = backdrop.querySelector('#dev-estado');
-        const uidInput    = backdrop.querySelector('#dev-uid');
-        const tipoInput   = backdrop.querySelector('#dev-tipo');
-        const nombreInput = backdrop.querySelector('#dev-nombre');
-        const ubicInput   = backdrop.querySelector('#dev-ubicacion');
-        const editor      = backdrop.querySelector('#dev-config-json');
-        const domErr      = backdrop.querySelector('#dev-dominio-err');
-        const uidErr      = backdrop.querySelector('#dev-uid-err');
-        const tipoErr     = backdrop.querySelector('#dev-tipo-err');
-        const nombreErr   = backdrop.querySelector('#dev-nombre-err');
-        const cfgErr      = backdrop.querySelector('#dev-config-err');
-        const formatBtn   = backdrop.querySelector('[data-act="format"]');
-        const saveBtn     = backdrop.querySelector('[data-act="save"]');
-
-        function parseEditor() {
-            const raw = editor.value.trim();
-            if (raw === '') return { ok: true, value: null };
-            try { return { ok: true, value: JSON.parse(raw) }; }
-            catch (e) { return { ok: false, error: e.message }; }
-        }
-        function clearCfgError() {
-            cfgErr.style.display = 'none';
-            editor.classList.remove('input-invalid');
-        }
-        function showCfgError(msg) {
-            cfgErr.textContent = msg;
-            cfgErr.style.display = 'block';
-            editor.classList.add('input-invalid');
-        }
-
-        editor.addEventListener('input', clearCfgError);
-        (isEdit ? nombreInput : domSel).focus();
-        if (isEdit) nombreInput.select();
-
-        formatBtn.addEventListener('click', () => {
-            const r = parseEditor();
-            if (!r.ok) { showCfgError('No se puede formatear: ' + r.error); return; }
-            editor.value = r.value === null ? '' : JSON.stringify(r.value, null, 2);
-            clearCfgError();
+        backdrop.querySelectorAll('.toggle-switch input').forEach(input => {
+            const etiqueta = input.parentElement.querySelector('.toggle-label');
+            input.addEventListener('change', () => {
+                etiqueta.textContent = input.checked ? etiqueta.dataset.on : etiqueta.dataset.off;
+            });
         });
 
+        const campo = name => backdrop.querySelector('#dev-' + name);
+        const val   = name => campo(name).value.trim();
+        const chk   = name => campo(name).checked;
+        // '' -> null: el catálogo sin elegir y el contador vacío son NULL, no 0.
+        const nInt  = name => { const v = val(name); return v === '' ? null : +v; };
+
+        const saveBtn = backdrop.querySelector('[data-act="save"]');
+        (isEdit ? campo('nombre') : campo('uuid')).focus();
+
+        function showError(name, msg) {
+            const err = backdrop.querySelector('#dev-' + name + '-err');
+            const inp = campo(name);
+            if (err) { err.textContent = msg; err.style.display = 'block'; }
+            inp.classList.add('input-invalid');
+            return inp;
+        }
+        function clearErrors() {
+            backdrop.querySelectorAll('.field-error').forEach(e => { e.style.display = 'none'; });
+            backdrop.querySelectorAll('.input-invalid').forEach(e => e.classList.remove('input-invalid'));
+        }
+
         saveBtn.addEventListener('click', async () => {
-            [domErr, uidErr, tipoErr, nombreErr].forEach(el => el.style.display = 'none');
-            [domSel, uidInput, tipoInput, nombreInput].forEach(el => el.classList.remove('input-invalid'));
-            clearCfgError();
+            clearErrors();
 
-            const uid        = uidInput.value.trim();
-            const dominio_id = +domSel.value;
-            const nombre     = nombreInput.value.trim();
-            const tipo       = tipoInput.value.trim();
-            const ubicacion  = ubicInput.value.trim();
-            const estado     = estadoSel.value;
-
+            // Se marcan los tres, pero el foco va al primero que falló.
             let firstInvalid = null;
-            if (!dominio_id) {
-                domErr.textContent = 'Elegí un dominio';
-                domErr.style.display = 'block';
-                domSel.classList.add('input-invalid');
-                firstInvalid = firstInvalid || domSel;
-            }
-            if (!uid) {
-                uidErr.textContent = 'El UID es obligatorio';
-                uidErr.style.display = 'block';
-                uidInput.classList.add('input-invalid');
-                firstInvalid = firstInvalid || uidInput;
-            }
-            if (!nombre) {
-                nombreErr.textContent = 'El nombre es obligatorio';
-                nombreErr.style.display = 'block';
-                nombreInput.classList.add('input-invalid');
-                firstInvalid = firstInvalid || nombreInput;
-            }
-            if (!tipo) {
-                tipoErr.textContent = 'El tipo es obligatorio';
-                tipoErr.style.display = 'block';
-                tipoInput.classList.add('input-invalid');
-                firstInvalid = firstInvalid || tipoInput;
-            }
-
-            const r = parseEditor();
-            if (!r.ok) {
-                showCfgError('JSON inválido: ' + r.error);
-                firstInvalid = firstInvalid || editor;
-            }
+            const exigir = (name, msg) => {
+                if (val(name)) return;
+                const inp = showError(name, msg);
+                firstInvalid = firstInvalid || inp;
+            };
+            exigir('uuid',    'El identificador es obligatorio');
+            exigir('nombre',  'El nombre es obligatorio');
+            exigir('dominio', 'Elegí un dominio');
             if (firstInvalid) { firstInvalid.focus(); return; }
 
-            const payload = { uid, dominio_id, nombre, tipo, ubicacion, estado, config_json: r.value };
+            const payload = {
+                uuid: val('uuid'), nombre: val('nombre'), serial: val('serial'),
+                identidad: val('identidad'), llave: val('llave'),
+                dominio: +val('dominio'),
+                agente: nInt('agente'), modelo: nInt('modelo'), producto: nInt('producto'),
+                transceptor: nInt('transceptor'), chip: nInt('chip'), adopcion: nInt('adopcion'),
+                mac: val('mac'), ip: val('ip'), firmware: val('firmware'), senal: val('senal'),
+                habilitado: chk('habilitado'), enlace: chk('enlace'),
+                adoptado: chk('adoptado'), monitoreo: chk('monitoreo'),
+                senalesLimite: nInt('senalesLimite'),
+                fabricacion: val('fabricacion'), instalacion: val('instalacion'),
+                inicio: val('inicio'), conexion: val('conexion'), latido: val('latido'),
+                inicios: nInt('inicios'), conexiones: nInt('conexiones'), latidos: nInt('latidos'),
+                monitoreoIntervalo: nInt('monitoreoIntervalo'),
+                monitoreoUltimo: val('monitoreoUltimo'), monitoreoSiguiente: val('monitoreoSiguiente'),
+                monitoreoCorreos: val('monitoreoCorreos'),
+                coordenadas: val('coordenadas'), indicadores: val('indicadores'),
+            };
 
             saveBtn.disabled = true;
             try {
@@ -4711,6 +4874,437 @@
                         viewCardHalf('Canal',       canalValue),
                         viewCardHalf('Usuario',     usuarioValue),
                         viewCardHalf('Estado',      estadoValue),
+                    ])}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+    }
+
+    /* ---------- Views: Adopciones ---------- */
+    // Módulo read-only sobre la tabla `adopciones`: el ciclo de vida de cada
+    // dispositivo dentro de un dominio. `adoptador` es el usuario que lo tomó
+    // (en la fecha `adoptado`); `liberador`, el que lo soltó después (en
+    // `liberado`). Mientras la adopción sigue en curso ambos campos de
+    // liberación quedan en NULL y `vigente` marca 'S'.
+
+    // `value` viaja al select del modal de Filtros; `key` es el campo del row
+    // por el que se ordena realmente — para las FKs conviene el nombre resuelto
+    // por el JOIN y no el id crudo.
+    // El orden de las opciones espeja el de las columnas del listado; las
+    // columnas Adopción y Liberación combinan usuario + fecha, así que cada una
+    // aporta dos criterios de ordenamiento.
+    const ORDEN_ADOPCIONES = [
+        { value: 'id',          label: 'Código',                 key: 'id'                },
+        { value: 'dispositivo', label: 'Dispositivo',            key: 'dispositivo_nombre'},
+        { value: 'dominio',     label: 'Dominio',                key: 'dominio_nombre'    },
+        { value: 'adoptado',    label: 'Adopción · fecha',       key: 'adoptado'          },
+        { value: 'adoptador',   label: 'Adopción · adoptador',   key: 'adoptador_nombre'  },
+        { value: 'liberado',    label: 'Liberación · fecha',     key: 'liberado'          },
+        { value: 'liberador',   label: 'Liberación · liberador', key: 'liberador_nombre'  },
+    ];
+
+    const VIGENCIAS_ADOPCION = [
+        { value: 'S', label: 'Vigentes'  },
+        { value: 'N', label: 'Liberadas' },
+    ];
+
+    function adopcionesDefaults() {
+        return {
+            codigo: '', texto: '', dispositivo: '', dominio: '',
+            adoptador: '', liberador: '', vigente: '', desde: '', hasta: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    function vigenciaBadge(a) {
+        return a.activa
+            ? '<span class="badge badge-success">Vigente</span>'
+            : '<span class="badge badge-warn">Liberada</span>';
+    }
+
+    // Celda combinada de evento (columnas Adopción / Liberación): el usuario
+    // que lo hizo arriba y la fecha en que ocurrió abajo. El login del usuario
+    // no entra acá — queda sólo en el modal de Consultar.
+    function adopcionEventoCell(nombre, fecha) {
+        if (!nombre && !fecha) return '<span class="td-id">—</span>';
+        return `
+            <div class="td-nombre">${nombre ? escape(nombre) : '—'}</div>
+            <div class="td-id">${formatDate(fecha)}</div>
+        `;
+    }
+
+    async function renderAdopciones(root) {
+        try {
+            const state = adopcionesDefaults();
+
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+
+            const [data, devData, domData, userData] = await Promise.all([
+                api('adopciones.php?' + qs.toString()),
+                api('dispositivos.php'),
+                api('dominios.php'),
+                api('users.php'),
+            ]);
+
+            const r            = data.resumen;
+            const dispositivos = devData.dispositivos;
+            const dominios     = domData.dominios;
+            const usuarios     = userData.usuarios;
+
+            root.innerHTML = `
+                ${moduleHeader('Adopciones', 'Historial de adopciones: qué dispositivo se adoptó, en qué dominio, por qué usuario y quién lo liberó después.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Vigentes</span>
+                        <span class="stat-value green">${r.vigentes}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Liberadas</span>
+                        <span class="stat-value orange">${r.liberadas}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Dispositivos adoptados</span>
+                        <span class="stat-value">${r.dispositivos}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'ado',
+                    quickPlaceholder: 'Buscar dispositivo, dominio, adoptador, liberador…',
+                    newLabel:         null,
+                })}
+                <div class="table-card" id="ado-table"></div>
+            `;
+
+            wireAdopcionesView(state, data.adopciones, dispositivos, dominios, usuarios);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function adopcionesTableBody(adopciones) {
+        if (!adopciones.length) {
+            return `<div class="table-empty">No hay adopciones que coincidan con los filtros.</div>`;
+        }
+
+        const rows = adopciones.map(a => `
+            <tr class="row-clickable" data-id="${a.id}">
+                <td><span class="td-id">#${a.id}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(a.dispositivo_nombre ?? '—')}</div>
+                    ${a.dispositivo_uuid ? `<div class="td-id">${escape(a.dispositivo_uuid)}</div>` : ''}
+                </td>
+                <td>${a.dominio ? `<span class="badge badge-info">${escape(a.dominio_nombre)}</span>` : '<span class="td-id">—</span>'}</td>
+                <td>${adopcionEventoCell(a.adoptador_nombre, a.adoptado)}</td>
+                <td>${adopcionEventoCell(a.liberador_nombre, a.liberado)}</td>
+                <td>${vigenciaBadge(a)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Dispositivo</th>
+                        <th>Dominio</th>
+                        <th>Adopción</th>
+                        <th>Liberación</th>
+                        <th>Vigencia</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireAdopcionesView(state, allAdopciones, allDispositivos, allDominios, allUsuarios) {
+        const tableWrap = document.getElementById('ado-table');
+        const quick     = document.getElementById('ado-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('ado-filters');
+
+        let adopciones = allAdopciones;
+
+        function applyAndRender() {
+            const q      = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = adopciones.filter(a => {
+                if (Number.isFinite(codigo) && a.id !== codigo) return false;
+                if (state.dispositivo && String(a.dispositivo ?? '') !== state.dispositivo) return false;
+                if (state.dominio     && String(a.dominio     ?? '') !== state.dominio)     return false;
+                if (state.adoptador   && String(a.adoptador   ?? '') !== state.adoptador)   return false;
+                if (state.liberador   && String(a.liberador   ?? '') !== state.liberador)   return false;
+                if (state.vigente === 'S' && !a.activa) return false;
+                if (state.vigente === 'N' &&  a.activa) return false;
+                // `adoptado` viene como 'YYYY-MM-DD HH:MM:SS' y los <input type=date>
+                // como 'YYYY-MM-DD': la comparación lexicográfica del prefijo alcanza.
+                if (state.desde || state.hasta) {
+                    const dia = String(a.adoptado ?? '').slice(0, 10);
+                    if (!dia) return false;
+                    if (state.desde && dia < state.desde) return false;
+                    if (state.hasta && dia > state.hasta) return false;
+                }
+                if (q && !((a.dispositivo_nombre ?? '') + ' ' +
+                           (a.dispositivo_uuid   ?? '') + ' ' +
+                           (a.dominio_nombre     ?? '') + ' ' +
+                           (a.adoptador_nombre   ?? '') + ' ' +
+                           (a.adoptador_login    ?? '') + ' ' +
+                           (a.liberador_nombre   ?? '') + ' ' +
+                           (a.liberador_login    ?? ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            const ordenKey = (ORDEN_ADOPCIONES.find(o => o.value === state.orden) || { key: 'id' }).key;
+            filtered.sort((a, b) => {
+                const va = a[ordenKey] ?? '';
+                const vb = b[ordenKey] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = adopcionesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        async function refetchFromServer() {
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
+            if (state.dominio)     qs.set('dominio',     state.dominio);
+            if (state.vigente)     qs.set('vigente',     state.vigente);
+
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const data = await api('adopciones.php?' + qs.toString());
+                adopciones = data.adopciones;
+                applyAndRender();
+            } catch (e) {
+                tableWrap.innerHTML = errorBox(e.message);
+            }
+        }
+
+        function rowMenuFor(a) {
+            return standardRowMenuItems({
+                view: true, onView: () => openAdopcionViewModal(a),
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const a  = adopciones.find(x => x.id === id);
+                if (!a) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(a), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openAdopcionViewModal(a));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(a), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () =>
+            openAdopcionesFiltersModal(state, allDispositivos, allDominios, allUsuarios, ({ refetch }) => {
+                if (refetch) refetchFromServer();
+                else        applyAndRender();
+            })
+        );
+
+        applyAndRender();
+    }
+
+    function openAdopcionesFiltersModal(state, allDispositivos, allDominios, allUsuarios, onApply) {
+        const devOpts = ['<option value="">Todos los dispositivos</option>'].concat(
+            allDispositivos.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dispositivo ? ' selected' : ''}>${escape(d.uid)} · ${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const userOpts = (placeholder, selected) => ['<option value="">' + placeholder + '</option>'].concat(
+            allUsuarios.map(u =>
+                `<option value="${u.id}"${String(u.id) === selected ? ' selected' : ''}>${escape(u.nombre)}</option>`
+            )
+        ).join('');
+        const vigOpts = ['<option value="">Todas</option>'].concat(
+            VIGENCIAS_ADOPCION.map(v =>
+                `<option value="${v.value}"${v.value === state.vigente ? ' selected' : ''}>${escape(v.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_ADOPCIONES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="ado-fm-codigo">Código</label>
+                    <input type="number" id="ado-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-texto">Buscar (dispositivo / dominio / usuarios)</label>
+                    <input type="search" id="ado-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-dispositivo">Dispositivo</label>
+                    <select id="ado-fm-dispositivo">${devOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-dominio">Dominio</label>
+                    <select id="ado-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-adoptador">Adoptador</label>
+                    <select id="ado-fm-adoptador">${userOpts('Todos los adoptadores', state.adoptador)}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-liberador">Liberador</label>
+                    <select id="ado-fm-liberador">${userOpts('Todos los liberadores', state.liberador)}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-desde">Adoptado desde</label>
+                    <input type="date" id="ado-fm-desde" value="${escape(state.desde)}">
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-hasta">Adoptado hasta</label>
+                    <input type="date" id="ado-fm-hasta" value="${escape(state.hasta)}">
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-vigente">Vigencia</label>
+                    <select id="ado-fm-vigente">${vigOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-limit">Límite</label>
+                    <input type="number" id="ado-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-orden">Ordenar por</label>
+                    <select id="ado-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ado-fm-dir">Dirección</label>
+                    <select id="ado-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                const prevDispositivo = state.dispositivo;
+                const prevDominio     = state.dominio;
+                const prevVigente     = state.vigente;
+                const prevLimit       = state.limit;
+
+                state.codigo      = modal.querySelector('#ado-fm-codigo').value.trim();
+                state.texto       = modal.querySelector('#ado-fm-texto').value.trim();
+                state.dispositivo = modal.querySelector('#ado-fm-dispositivo').value;
+                state.dominio     = modal.querySelector('#ado-fm-dominio').value;
+                state.adoptador   = modal.querySelector('#ado-fm-adoptador').value;
+                state.liberador   = modal.querySelector('#ado-fm-liberador').value;
+                state.desde       = modal.querySelector('#ado-fm-desde').value;
+                state.hasta       = modal.querySelector('#ado-fm-hasta').value;
+                state.vigente     = modal.querySelector('#ado-fm-vigente').value;
+                state.orden       = modal.querySelector('#ado-fm-orden').value;
+                state.dir         = modal.querySelector('#ado-fm-dir').value;
+                state.limit       = readLimit(modal.querySelector('#ado-fm-limit'), 100);
+
+                // Dispositivo, dominio, vigencia y límite viajan al backend
+                // (?dispositivo=&dominio=&vigente=&limit=); el resto se aplica
+                // client-side sobre el set ya descargado.
+                const needsRefetch = state.dispositivo !== prevDispositivo
+                                  || state.dominio     !== prevDominio
+                                  || state.vigente     !== prevVigente
+                                  || state.limit       !== prevLimit;
+                onApply({ refetch: needsRefetch });
+            },
+            onClear(modal) {
+                const d = adopcionesDefaults();
+                modal.querySelector('#ado-fm-codigo').value      = d.codigo;
+                modal.querySelector('#ado-fm-texto').value       = d.texto;
+                modal.querySelector('#ado-fm-dispositivo').value = d.dispositivo;
+                modal.querySelector('#ado-fm-dominio').value     = d.dominio;
+                modal.querySelector('#ado-fm-adoptador').value   = d.adoptador;
+                modal.querySelector('#ado-fm-liberador').value   = d.liberador;
+                modal.querySelector('#ado-fm-desde').value       = d.desde;
+                modal.querySelector('#ado-fm-hasta').value       = d.hasta;
+                modal.querySelector('#ado-fm-vigente').value     = d.vigente;
+                modal.querySelector('#ado-fm-orden').value       = d.orden;
+                modal.querySelector('#ado-fm-dir').value         = d.dir;
+                modal.querySelector('#ado-fm-limit').value       = String(d.limit);
+            },
+        });
+    }
+
+    function openAdopcionViewModal(a) {
+        const usuarioValue = (nombre, login, id) => nombre
+            ? `${escape(nombre)}${login ? ` <code>${escape(login)}</code>` : ''}`
+            : (id != null ? `<code>#${id}</code>` : `<span class="muted">—</span>`);
+
+        const dispositivoValue = a.dispositivo_nombre
+            ? `${escape(a.dispositivo_nombre)}${a.dispositivo_uuid ? ` <code>${escape(a.dispositivo_uuid)}</code>` : ''}`
+            : (a.dispositivo != null ? `<code>#${a.dispositivo}</code>` : `<span class="muted">Sin dispositivo asociado</span>`);
+        const dominioValue = a.dominio
+            ? `<span class="badge badge-info">${escape(a.dominio_nombre)}</span>`
+            : `<span class="muted">—</span>`;
+        const liberadoValue = a.liberado
+            ? escape(formatDate(a.liberado))
+            : `<span class="muted">Sin liberar</span>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Consultar adopción</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',      `<code>#${a.id}</code>`),
+                        viewCardHalf('Vigencia',    vigenciaBadge(a)),
+                        viewCardHalf('Dispositivo', dispositivoValue),
+                        viewCardHalf('Dominio',     dominioValue),
+                        viewCardHalf('Adoptado',    escape(formatDate(a.adoptado))),
+                        viewCardHalf('Adoptador',   usuarioValue(a.adoptador_nombre, a.adoptador_login, a.adoptador)),
+                        viewCardHalf('Liberado',    liberadoValue),
+                        viewCardHalf('Liberador',   usuarioValue(a.liberador_nombre, a.liberador_login, a.liberador)),
                     ])}
                 </div>
                 <div class="modal-footer">

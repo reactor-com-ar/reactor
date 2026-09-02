@@ -140,6 +140,9 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     <a href="#/alerts" data-route="alerts" class="nav-item nav-sub-item">
                         <i class="fa-solid fa-bell nav-icon"></i> Alertas
                     </a>
+                    <a href="#/adopciones" data-route="adopciones" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-handshake nav-icon"></i> Adopciones
+                    </a>
                 </div>
             </div>
 

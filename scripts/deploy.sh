@@ -5,9 +5,15 @@
 # URL servida:    https://cloud.reactor.com.ar
 #
 # Uso:
-#   bash deploy.sh           # sync + recreate
-#   bash deploy.sh --rebuild # ademas reconstruye la imagen Docker
+#   bash deploy.sh           # solo sube cambios (NO toca los contenedores)
+#   bash deploy.sh --restart # sube + recrea los contenedores
+#   bash deploy.sh --rebuild # sube + reconstruye la imagen + recrea
 #                            # (necesario si cambio docker/Dockerfile)
+#
+# El modo por defecto no reinicia nada: cloud/ y panel/ estan bind-monteados
+# como directorios, asi que el codigo nuevo queda vivo apenas termina el
+# rsync. El script avisa al final si detecto un cambio que si requiere
+# --restart o --rebuild.
 # ============================================================
 
 set -e
@@ -19,10 +25,20 @@ BASE_LOCAL="$(cd "$(dirname "$0")/.." && pwd)"
 BASE_REMOTE="/opt/app/reactor"
 COMPOSE_FILE="docker-compose.prod.yml"   # generado por aprovisionar_server.sh
 
-REBUILD=false
-if [ "$1" == "--rebuild" ]; then
-    REBUILD=true
-fi
+# sync    -> solo sube archivos (default)
+# restart -> sube + docker compose up -d --force-recreate
+# rebuild -> sube + docker compose build + up -d --force-recreate
+MODE="sync"
+case "${1:-}" in
+    ""|--sync)  MODE="sync"    ;;
+    --restart)  MODE="restart" ;;
+    --rebuild)  MODE="rebuild" ;;
+    *)
+        echo "ERROR: parametro desconocido '$1'"
+        echo "       Uso: bash deploy.sh [--restart|--rebuild]"
+        exit 1
+        ;;
+esac
 
 VERSION="1.0.$(date +%s)"
 
@@ -30,6 +46,11 @@ echo ""
 echo "================================================"
 echo "  Deploy reactor -- version: $VERSION"
 echo "  Host: $HOST"
+case "$MODE" in
+    sync)    echo "  Modo: sync (no se reinician contenedores)" ;;
+    restart) echo "  Modo: restart (recrea contenedores)" ;;
+    rebuild) echo "  Modo: rebuild (reconstruye imagen + recrea)" ;;
+esac
 echo "================================================"
 echo ""
 
@@ -76,6 +97,9 @@ fi
 # falta tenerlo instalado en local.
 STAGING="/tmp/reactor-deploy-$(date +%s)"
 
+# El remoto emite marcadores REACTOR_*: los consumimos abajo para decidir
+# si hay que avisar que este deploy necesita --restart / --rebuild.
+SYNC_OUT="$(
 tar \
     --exclude='./cloud/.git' \
     --exclude='./cloud/node_modules' \
@@ -94,41 +118,106 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no \
         tar -xzf - -C '$STAGING/'
         for dir in cloud panel docker $INCLUDE_DB; do
             if [ -d \"$STAGING/\$dir\" ]; then
-                rsync -a --delete \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\"
+                # -i itemiza; filtramos a transferencias/borrados reales
+                # (las lineas que empiezan con '.' son solo atributos).
+                changed=\$(rsync -ai --delete \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\" \
+                          | grep -E '^(>|<|\*deleting)' || true)
+                # docker/ define la imagen (Dockerfile, ports.conf, vhosts.conf):
+                # si cambio, el contenedor corriendo quedo desactualizado.
+                if [ \"\$dir\" = docker ] && [ -n \"\$changed\" ]; then
+                    echo 'REACTOR_DOCKER_CHANGED'
+                fi
             fi
         done
         for f in .env.production env.php; do
+            [ -f \"$STAGING/\$f\" ] || continue
             # Si Docker hizo bind-mount cuando el archivo no existia, el
             # path en el host quedo como directorio vacio. Lo removemos
             # antes de copiar el archivo nuevo.
             if [ -d \"$BASE_REMOTE/\$f\" ]; then
                 rm -rf \"$BASE_REMOTE/\$f\"
             fi
-            if [ -f \"$STAGING/\$f\" ]; then
+            if [ -f \"$BASE_REMOTE/\$f\" ]; then
+                if ! cmp -s \"$STAGING/\$f\" \"$BASE_REMOTE/\$f\"; then
+                    # Escritura in-place: '>' trunca y reescribe el MISMO
+                    # inodo. Docker bind-montea estos archivos por inodo, asi
+                    # que el contenedor ve el contenido nuevo sin recrearse
+                    # (un 'cp' que reemplace el inodo lo dejaria viendo el
+                    # archivo viejo).
+                    cat \"$STAGING/\$f\" > \"$BASE_REMOTE/\$f\"
+                    echo \"REACTOR_ENV_CHANGED:\$f\"
+                fi
+            else
+                # No existia (o era el directorio vacio que acabamos de
+                # borrar): el bind-mount del contenedor apunta a otra cosa.
                 cp -f \"$STAGING/\$f\" \"$BASE_REMOTE/\$f\"
+                echo \"REACTOR_ENV_NEW:\$f\"
             fi
         done
         rm -rf '$STAGING'
     "
+)"
 echo "  OK"
 echo ""
 
-# ---- 4. Rebuild (opcional) + force-recreate del contenedor ----
-# force-recreate siempre: Docker bind-montea .env.production y env.php por
-# inodo, no por path. El cp -f del paso 3 crea inodos nuevos, asi que sin
-# --force-recreate el contenedor sigue viendo los archivos viejos. Es
-# barato (~2s).
-if [ "$REBUILD" = true ]; then
-    echo "  Reconstruyendo imagen Docker y recreando contenedor..."
-    ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" \
-        "cd '$BASE_REMOTE' && docker compose -f $COMPOSE_FILE build && docker compose -f $COMPOSE_FILE up -d --force-recreate"
-    echo "  OK -- imagen reconstruida y contenedor levantado"
-else
-    echo "  Recreando contenedor..."
-    ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" \
-        "cd '$BASE_REMOTE' && docker compose -f $COMPOSE_FILE up -d --force-recreate"
-    echo "  OK -- contenedor actualizado"
-fi
+# ---- 4. Rebuild / recreate del contenedor (solo si se pidio) ----
+# Por defecto NO se toca el contenedor. La gran mayoria de los deploys son
+# cambios de codigo en cloud/ y panel/, y esas dos carpetas estan
+# bind-monteadas como DIRECTORIOS: el contenedor resuelve cada archivo por
+# path en cada request, asi que el codigo nuevo ya esta vivo al terminar el
+# paso 3. (No hay opcache habilitado en la imagen -- ver docker/Dockerfile --
+# asi que tampoco hay bytecode cacheado que invalidar.)
+#
+# .env.production y env.php se bind-montean por ARCHIVO, o sea por inodo. El
+# paso 3 los reescribe in-place para no romper ese mount, de modo que env.php
+# (require_once en cada request) tambien queda vivo sin recrear.
+#
+# Cuando SI hace falta recrear:
+#   --restart : cambio .env.production. Las vars de 'env_file:' se inyectan
+#               al proceso al CREAR el contenedor; el archivo nuevo no las
+#               actualiza. Tambien si el bind-mount quedo roto (env NEW).
+#   --rebuild : cambio docker/ (Dockerfile, ports.conf, vhosts.conf) o
+#               cualquier cosa horneada en la imagen.
+case "$MODE" in
+    rebuild)
+        echo "  Reconstruyendo imagen Docker y recreando contenedores..."
+        ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" \
+            "cd '$BASE_REMOTE' && docker compose -f $COMPOSE_FILE build && docker compose -f $COMPOSE_FILE up -d --force-recreate"
+        echo "  OK -- imagen reconstruida y contenedores levantados"
+        ;;
+    restart)
+        echo "  Recreando contenedores..."
+        ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" \
+            "cd '$BASE_REMOTE' && docker compose -f $COMPOSE_FILE up -d --force-recreate"
+        echo "  OK -- contenedores recreados"
+        ;;
+    sync)
+        echo "  Sin reinicio: cloud/ y panel/ son bind-mounts, los cambios ya estan vivos."
+
+        # Avisos: cambios que el sync solo NO alcanza a activar.
+        AVISOS=""
+        if echo "$SYNC_OUT" | grep -q '^REACTOR_DOCKER_CHANGED$'; then
+            AVISOS="$AVISOS
+    - Cambio docker/ (imagen): correr 'bash deploy.sh --rebuild' para activarlo."
+        fi
+        if echo "$SYNC_OUT" | grep -q '^REACTOR_ENV_CHANGED:\.env\.production$'; then
+            AVISOS="$AVISOS
+    - Cambio .env.production: las vars de env_file: se inyectan al crear el
+      contenedor. Correr 'bash deploy.sh --restart' para activarlas."
+        fi
+        if echo "$SYNC_OUT" | grep -q '^REACTOR_ENV_NEW:'; then
+            AVISOS="$AVISOS
+    - Se creo un archivo de entorno que no existia en el server: el
+      bind-mount del contenedor quedo apuntando al inodo viejo. Correr
+      'bash deploy.sh --restart'."
+        fi
+
+        if [ -n "$AVISOS" ]; then
+            echo ""
+            echo "  AVISO -- este deploy incluye cambios que necesitan recrear:$AVISOS"
+        fi
+        ;;
+esac
 echo ""
 
 # ---- 5. Migraciones SQL ----

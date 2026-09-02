@@ -1085,7 +1085,7 @@
         q: '',
         ...DISPOSITIVOS_DEFAULTS,
         filas: [],
-        catalogos: { agentes: [], modelos: [], productos: [], transceptores: [], chips: [] },
+        catalogos: { modelos: [] },   // unico catalogo que queda: el filtro por modelo
         resumen: null,
     };
 
@@ -1099,14 +1099,6 @@
         if (dispositivos.orden  !== DISPOSITIVOS_DEFAULTS.orden)          n++;
         if (dispositivos.dir    !== DISPOSITIVOS_DEFAULTS.dir)            n++;
         return n;
-    }
-
-    // 'YYYY-MM-DD HH:MM:SS' -> 'YYYY-MM-DDTHH:MM' (valor de <input datetime-local>).
-    function toInputDateTime(value) {
-        const s = String(value ?? '').trim();
-        if (s === '' || s.startsWith('0000-00-00')) return '';
-        const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/);
-        return m ? `${m[1]}T${m[2] || '00:00'}` : '';
     }
 
     function badgeEnlace(online) {
@@ -1200,7 +1192,7 @@
 
         container.querySelector('#dv-filtros').addEventListener('click', abrirFiltrosDispositivos);
         container.querySelector('#dv-refrescar').addEventListener('click', () => cargarDispositivos());
-        container.querySelector('#dv-nuevo').addEventListener('click', () => formDispositivo(null));
+        container.querySelector('#dv-nuevo').addEventListener('click', formAdoptarDispositivo);
 
         cargarDispositivos();
     }
@@ -1438,7 +1430,7 @@
 
             if (destino === 'conexion' && !conexionPedida) {
                 conexionPedida = true;
-                cargarConexionDispositivo(id, backdrop.querySelector('[data-role="conexion-body"]'))
+                cargarConexionDispositivo(id, backdrop.querySelector('[data-role="conexion-body"]'), null)
                     .catch(() => { conexionPedida = false; });   // permite reintentar
             }
         }));
@@ -1469,137 +1461,315 @@
                 ${nivel.dbm} dBm <span class="muted">· ${nivel.porcentaje}% · ${banda.etiqueta}</span>`;
     }
 
-    async function cargarConexionDispositivo(id, contenedor) {
+    async function cargarConexionDispositivo(id, contenedor, horas) {
         if (!contenedor) return;
+        const qs = horas ? `&horas=${horas}` : '';
         let data;
         try {
-            data = await api(`api/dispositivo_conexion.php?id=${id}`);
+            data = await api(`api/dispositivo_conexion.php?id=${id}${qs}`);
         } catch (err) {
             contenedor.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
             throw err;
         }
         contenedor.innerHTML = vistaConexion(data);
+        activarConexion(contenedor, id);
     }
 
     function vistaConexion(data) {
-        const escala   = data.escala || { maximo: -10, minimo: -90 };
-        const muestras = data.muestras || [];
-        const r        = data.resumen  || {};
-        const actual   = data.dispositivo?.senal;
+        const r      = data.resumen || {};
+        const actual = data.dispositivo?.senal;
+        const serie  = data.serie || [];
 
-        const nota = `<p class="modal-note">
-            Nivel de señal que el equipo informó en sus señales entrantes, de la
-            medición más reciente a la más vieja. La escala va de
-            ${escala.minimo} dBm (0%) a ${escala.maximo} dBm (100%).
-        </p>`;
+        const chips = (data.opciones || []).map((h) => `
+            <button type="button" class="filter-chip${h === data.horas ? ' active' : ''}" data-horas="${h}">
+                ${etiquetaHoras(h)}
+            </button>`).join('');
 
-        if (muestras.length === 0) {
-            return `${nota}
-                <div class="alert alert-info">
-                    Este dispositivo no informó su nivel de señal en las últimas
-                    ${formatNumero(data.ventana) || data.ventana} señales registradas.
-                </div>`;
-        }
+        const sinDatos = (r.muestras || 0) === 0
+            ? `<div class="alert alert-info" style="margin:0">
+                   El equipo no informó su nivel de señal en las últimas
+                   ${etiquetaHoras(data.horas)}: la línea queda cortada en todo el período.
+               </div>`
+            : '';
 
-        const periodo = [formatDate(r.desde), formatDate(r.hasta)].filter(Boolean).join(' → ');
         const resumen = `<div class="view-grid">${[
             viewCard('Nivel actual', nivelSenalHtml(actual)),
             viewCard('Promedio',     nivelSenalHtml(r.promedio)),
             viewCard('Mejor',        nivelSenalHtml(r.mejor)),
             viewCard('Peor',         nivelSenalHtml(r.peor)),
-            viewCard('Período medido',
-                `${r.muestras} ${r.muestras === 1 ? 'medición' : 'mediciones'}${periodo ? ` · ${escapeHtml(periodo)}` : ''}`,
+            viewCard('Cobertura',
+                `${r.horas_con_dato || 0} de ${r.horas || 0} horas con reporte` +
+                `<span class="muted"> · ${formatNumero(r.muestras || 0)} ${r.muestras === 1 ? 'medición' : 'mediciones'}</span>`,
                 true),
         ].join('')}</div>`;
 
-        return `${nota}${resumen}
-            <div class="senal-chart">
-                <div class="senal-rows">${muestras.map(filaSenal).join('')}</div>
-                <div class="senal-axis">
-                    <div class="senal-axis-scale">${ejeSenal(escala)}</div>
-                </div>
-                <div class="senal-legend">${BANDAS_SENAL.map((b) => `
-                    <span class="senal-legend-item">
-                        <span class="senal-legend-dot senal-bar-${b.clave}"></span>${b.etiqueta}
-                        <span class="muted">(${b.dbm})</span>
-                    </span>`).join('')}
-                </div>
-            </div>`;
+        return `
+            <p class="modal-note">
+                Nivel de señal a lo largo del tiempo: un punto por hora con el promedio
+                de lo que informó el equipo en esa hora. Las horas sin reporte quedan
+                como un corte en la línea.
+            </p>
+            <div class="senal-toolbar">
+                <span class="senal-toolbar-label">Período</span>
+                <div class="senal-chips">${chips}</div>
+            </div>
+            ${sinDatos}
+            ${graficoSenal(serie, data.escala || { maximo: -10, minimo: -90 }, data.horas)}
+            <div class="senal-legend">${BANDAS_SENAL.map((b) => `
+                <span class="senal-legend-item">
+                    <span class="senal-legend-dot senal-zona-${b.clave}"></span>${b.etiqueta}
+                    <span class="muted">(${b.dbm})</span>
+                </span>`).join('')}
+            </div>
+            ${resumen}`;
     }
 
-    /* Rótulos del eje: uno por cada guía del track (0/25/50/75/100% de la
-       escala). Se derivan de `escala` para que sigan diciendo la verdad si
-       alguna vez cambian los extremos. */
-    function ejeSenal(escala) {
-        return [0, 25, 50, 75, 100].map((p) => {
-            const dbm = Math.round(escala.minimo + ((escala.maximo - escala.minimo) * p) / 100);
-            return `<span style="left:${p}%">${dbm}${p === 100 ? ' dBm' : ''}</span>`;
+    // Hasta 48 h se lee mejor en horas; de ahí en más, en días.
+    function etiquetaHoras(h) {
+        return h > 48 ? `${Math.round(h / 24)} días` : `${h} h`;
+    }
+
+    /* ---------- El gráfico ----------
+     * SVG a mano, sin librerías (el panel no tiene build step). Eje X = tiempo
+     * en horas, eje Y = nivel en dBm sobre la escala del producto. Las bandas
+     * de calidad van de fondo como zonas horizontales: así el color dice en qué
+     * franja está el equipo sin pintar la línea, que es una sola serie.
+     *
+     * El viewBox mide lo mismo que el ancho útil del modal ancho (880 - 48 de
+     * padding), así que a tamaño normal 1 unidad = 1 píxel y los textos salen
+     * al tamaño declarado; si el modal se angosta, escala todo junto. */
+    const SENAL_VB = { w: 832, h: 220, padL: 42, padR: 12, padT: 12, padB: 28 };
+
+    function graficoSenal(serie, escala, horas) {
+        const { w, h, padL, padR, padT, padB } = SENAL_VB;
+        const plotW = w - padL - padR;
+        const plotH = h - padT - padB;
+        const n     = serie.length || 1;
+
+        const y = (dbm) => padT + (plotH * (escala.maximo - dbm)) / (escala.maximo - escala.minimo);
+        const x = (i)   => padL + (plotW * (i + 0.5)) / n;
+
+        // Zonas de calidad: los cortes de las bandas expresados en dBm.
+        const zonas = [
+            { clave: 'buena',   hasta: escala.maximo, desde: -50 },
+            { clave: 'regular', hasta: -50,           desde: -70 },
+            { clave: 'debil',   hasta: -70,           desde: escala.minimo },
+        ].map((z) => `<rect class="senal-zona senal-zona-${z.clave}" x="${padL}" y="${y(z.hasta)}"
+                            width="${plotW}" height="${(y(z.desde) - y(z.hasta)).toFixed(1)}"/>`).join('');
+
+        // Guías y rótulos del eje Y, cada 20 dBm (25% de la escala).
+        const ticksY = [];
+        for (let dbm = escala.minimo; dbm <= escala.maximo; dbm += 20) ticksY.push(dbm);
+        const ejeY = ticksY.map((dbm) => `
+            <line class="senal-grid" x1="${padL}" y1="${y(dbm)}" x2="${w - padR}" y2="${y(dbm)}"/>
+            <text class="senal-tick" x="${padL - 8}" y="${y(dbm) + 3.5}" text-anchor="end">${dbm}</text>`).join('');
+
+        // Rótulos del eje X: un paso "redondo" que deje como mucho 8 marcas.
+        const paso  = [1, 2, 3, 4, 6, 8, 12, 24, 48].find((p) => n / p <= 8) || Math.ceil(n / 8);
+        const ejeX  = serie.map((p, i) => (i % paso !== 0 ? '' : `
+            <text class="senal-tick" x="${x(i)}" y="${h - padB + 16}" text-anchor="middle">${etiquetaHora(p.hora, horas)}</text>`)).join('');
+
+        // Una polilínea por tramo continuo: los cortes NO se interpolan, que
+        // es justamente lo que hay que poder ver.
+        const tramos = [];
+        let tramo = [];
+        serie.forEach((p, i) => {
+            if (p.dbm === null) { if (tramo.length) tramos.push(tramo); tramo = []; return; }
+            tramo.push(`${x(i).toFixed(1)},${y(p.dbm).toFixed(1)}`);
+        });
+        if (tramo.length) tramos.push(tramo);
+
+        const linea = tramos.filter((t) => t.length > 1)
+            .map((t) => `<polyline class="senal-linea" points="${t.join(' ')}"/>`).join('');
+
+        // Puntos: con pocas horas van todos; con muchas, sólo los que quedarían
+        // invisibles por no tener vecino con dato (una hora suelta entre cortes).
+        const puntos = serie.map((p, i) => {
+            if (p.dbm === null) return '';
+            const solo = (serie[i - 1]?.dbm ?? null) === null && (serie[i + 1]?.dbm ?? null) === null;
+            if (n > 48 && !solo) return '';
+            return `<circle class="senal-punto" cx="${x(i).toFixed(1)}" cy="${y(p.dbm).toFixed(1)}" r="${solo ? 3 : 2.5}"/>`;
         }).join('');
-    }
 
-    function filaSenal(m) {
-        const banda   = bandaSenal(m.porcentaje);
-        const fecha   = formatDate(m.fecha) || '';
-        // La fecha de la fila va corta (sin año): las mediciones son
-        // recientes y el período completo ya está en el resumen.
-        const corta   = fecha.replace(/^(\d{2}\/\d{2})\/\d{4}/, '$1');
-        const reporte = m.reporte ? ` · reporte ${m.reporte}` : '';
-        const titulo  = `${fecha} — ${m.dbm} dBm (${m.porcentaje}%, ${banda.etiqueta})${reporte} · señal #${m.id}`;
+        // Columnas invisibles: una por hora, son el área sensible del hover.
+        const hit = serie.map((p, i) => `
+            <rect class="senal-hit" x="${(padL + (plotW * i) / n).toFixed(1)}" y="${padT}"
+                  width="${(plotW / n).toFixed(2)}" height="${plotH}"
+                  data-x="${x(i).toFixed(1)}" data-tip="${escapeHtml(tipHora(p, horas))}"
+                  role="img" aria-label="${escapeHtml(tipHora(p, horas))}"/>`).join('');
 
         return `
-            <div class="senal-row" title="${escapeHtml(titulo)}">
-                <span class="senal-row-fecha">${escapeHtml(corta)}</span>
-                <span class="senal-track">
-                    <span class="senal-bar senal-bar-${banda.clave}" style="width:${m.porcentaje}%"></span>
-                </span>
-                <span class="senal-row-valor">
-                    <i class="fa-solid ${banda.icono} senal-icon-${banda.clave}"></i>${m.dbm} dBm
-                </span>
+            <div class="senal-plot">
+                <svg class="senal-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet"
+                     role="img" aria-label="Nivel de señal por hora, en dBm">
+                    ${zonas}${ejeY}${ejeX}
+                    <line class="senal-cross" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" hidden/>
+                    ${linea}${puntos}${hit}
+                    <text class="senal-tick senal-unidad" x="${padL - 8}" y="${padT - 3}" text-anchor="end">dBm</text>
+                </svg>
+                <div class="senal-tip" hidden></div>
             </div>`;
     }
 
-    /* ---------- Alta / Edición ----------
-     * Los campos de telemetria (enlace, ip, senal, firmware, contadores,
-     * fechas de conexion/latido, adopcion y monitoreoUltimo/Siguiente) los
-     * escribe el equipo: se consultan pero no se editan desde el panel.
-     * El alta y la edicion NO comparten formulario: el alta pide la ficha
-     * completa y la edicion expone solo `nombre` (ver `bodyEdicion`). */
-    async function formDispositivo(id) {
-        const esEdicion = id != null;
-        let d = {
-            uuid: '', nombre: '', agente: null, modelo: null, producto: null,
-            transceptor: null, chip: null, mac: '', serial: '', identidad: '',
-            llave: '', senalesLimite: null, fabricacion: '', instalacion: '',
-            monitoreo: false, monitoreoIntervalo: null, monitoreoCorreos: '',
-            coordenadas: '', indicadores: '', habilitado: true,
-        };
+    // 'YYYY-MM-DD HH:00:00' -> 'HH:00' en ventanas cortas, 'DD/MM' en las largas.
+    function etiquetaHora(hora, horas) {
+        const m = String(hora ?? '').match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})/);
+        if (!m) return '';
+        return horas > 48 ? `${m[3]}/${m[2]}` : `${m[4]}:00`;
+    }
 
-        if (esEdicion) {
-            try {
-                d = (await api(`api/dispositivos.php?id=${id}`)).dispositivo;
-            } catch (err) {
-                toast(err.message, { error: true });
+    // Texto del tooltip / etiqueta accesible de una hora de la serie.
+    function tipHora(p, horas) {
+        const cuando = formatDate(p.hora) || p.hora;
+        if (p.dbm === null) return `${cuando} · sin reporte`;
+        const banda = bandaSenal(p.porcentaje);
+        const rango = p.minimo !== p.maximo ? ` (entre ${p.minimo} y ${p.maximo})` : '';
+        return `${cuando} · ${p.dbm} dBm${rango} · ${p.porcentaje}% · ${banda.etiqueta}`
+             + ` · ${p.muestras} ${p.muestras === 1 ? 'medición' : 'mediciones'}`;
+    }
+
+    /* Cablea lo que el HTML no puede: los chips de período y el hover del
+       gráfico (cruz vertical + tooltip). Se llama después de cada render. */
+    function activarConexion(contenedor, id) {
+        contenedor.querySelectorAll('.senal-chips [data-horas]').forEach((chip) => {
+            chip.addEventListener('click', () => {
+                cargarConexionDispositivo(id, contenedor, +chip.dataset.horas).catch(() => {});
+            });
+        });
+
+        const plot  = contenedor.querySelector('.senal-plot');
+        const tip   = contenedor.querySelector('.senal-tip');
+        const cruz  = contenedor.querySelector('.senal-cross');
+        if (!plot || !tip || !cruz) return;
+
+        plot.querySelectorAll('.senal-hit').forEach((celda) => {
+            celda.addEventListener('mouseenter', () => {
+                cruz.setAttribute('x1', celda.dataset.x);
+                cruz.setAttribute('x2', celda.dataset.x);
+                cruz.removeAttribute('hidden');
+
+                // La posición se mide sobre el DOM, no sobre el viewBox: el SVG
+                // escala con el modal y las unidades no son píxeles.
+                const c = celda.getBoundingClientRect();
+                const p = plot.getBoundingClientRect();
+                tip.textContent   = celda.dataset.tip;
+                tip.style.left    = `${c.left - p.left + c.width / 2}px`;
+                tip.style.top     = `${c.top - p.top}px`;
+                tip.removeAttribute('hidden');
+            });
+        });
+
+        plot.addEventListener('mouseleave', () => {
+            cruz.setAttribute('hidden', '');
+            tip.setAttribute('hidden', '');
+        });
+    }
+
+    /* ---------- Adopción (reemplaza al alta) ----------
+     * El cliente no da de alta dispositivos: los fabrica Reactor y el panel
+     * los ADOPTA. Por eso el modal pide un solo dato, el número de serie del
+     * equipo, y el botón dice `Continuar`: lo que sigue no es un alta sino la
+     * confirmación de la adopción, que el backend ya registró. */
+    function formAdoptarDispositivo() {
+        const body = `
+            <p style="font-size:.88rem;color:var(--muted);line-height:1.5;margin:0">
+                Ingresá el número de serie que figura en la etiqueta del equipo.
+                Si está disponible, lo incorporamos a tu cuenta.
+            </p>
+            <div class="form-group">
+                <label for="da-serial">Número de serie *</label>
+                <input type="text" id="da-serial" maxlength="50" autocomplete="off" spellcheck="false"
+                       placeholder="El que figura en la etiqueta del equipo">
+            </div>
+            <div class="field-error" id="da-error" style="display:none"></div>
+        `;
+
+        const m = openModal('Nuevo dispositivo', body, {
+            closeLabel:  'Cancelar',
+            primaryHtml: '<button class="btn btn-primary" data-act="continuar">Continuar</button>',
+        });
+
+        const input = m.backdrop.querySelector('#da-serial');
+        const err   = m.backdrop.querySelector('#da-error');
+        const btn   = m.backdrop.querySelector('[data-act="continuar"]');
+
+        input.focus();
+        // Enter confirma: con un solo campo, obligar a ir al botón molesta.
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+
+        btn.addEventListener('click', async () => {
+            const serial = input.value.trim();
+            const fallar = (msg) => {
+                err.textContent   = msg;
+                err.style.display = '';
+                input.classList.add('input-invalid');
+            };
+
+            if (serial === '') {
+                fallar('Ingresá el número de serie del equipo.');
+                input.focus();
                 return;
             }
+
+            err.style.display = 'none';
+            input.classList.remove('input-invalid');
+            btn.disabled = true;
+            try {
+                const adoptado = await api('api/dispositivos.php?accion=adoptar', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ serial }),
+                });
+                m.close();
+                cargarDispositivos();
+                modalDispositivoAdoptado(adoptado);
+            } catch (e2) {
+                fallar(e2.message);
+                btn.disabled = false;
+            }
+        });
+    }
+
+    /* Segundo modal del alta. Cuando se abre, el equipo YA fue adoptado: la
+       adopción se registró en el POST anterior, acá sólo se confirma y se
+       muestra de qué equipo se trata. Por eso no tiene acción primaria. */
+    function modalDispositivoAdoptado(d) {
+        const body = `
+            <div class="alert alert-success" style="margin-bottom:0">
+                El dispositivo fue adoptado y ya forma parte de tu cuenta.
+            </div>
+            <div class="view-grid">
+                ${viewCard('Identificador',   d.uuid   ? `<code>${escapeHtml(d.uuid)}</code>`   : '')}
+                ${viewCard('Número de serie', d.serial ? `<code>${escapeHtml(d.serial)}</code>` : '')}
+                ${viewCard('Nombre',          escapeHtml(d.nombre || ''), true)}
+                ${viewCard('Modelo',          escapeHtml(d.modelo_nombre || ''))}
+                ${viewCard('Estado',          badgeHabilitado(true))}
+            </div>
+            <p style="font-size:.85rem;color:var(--muted);line-height:1.5;margin:0">
+                Podés renombrarlo con <strong>Editar</strong>, en el menú de la fila.
+            </p>
+        `;
+        openModal('Dispositivo adoptado', body, { closeLabel: 'Cerrar' });
+    }
+
+    /* ---------- Edición ----------
+     * La UI expone UN SOLO campo, `nombre`. El resto de la ficha (identificador
+     * de fábrica, catálogos, MAC, fechas, monitoreo) lo administra Reactor y no
+     * el cliente; `habilitado` se cambia desde Habilitar / Deshabilitar del
+     * menú contextual del listado. Los campos de telemetría (enlace, ip, senal,
+     * firmware, contadores, fechas de conexión/latido, adopción y
+     * monitoreoUltimo/Siguiente) los escribe el equipo: se consultan pero no se
+     * editan desde el panel. */
+    async function formDispositivo(id) {
+        let d;
+        try {
+            d = (await api(`api/dispositivos.php?id=${id}`)).dispositivo;
+        } catch (err) {
+            toast(err.message, { error: true });
+            return;
         }
 
-        const opciones = (lista, seleccionado, vacio) =>
-            [`<option value="">${vacio}</option>`].concat(
-                (lista || []).map((o) =>
-                    `<option value="${o.id}"${o.id === seleccionado ? ' selected' : ''}>${escapeHtml(o.nombre || `#${o.id}`)}</option>`)
-            ).join('');
-
-        const c       = dispositivos.catalogos;
-        const dominio = sesion.dominio_nombre || (sesion.dominio ? `#${sesion.dominio}` : '—');
-        const num     = (v) => (v === null || v === undefined ? '' : String(v));
-
-        /* En edicion la UI expone UN SOLO campo, `nombre`: el resto de la ficha
-         * (identificador de fabrica, catalogos, fechas, monitoreo) lo
-         * administra Reactor y no el cliente, y `habilitado` se cambia desde
-         * Habilitar / Deshabilitar del menu contextual del listado. El alta
-         * sigue pidiendo el formulario completo, que es donde se cargan
-         * esos datos. */
-        const bodyEdicion = `
+        const body = `
             <div class="form-group">
                 <label for="df-nombre">Nombre *</label>
                 <input type="text" id="df-nombre" maxlength="255" value="${escapeHtml(d.nombre)}">
@@ -1607,174 +1777,34 @@
             <div class="field-error" id="df-error" style="display:none"></div>
         `;
 
-        const bodyAlta = `
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-uuid">Identificador *</label>
-                    <input type="text" id="df-uuid" maxlength="16" value="${escapeHtml(d.uuid)}"
-                           placeholder="UUID de fábrica">
-                </div>
-                <div class="form-group">
-                    <label for="df-nombre">Nombre *</label>
-                    <input type="text" id="df-nombre" maxlength="255" value="${escapeHtml(d.nombre)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-modelo">Modelo</label>
-                    <select id="df-modelo">${opciones(c.modelos, d.modelo, '— Sin modelo —')}</select>
-                </div>
-                <div class="form-group">
-                    <label for="df-producto">Producto</label>
-                    <select id="df-producto">${opciones(c.productos, d.producto, '— Sin producto —')}</select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-agente">Agente</label>
-                    <select id="df-agente">${opciones(c.agentes, d.agente, '— Sin agente —')}</select>
-                </div>
-                <div class="form-group">
-                    <label for="df-transceptor">Transceptor</label>
-                    <select id="df-transceptor">${opciones(c.transceptores, d.transceptor, '— Sin transceptor —')}</select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-chip">Chip</label>
-                    <select id="df-chip">${opciones(c.chips, d.chip, '— Sin chip —')}</select>
-                </div>
-                <div class="form-group">
-                    <label>Dominio</label>
-                    <input type="text" value="${escapeHtml(dominio)}" readonly title="Se asigna desde tu sesión">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-mac">MAC</label>
-                    <input type="text" id="df-mac" maxlength="50" value="${escapeHtml(d.mac)}">
-                </div>
-                <div class="form-group">
-                    <label for="df-serial">Serie</label>
-                    <input type="text" id="df-serial" maxlength="50" value="${escapeHtml(d.serial)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-identidad">Identidad</label>
-                    <input type="text" id="df-identidad" maxlength="50" value="${escapeHtml(d.identidad)}">
-                </div>
-                <div class="form-group">
-                    <label for="df-llave">Llave</label>
-                    <input type="text" id="df-llave" maxlength="50" value="${escapeHtml(d.llave)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-fabricacion">Fabricación</label>
-                    <input type="datetime-local" id="df-fabricacion" value="${toInputDateTime(d.fabricacion)}">
-                </div>
-                <div class="form-group">
-                    <label for="df-instalacion">Instalación</label>
-                    <input type="datetime-local" id="df-instalacion" value="${toInputDateTime(d.instalacion)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="df-senaleslimite">Límite de señales</label>
-                    <input type="number" min="0" id="df-senaleslimite" value="${escapeHtml(num(d.senalesLimite))}">
-                </div>
-                <div class="form-group">
-                    <label for="df-monitoreointervalo">Intervalo de monitoreo (min)</label>
-                    <input type="number" min="0" id="df-monitoreointervalo" value="${escapeHtml(num(d.monitoreoIntervalo))}">
-                </div>
-            </div>
-            <div class="form-group">
-                <label for="df-monitoreocorreos">Correos de monitoreo</label>
-                <input type="text" id="df-monitoreocorreos" maxlength="1000" value="${escapeHtml(d.monitoreoCorreos)}"
-                       placeholder="Separados por coma">
-            </div>
-            <div class="form-group">
-                <label for="df-coordenadas">Coordenadas</label>
-                <input type="text" id="df-coordenadas" maxlength="255" value="${escapeHtml(d.coordenadas)}"
-                       placeholder="latitud, longitud">
-            </div>
-            <div class="form-group">
-                <label for="df-indicadores">Indicadores</label>
-                <input type="text" id="df-indicadores" maxlength="1000" value="${escapeHtml(d.indicadores)}">
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                        <input type="checkbox" id="df-habilitado" ${d.habilitado ? 'checked' : ''}>
-                        Dispositivo habilitado
-                    </label>
-                </div>
-                <div class="form-group">
-                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                        <input type="checkbox" id="df-monitoreo" ${d.monitoreo ? 'checked' : ''}>
-                        Monitoreo activo
-                    </label>
-                </div>
-            </div>
-            <div class="field-error" id="df-error" style="display:none"></div>
-        `;
+        const m = openModal(`Editar dispositivo <span class="muted">#${d.id}</span>`, body, {
+            closeLabel:  'Cancelar',
+            primaryHtml: '<button class="btn btn-primary" data-act="guardar">Guardar</button>',
+        });
 
-        const m = openModal(
-            esEdicion ? `Editar dispositivo <span class="muted">#${d.id}</span>` : 'Nuevo dispositivo',
-            esEdicion ? bodyEdicion : bodyAlta,
-            {
-                wide:        !esEdicion,
-                closeLabel:  'Cancelar',
-                primaryHtml: `<button class="btn btn-primary" data-act="guardar">${esEdicion ? 'Guardar' : 'Crear dispositivo'}</button>`,
-            }
-        );
+        const err   = m.backdrop.querySelector('#df-error');
+        const btn   = m.backdrop.querySelector('[data-act="guardar"]');
+        const input = m.backdrop.querySelector('#df-nombre');
 
-        const err = m.backdrop.querySelector('#df-error');
-        const btn = m.backdrop.querySelector('[data-act="guardar"]');
-        const val = (sel) => m.backdrop.querySelector(sel).value.trim();
+        input.focus();
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
 
         btn.addEventListener('click', async () => {
-            /* El PUT reescribe la fila entera y en edicion el form ya no tiene
-               los demas campos: se parte del registro tal como vino del GET y
-               se pisa nada mas `nombre`, igual que el toggle del listado hace
-               con `habilitado`. */
-            const payload = esEdicion ? {
-                ...payloadDispositivo(d),
-                id:     d.id,
-                nombre: val('#df-nombre'),
-            } : {
-                uuid:               val('#df-uuid'),
-                nombre:             val('#df-nombre'),
-                modelo:             +(val('#df-modelo')      || 0),
-                producto:           +(val('#df-producto')    || 0),
-                agente:             +(val('#df-agente')      || 0),
-                transceptor:        +(val('#df-transceptor') || 0),
-                chip:               +(val('#df-chip')        || 0),
-                mac:                val('#df-mac'),
-                serial:             val('#df-serial'),
-                identidad:          val('#df-identidad'),
-                llave:              val('#df-llave'),
-                fabricacion:        val('#df-fabricacion'),
-                instalacion:        val('#df-instalacion'),
-                senalesLimite:      val('#df-senaleslimite'),
-                monitoreoIntervalo: val('#df-monitoreointervalo'),
-                monitoreoCorreos:   val('#df-monitoreocorreos'),
-                coordenadas:        val('#df-coordenadas'),
-                indicadores:        val('#df-indicadores'),
-                habilitado:         m.backdrop.querySelector('#df-habilitado').checked,
-                monitoreo:          m.backdrop.querySelector('#df-monitoreo').checked,
-            };
+            /* El PUT reescribe la fila entera y el form ya no tiene los demás
+               campos: se parte del registro tal como vino del GET y se pisa
+               nada más `nombre`, igual que el toggle del listado hace con
+               `habilitado`. */
+            const payload = { ...payloadDispositivo(d), id: d.id, nombre: input.value.trim() };
 
             btn.disabled = true;
             try {
                 await api('api/dispositivos.php', {
-                    method:  esEdicion ? 'PUT' : 'POST',
+                    method:  'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify(payload),
                 });
                 m.close();
-                toast(esEdicion ? 'Dispositivo actualizado' : 'Dispositivo creado');
+                toast('Dispositivo actualizado');
                 cargarDispositivos();
             } catch (e2) {
                 err.textContent   = e2.message;
@@ -3122,10 +3152,16 @@
      * legacy no se repite en la tabla — todo el panel ya corre acotado al
      * dominio de la sesion — pero sigue estando en el modal de Consulta.
      *
-     * SOLO LECTURA, igual que el legacy: la invitacion la emite el usuario
-     * desde la pantalla de invitar y el destinatario es quien la acepta o
-     * la rechaza. El menu contextual no tiene Editar ni Eliminar; sus
-     * acciones propias son atajos para acotar el listado.
+     * ALTA SI, EDICION NO: se puede invitar (boton "Invitar" de la toolbar)
+     * pero no editar ni dar de baja una invitacion, porque una vez emitida
+     * el que la mueve es el destinatario, aceptandola o rechazandola. Por eso
+     * el menu contextual no tiene Editar ni Eliminar; sus acciones propias
+     * son atajos para acotar el listado.
+     *
+     * El alta pide UN solo campo, el correo, que es a donde va el mensaje.
+     * Nombre y celular los completa el invitado al aceptar. Es la misma
+     * forma del alta legacy (un solo campo, el celular) con el canal
+     * invertido: aquel mandaba por WhatsApp, este por correo.
      * ======================================================= */
 
     const INVITACIONES_DEFAULTS = {
@@ -3172,11 +3208,11 @@
                 <div class="module-help" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin-bottom:16px;box-shadow:var(--shadow);display:flex;gap:14px;align-items:center">
                     <div class="module-help-icon"><i class="fa-solid fa-envelope-open-text"></i></div>
                     <div style="font-size:.88rem;color:var(--muted);line-height:1.45">
-                        Las invitaciones son los pedidos de acceso que un usuario del dominio le envía a
-                        una persona para que se sume al sistema, con sus datos de contacto, cuándo se emitió,
-                        cuándo la abrió el destinatario y en qué estado quedó. Se listan únicamente las del
-                        dominio <strong>${dominio}</strong> y es un registro de solo lectura: no se puede
-                        editar ni eliminar.
+                        Las invitaciones son los pedidos de acceso que un usuario del dominio le envía por
+                        correo a una persona para que se sume al sistema, con sus datos de contacto, cuándo
+                        se emitió, cuándo la abrió el destinatario y en qué estado quedó. Se listan
+                        únicamente las del dominio <strong>${dominio}</strong>. Una vez enviada no se
+                        edita ni se elimina: la resuelve el destinatario desde el enlace que recibió.
                     </div>
                 </div>
 
@@ -3197,6 +3233,11 @@
                         </button>
                         <button type="button" class="btn btn-ghost btn-icon" id="in-refrescar" title="Refrescar">
                             <i class="fa-solid fa-rotate"></i>
+                        </button>
+                    </div>
+                    <div class="toolbar-right">
+                        <button type="button" class="btn btn-primary" id="in-nueva">
+                            <i class="fa-solid fa-paper-plane"></i> Invitar
                         </button>
                     </div>
                 </div>
@@ -3237,6 +3278,7 @@
 
         container.querySelector('#in-filtros').addEventListener('click', abrirFiltrosInvitaciones);
         container.querySelector('#in-refrescar').addEventListener('click', () => cargarInvitaciones());
+        container.querySelector('#in-nueva').addEventListener('click', () => formInvitacion());
 
         cargarInvitaciones();
     }
@@ -3375,6 +3417,79 @@
                 onSelect: () => { invitaciones.estado = r.estado; pintarBadgeFiltrosInvitaciones(); cargarInvitaciones(); },
             } : null,
         ].filter(Boolean);
+    }
+
+    /* ---------- Invitar (alta + envio) ----------
+     * Un solo campo: el correo del invitado. El resto de la ficha la
+     * completa el propio invitado cuando acepta, asi que no hay nada mas
+     * que preguntarle al emisor.
+     *
+     * El POST encola el correo en el microservicio antes de responder, y si
+     * el envio falla el backend revierte el alta: por eso el boton espera la
+     * respuesta en vez de cerrar el modal de entrada. Un "Invitación enviada"
+     * optimista mentiria en el unico caso que importa. */
+    function formInvitacion() {
+        const dominio = sesion.dominio_nombre || (sesion.dominio ? `#${sesion.dominio}` : '—');
+
+        const body = `
+            <div class="form-group">
+                <label for="if-correo">Correo del invitado *</label>
+                <input type="email" id="if-correo" maxlength="100" autocomplete="off"
+                       placeholder="persona@ejemplo.com" autofocus>
+            </div>
+            <div class="form-group">
+                <label>Dominio</label>
+                <input type="text" value="${escapeHtml(dominio)}" readonly
+                       title="Se toma de tu sesión">
+            </div>
+            <div class="alert alert-info" style="margin-top:4px">
+                Le va a llegar un correo con un enlace para aceptar o rechazar la invitación.
+                Su nombre, apellido y celular los completa al aceptar.
+            </div>
+            <div class="field-error" id="if-error" style="display:none"></div>
+        `;
+
+        const m = openModal('Invitar usuario', body, {
+            closeLabel:  'Cancelar',
+            primaryHtml: '<button class="btn btn-primary" data-act="enviar">Enviar invitación</button>',
+        });
+
+        const input = m.backdrop.querySelector('#if-correo');
+        const err   = m.backdrop.querySelector('#if-error');
+        const btn   = m.backdrop.querySelector('[data-act="enviar"]');
+        const label = btn.textContent;
+
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+
+        btn.addEventListener('click', async () => {
+            const correo = input.value.trim();
+            if (correo === '') {
+                err.textContent = 'El correo es obligatorio.';
+                err.style.display = '';
+                input.focus();
+                return;
+            }
+
+            err.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Enviando…';
+            try {
+                await api('api/invitaciones.php', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ correo }),
+                });
+                m.close();
+                toast(`Invitación enviada a ${correo}`);
+                cargarInvitaciones();
+            } catch (e2) {
+                err.textContent   = e2.message;
+                err.style.display = '';
+                btn.disabled = false;
+                btn.textContent = label;
+                input.focus();
+            }
+        });
     }
 
     /* ---------- Consultar ---------- */

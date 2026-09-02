@@ -327,6 +327,45 @@ textarea { resize: vertical; min-height: 60px; }
 
 **Regla:** label arriba (no inline), `.78–.8rem`, color `var(--muted)`. Validación con `.input-invalid` + `.field-error` debajo.
 
+### 8.1 Secciones de formulario
+
+Para formularios largos —los que editan todas las columnas de una tabla, como
+el de **Dispositivos** (35 campos)— los campos se agrupan en secciones con un
+rótulo con ícono.
+
+```css
+.form-section        { display: flex; flex-direction: column; gap: 12px; }
+.form-section + .form-section { margin-top: 4px; }
+.form-section-title  {
+  display: flex; align-items: center; gap: 8px;
+  font-size: .72rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted);
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.form-section-title i { font-size: .8rem; opacity: .8; }
+```
+
+```html
+<div class="form-section">
+  <div class="form-section-title"><i class="fa-solid fa-sitemap"></i>Asignación</div>
+  <div class="form-row"> … </div>
+</div>
+```
+
+**Reglas:**
+
+- **El separador es el título, no un recuadro.** La sección no lleva fondo ni
+  borde propio: adentro de un modal, encajar una caja dentro de otra ensucia
+  la jerarquía. La única línea es la de abajo del rótulo.
+- El rótulo usa la tipografía de rótulo de sección (`.72rem`, `800`,
+  mayúsculas), la misma familia visual que el toggle de categoría del sidebar.
+- **Ícono obligatorio**, FontAwesome solid, a `.8rem` y `opacity: .8` — lo
+  suficiente para anclar la sección sin competir con los labels.
+- **La misma agrupación se usa en Consultar y en Editar** del mismo recurso,
+  para que los dos modales se lean igual y el ojo encuentre cada campo en el
+  mismo lugar.
+
 ## 9. Toolbar (filtros + búsqueda + acciones)
 
 Patrón normativo para el encabezado de cualquier listado ABM (ver `ABM.md` §2).
@@ -375,7 +414,7 @@ No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como 
 - El `placeholder` del input de búsqueda rápida lista los campos sobre los que opera la búsqueda (UID / nombre / tipo / ubicación, operador / nº / ICCID / notas, etc.).
 - El filtrado en vivo se aplica al `input`/`change` event sin re-fetch (filtrado client-side por defecto). Señales y Registros son casos mixtos: filtran client-side sobre la última página descargada, pero re-fetchean cuando cambian los parámetros `?dispositivo=` o `?limit=` server-side.
 - El botón `Filtros` es secundario, no primario — la acción primaria del listado es siempre `+ Nuevo <entidad>`, una sola por pantalla (ver §6).
-- Si el módulo es read-only (señales, alertas), se omite el botón `+ Nuevo` y la toolbar colapsa a sólo búsqueda rápida + Filtros. El helper `abmToolbar` lo soporta nativamente pasando `newLabel: null`.
+- Si el módulo es read-only (señales, registros, adopciones, alertas), se omite el botón `+ Nuevo` y la toolbar colapsa a sólo búsqueda rápida + Filtros. El helper `abmToolbar` lo soporta nativamente pasando `newLabel: null`.
 - `.filter-chip` queda en CSS como utilitario suelto, pero **no se usa en listados ABM nuevos**.
 
 ## 10. Tablas
@@ -1189,7 +1228,7 @@ th.action-col, td.action-col { width: 1%; white-space: nowrap; text-align: cente
 - Cada `<td>` de acción tiene la clase `action-col` para forzar ancho mínimo y centrado.
 - Los módulos **read-only** (eventos, logs, señales) usan solo la columna **Consultar**; no incluyen Editar / Eliminar.
 - Tooltip exacto (`title="Consultar" / "Editar" / "Eliminar"`) para que el ícono sea legible sin contexto.
-- **Click izquierdo en la fila → acción por defecto (Consultar).** Opt-in por módulo: `<tr class="row-clickable">` (§10) + listener de `click` en la fila que abre el modal de Consultar. El botón hamburguesa hace `stopPropagation()` para no dispararlo. Activo en todos los listados ABM: **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Usuarios y Perfiles** (más la solapa Perfiles del modal de Consultar de Usuarios). El click derecho sigue abriendo el menú contextual completo.
+- **Click izquierdo en la fila → acción por defecto (Consultar).** Opt-in por módulo: `<tr class="row-clickable">` (§10) + listener de `click` en la fila que abre el modal de Consultar. El botón hamburguesa hace `stopPropagation()` para no dispararlo. Activo en todos los listados ABM: **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Adopciones, Usuarios y Perfiles** (más la solapa Perfiles del modal de Consultar de Usuarios). El click derecho sigue abriendo el menú contextual completo.
 
 ## 25. ABM: tarjetas de consulta (read-only)
 

@@ -7,14 +7,16 @@ declare(strict_types=1);
  *
  *   GET    api/dispositivos.php                     -> listado + resumen + catalogos
  *   GET    api/dispositivos.php?id=N                -> un registro (todos los campos)
- *   POST   api/dispositivos.php                     -> alta
- *   POST   api/dispositivos.php?accion=liberar&id=N -> liberar (ver handleLiberar)
+ *   POST   api/dispositivos.php?accion=adoptar      -> adoptar por numero de serie
+ *   POST   api/dispositivos.php?accion=liberar&id=N -> liberar
  *   PUT    api/dispositivos.php                     -> modificacion
  *
- * NO HAY BAJA: un dispositivo no se borra, se libera. Cualquier equipo que
- * haya estado en servicio tiene historial en `adopciones`, `canales`,
- * `botones`, `controles`, `etiquetas` y `usos`, todas con FK ON DELETE
- * RESTRICT, asi que el DELETE fallaba con 1451 en la practica.
+ * NO HAY ALTA NI BAJA. El cliente no da de alta ni borra equipos: los
+ * fabrica Reactor y el panel solo los ADOPTA (entran al dominio) y los
+ * LIBERA (vuelven al pool). Ese es todo el ciclo de vida que ve el cliente.
+ * Ademas, cualquier equipo que haya estado en servicio tiene historial en
+ * `adopciones`, `canales`, `botones`, `controles`, `etiquetas` y `usos`,
+ * todas con FK ON DELETE RESTRICT, asi que el DELETE fallaba con 1451.
  *
  * ALCANCE: todo se acota al dominio de la sesion (requireDominioId()). Ningun
  * query corre sin ese filtro, ni siquiera el lookup por id.
@@ -50,7 +52,12 @@ try {
             isset($_GET['id']) ? handleGet((int) $_GET['id']) : handleList();
             break;
         case 'POST':
-            ($_GET['accion'] ?? '') === 'liberar' ? handleLiberar() : handleCreate();
+            switch ($_GET['accion'] ?? '') {
+                case 'adoptar': handleAdoptar(); break;
+                case 'liberar': handleLiberar(); break;
+                default:
+                    json_error('Accion no soportada: los dispositivos se incorporan adoptandolos por numero de serie', 400);
+            }
             break;
         case 'PUT':    handleUpdate(); break;
         default:
@@ -142,7 +149,7 @@ function handleList(): void
 
     json_ok([
         'dispositivos' => $dispositivos,
-        'catalogos'    => catalogos($dominio),
+        'catalogos'    => catalogos(),
         'resumen'      => [
             'total'       => (int) $r['total'],
             'habilitados' => (int) $r['habilitados'],
@@ -188,29 +195,122 @@ function handleGet(int $id): void
 }
 
 /* ------------------------------------------------------------------ */
-/* Alta / Modificacion / Baja                                          */
+/* Adopcion / Modificacion / Liberacion                                */
 /* ------------------------------------------------------------------ */
 
-function handleCreate(): void
+/**
+ * Adoptar: incorpora al dominio de la sesion un equipo que este en el pool
+ * `Liberado`, buscandolo por su numero de serie. Es la unica forma de sumar un
+ * dispositivo — reemplaza al alta, porque el cliente no fabrica equipos.
+ *
+ * Es la inversa exacta de handleLiberar(): abre una fila en `adopciones`
+ * (`vigente = '1'`, `liberado` con el centinela '1500-01-01 00:00:00') y mueve
+ * el dispositivo al dominio con `adoptado = 1`, `adopcion` = la fila nueva y
+ * `habilitado = 1`, para que quede operativo sin un segundo paso.
+ *
+ * `serial` NO es unico en la tabla y no hay UNIQUE que lo impida (3 repetidos
+ * en dev, uno de ellos con las dos filas en el pool), asi que la busqueda
+ * puede traer varias: si mas de una esta libre no se adivina cual.
+ *
+ * El UPDATE final lleva `AND dominio = DOMINIO_LIBERADO` a proposito: si entre
+ * el SELECT y el UPDATE otra cuenta adopto el mismo equipo, afecta 0 filas y
+ * la transaccion se deshace en lugar de robarselo.
+ */
+function handleAdoptar(): void
 {
     $dominio = requireDominioId();
-    $datos   = validar(readJson(), $dominio, null);
+    $serial  = trim((string) (readJson()['serial'] ?? ''));
+
+    if ($serial === '') {
+        json_error('Ingresa el numero de serie del equipo', 422);
+    }
+    if (mb_strlen($serial) > 50) {
+        json_error('El numero de serie no puede superar 50 caracteres', 422);
+    }
 
     $stmt = db()->prepare(
-        'INSERT INTO dispositivos
-            (uuid, nombre, dominio, agente, modelo, producto, transceptor, chip,
-             mac, serial, identidad, llave, habilitado, senalesLimite,
-             fabricacion, instalacion, monitoreo, monitoreoIntervalo,
-             monitoreoCorreos, coordenadas, indicadores)
-         VALUES
-            (:uuid, :nombre, :dominio, :agente, :modelo, :producto, :transceptor, :chip,
-             :mac, :serial, :identidad, :llave, :habilitado, :senalesLimite,
-             :fabricacion, :instalacion, :monitoreo, :monitoreoIntervalo,
-             :monitoreoCorreos, :coordenadas, :indicadores)'
+        'SELECT d.id, d.uuid, d.nombre, d.serial, d.dominio, m.nombre AS modelo_nombre
+         FROM dispositivos d
+         LEFT JOIN modelos m ON m.id = d.modelo
+         WHERE d.serial = :s
+         ORDER BY d.id ASC'
     );
-    $stmt->execute(array_merge($datos, [':dominio' => $dominio]));
+    $stmt->execute([':s' => $serial]);
+    $filas = $stmt->fetchAll();
 
-    json_ok(['id' => (int) db()->lastInsertId()], 201);
+    if (!$filas) {
+        json_error('No encontramos ningun equipo con ese numero de serie. Revisa la etiqueta del dispositivo.', 404);
+    }
+
+    $libres = array_values(array_filter(
+        $filas,
+        static fn(array $r): bool => (int) $r['dominio'] === DOMINIO_LIBERADO
+    ));
+
+    if (!$libres) {
+        // Existe, pero no esta disponible. El mensaje distingue si ya es tuyo:
+        // "ya esta adoptado por otra cuenta" confunde cuando el equipo es propio.
+        $propio = array_filter($filas, static fn(array $r): bool => (int) $r['dominio'] === $dominio);
+        json_error(
+            $propio
+                ? 'Ese equipo ya esta en tu cuenta.'
+                : 'Ese equipo ya esta adoptado por otra cuenta. Pedile al titular que lo libere para poder adoptarlo.',
+            409
+        );
+    }
+    if (count($libres) > 1) {
+        json_error('Hay mas de un equipo con ese numero de serie. Contactate con Reactor para que lo resuelvan.', 409);
+    }
+
+    $disp    = $libres[0];
+    $id      = (int) $disp['id'];
+    $usuario = (int) (sessionContext()['id'] ?? 0);
+
+    db()->beginTransaction();
+    try {
+        // Un equipo del pool no deberia tener adopciones abiertas, pero los
+        // datos traen de todo (24 filas del pool siguen con adoptado = 1): se
+        // cierran antes para no dejarlo con dos vigentes a la vez.
+        $cerrar = db()->prepare(
+            "UPDATE adopciones SET liberado = NOW(), vigente = '0'
+              WHERE dispositivo = :id AND vigente = '1'"
+        );
+        $cerrar->execute([':id' => $id]);
+
+        $ins = db()->prepare(
+            "INSERT INTO adopciones (dispositivo, dominio, adoptado, adoptador, liberado, vigente)
+             VALUES (:disp, :dom, NOW(), :usr, '1500-01-01 00:00:00', '1')"
+        );
+        $ins->execute([':disp' => $id, ':dom' => $dominio, ':usr' => $usuario > 0 ? $usuario : null]);
+        $adopcion = (int) db()->lastInsertId();
+
+        $upd = db()->prepare(
+            'UPDATE dispositivos
+                SET dominio = :dom, adoptado = 1, adopcion = :ad, habilitado = 1
+              WHERE id = :id AND dominio = :libre'
+        );
+        $upd->execute([':dom' => $dominio, ':ad' => $adopcion, ':id' => $id, ':libre' => DOMINIO_LIBERADO]);
+
+        if ($upd->rowCount() === 0) {
+            db()->rollBack();
+            json_error('Otra cuenta adopto ese equipo recien. Volve a intentar con otro numero de serie.', 409);
+        }
+
+        db()->commit();
+    } catch (Throwable $e) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $e;
+    }
+
+    json_ok([
+        'id'            => $id,
+        'uuid'          => (string) ($disp['uuid']          ?? ''),
+        'nombre'        => (string) ($disp['nombre']        ?? ''),
+        'serial'        => (string) ($disp['serial']        ?? ''),
+        'modelo_nombre' => (string) ($disp['modelo_nombre'] ?? ''),
+    ], 201);
 }
 
 function handleUpdate(): void
@@ -385,40 +485,31 @@ function chipNombre(mixed $id, mixed $telefono, mixed $serie): string
 }
 
 /**
- * Catalogos que alimentan los selects del alta/edicion y el filtro por modelo.
- * `agentes`, `modelos`, `productos` y `transceptores` son globales (no tienen
- * columna `dominio`); `chips` si, y va acotado al dominio de la sesion.
+ * Catalogos del modulo. Hoy es uno solo: `modelos`, que alimenta el filtro del
+ * listado. Los de `agentes`, `productos`, `transceptores` y `chips` se
+ * quitaron junto con el formulario de alta — eran 4 queries por cada carga del
+ * listado para selects que ya no existen (la edicion solo toca `nombre`).
+ * `modelos` es global, no tiene columna `dominio`.
  */
-function catalogos(int $dominio): array
+function catalogos(): array
 {
-    $simple = static function (string $tabla): array {
-        $stmt = db()->query('SELECT id, nombre FROM ' . $tabla . ' ORDER BY nombre ASC');
-        return array_map(static fn(array $r): array => [
-            'id'     => (int) $r['id'],
-            'nombre' => (string) ($r['nombre'] ?? ''),
-        ], $stmt->fetchAll());
-    };
-
-    $chips = db()->prepare(
-        'SELECT id, telefono, serie FROM chips WHERE dominio = :dom ORDER BY telefono ASC, serie ASC'
-    );
-    $chips->execute([':dom' => $dominio]);
+    $stmt = db()->query('SELECT id, nombre FROM modelos ORDER BY nombre ASC');
 
     return [
-        'agentes'       => $simple('agentes'),
-        'modelos'       => $simple('modelos'),
-        'productos'     => $simple('productos'),
-        'transceptores' => $simple('transceptores'),
-        'chips'         => array_map(static fn(array $r): array => [
+        'modelos' => array_map(static fn(array $r): array => [
             'id'     => (int) $r['id'],
-            'nombre' => chipNombre($r['id'], $r['telefono'], $r['serie']),
-        ], $chips->fetchAll()),
+            'nombre' => (string) ($r['nombre'] ?? ''),
+        ], $stmt->fetchAll()),
     ];
 }
 
 /**
- * Valida y normaliza el payload de alta/edicion. Corta con 422 si algo falla.
- * Devuelve el array de parametros PDO listo para el INSERT/UPDATE.
+ * Valida y normaliza el payload de la edicion. Corta con 422 si algo falla.
+ * Devuelve el array de parametros PDO listo para el UPDATE.
+ *
+ * Sigue validando la ficha entera aunque el modal solo edite `nombre`: el PUT
+ * reescribe la fila completa y el front le manda de vuelta los campos que leyo
+ * del GET, asi que tienen que revalidarse igual.
  */
 function validar(array $in, int $dominio, ?int $idActual): array
 {

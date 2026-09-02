@@ -3,16 +3,30 @@
 declare(strict_types=1);
 
 /**
- * Invitaciones: listado de `invitaciones` (esquema real en db/schema.sql).
+ * Invitaciones: listado y alta de `invitaciones` (esquema en db/schema.sql).
  *
- *   GET api/invitaciones.php        -> listado + resumen + catalogos
- *   GET api/invitaciones.php?id=N   -> una invitacion (todos los campos)
+ *   GET  api/invitaciones.php        -> listado + resumen + catalogos
+ *   GET  api/invitaciones.php?id=N   -> una invitacion (todos los campos)
+ *   POST api/invitaciones.php        -> alta + envio del correo
  *
- * MODULO DE SOLO LECTURA. Portado de reactor-panel/invitaciones/listar.php,
- * que tampoco ofrecia edicion ni baja: la invitacion la crea el emisor desde
- * la pantalla de invitar y el destinatario es quien la acepta o la rechaza.
- * Por eso este endpoint no expone POST / PUT / DELETE -- cualquier otro
- * metodo corta con 405.
+ * SIN EDICION NI BAJA. Igual que reactor-panel/invitaciones/listar.php, la
+ * invitacion la emite el usuario y el destinatario es quien la acepta o la
+ * rechaza: no hay nada que editar desde el panel. PUT y DELETE cortan con 405.
+ *
+ * ALTA: el unico dato que se pide es el correo, porque es el destino del
+ * mensaje. El nombre y el celular del invitado se capturan recien cuando
+ * acepta (invitacion/aceptar.php), que es donde el legacy tambien los pedia.
+ * Es la misma forma del alta legacy (reactor-app/dominio/invitar.php pedia
+ * un solo campo, el celular) con el canal invertido.
+ *
+ * ENVIO: por correo, via el microservicio de Databox (lib/databox.php). El
+ * legacy manda por WhatsApp desde reactor-app y NO se toca: los dos caminos
+ * conviven sobre la misma tabla. El enlace apunta a panel.reactor.com.ar.
+ *
+ * ATOMICIDAD: el alta y el envio van en una transaccion. Si el correo no se
+ * pudo encolar se revierte el INSERT: una fila pendiente que el destinatario
+ * nunca recibio es peor que no tener fila, porque nadie sabe que hay que
+ * reintentar.
  *
  * ALCANCE: todo se acota al dominio de la sesion (requireDominioId()),
  * incluido el lookup por id, para que nadie lea una invitacion de otro
@@ -31,6 +45,7 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/bootstrap.php';
+require_once dirname(__DIR__) . '/lib/invitaciones.php';
 
 const ORDEN_VALIDO = ['id', 'emitida', 'abierta', 'nombre'];
 const MAX_LIMITE   = 1000;
@@ -49,10 +64,16 @@ const ESTADOS_FALLBACK = [
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
-    if ($method !== 'GET') {
-        json_error('Metodo no permitido: las invitaciones son de solo lectura', 405);
+    switch ($method) {
+        case 'GET':
+            isset($_GET['id']) ? handleGet((int) $_GET['id']) : handleList();
+            break;
+        case 'POST':
+            handleCreate();
+            break;
+        default:
+            json_error('Metodo no permitido: la invitacion no se edita ni se elimina', 405);
     }
-    isset($_GET['id']) ? handleGet((int) $_GET['id']) : handleList();
 } catch (Throwable $e) {
     json_error('Error al procesar las invitaciones: ' . $e->getMessage(), 500);
 }
@@ -176,6 +197,112 @@ function handleGet(int $id): void
     }
 
     json_ok(['invitacion' => mapInvitacion($row, estadosInvitacion()['textos'])]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Alta + envio                                                        */
+/* ------------------------------------------------------------------ */
+
+function handleCreate(): void
+{
+    $dominio = requireDominioId();
+    $ctx     = sessionContext() ?? [];
+    $emisor  = (int) ($ctx['id'] ?? 0);
+    if ($emisor <= 0) {
+        json_error('No se pudo identificar al emisor de la invitacion', 409);
+    }
+
+    $in     = readJson();
+    $correo = strtolower(trim((string) ($in['correo'] ?? '')));
+
+    if ($correo === '') {
+        json_error('El correo es obligatorio', 422);
+    }
+    if (mb_strlen($correo) > 100) {
+        json_error('El correo no puede superar 100 caracteres', 422);
+    }
+    if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+        json_error('El correo no es valido', 422);
+    }
+
+    // Si esa persona ya entra a este dominio, la invitacion no tiene efecto:
+    // al aceptarla el flujo cortaria igual. Mejor decirlo ahora que gastar un
+    // correo y dejar una pendiente que nunca se va a poder cerrar.
+    $ya = db()->prepare(
+        "SELECT u.id
+         FROM usuarios u
+         JOIN perfiles p ON p.usuario = u.id AND p.dominio = :dom AND p.habilitado = '1'
+         WHERE LOWER(u.correo) = :correo
+         LIMIT 1"
+    );
+    $ya->execute([':dom' => $dominio, ':correo' => $correo]);
+    if ($ya->fetchColumn()) {
+        json_error('Ese correo ya tiene acceso a este dominio', 409);
+    }
+
+    $pdo  = db();
+    $uuid = invitacionUuidNuevo($pdo);
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO invitaciones
+                (uuid, dominio, emisor, nombre, celular, correo, emitida, abierta, estado)
+             VALUES
+                (:uuid, :dom, :emisor, NULL, NULL, :correo, NOW(), :abierta, :estado)'
+        );
+        $stmt->execute([
+            ':uuid'    => $uuid,
+            ':dom'     => $dominio,
+            ':emisor'  => $emisor,
+            ':correo'  => $correo,
+            // El legacy no usa NULL para "todavia no se abrio": usa el
+            // centinela historico, y las dos pantallas lo leen como vacio.
+            ':abierta' => INVITACION_SIN_FECHA,
+            ':estado'  => INVITACION_PENDIENTE,
+        ]);
+        $id = (int) $pdo->lastInsertId();
+
+        $envio = invitacionEnviarCorreo([
+            'uuid'           => $uuid,
+            'dominio'        => $dominio,
+            'dominio_nombre' => (string) ($ctx['dominio_nombre'] ?? ''),
+            // sessionContext() siempre trae la clave 'nombre' (a veces vacia),
+            // asi que ?? no alcanza para caer al login.
+            'emisor_nombre'  => trim((string) ($ctx['nombre'] ?? '')) !== ''
+                ? (string) $ctx['nombre']
+                : (string) ($ctx['usuario'] ?? ''),
+            'nombre'         => '',
+            'correo'         => $correo,
+        ]);
+
+        if (!$envio['ok']) {
+            $pdo->rollBack();
+            json_error('No se pudo enviar la invitacion. ' . ($envio['error'] ?? ''), 502);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    json_ok(['id' => $id, 'uuid' => $uuid, 'correo' => $correo], 201);
+}
+
+function readJson(): array
+{
+    $raw = file_get_contents('php://input');
+    if ($raw === false || $raw === '') {
+        return [];
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        json_error('Body JSON invalido', 400);
+    }
+    return $data;
 }
 
 /* ------------------------------------------------------------------ */

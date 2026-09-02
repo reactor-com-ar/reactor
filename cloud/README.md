@@ -46,8 +46,12 @@ Despues queda servido en <http://localhost:8086>.
 
 | Metodo | Path                  | Descripcion                                                 |
 | ------ | --------------------- | ----------------------------------------------------------- |
-| GET    | `/api/dispositivos.php` | Listado de `dispositivos` + resumen + dominio + `config_json` (parseado) |
-| PUT    | `/api/dispositivos.php` | Actualiza `config_json` de un dispositivo. Body JSON: `{id, config_json}` (`config_json` puede ser cualquier estructura JSON o `null`; hasta 64 KB serializado) |
+| GET    | `/api/dispositivos.php` | Listado de `dispositivos` + resumen. Devuelve las derivaciones de la tabla (`uid`, `tipo`, `ubicacion`, `estado`), no las columnas crudas |
+| GET    | `/api/dispositivos.php?id=N` | Un dispositivo con **todas** sus columnas + los catalogos de los selects |
+| GET    | `/api/dispositivos.php?catalogos=1` | Solo los catalogos (modal de alta) |
+| POST   | `/api/dispositivos.php` | Alta. Body JSON con las 35 columnas de `dispositivos` (obligatorias: `uuid`, `nombre`, `dominio`) |
+| PUT    | `/api/dispositivos.php` | Modificacion. Mismo body + `id` |
+| DELETE | `/api/dispositivos.php?id=N` | Baja (409 si el equipo tiene historial asociado) |
 | GET    | `/api/dominios.php`    | Listado de `dominios` con `dispositivos_count`              |
 | POST   | `/api/dominios.php`    | Crea dominio. Body JSON: `{nombre, descripcion?}`           |
 | PUT    | `/api/dominios.php`    | Actualiza dominio. Body JSON: `{id, nombre, descripcion?}`  |
@@ -76,7 +80,7 @@ ingles por convencion).
 | Tabla          | Campos principales                                                                   |
 | -------------- | ------------------------------------------------------------------------------------- |
 | `dominios`     | `id`, `nombre`, `descripcion`                                                         |
-| `dispositivos` | `id`, `uid`, `dominio_id` (FK), `nombre`, `tipo`, `ubicacion`, `estado`, `config_json` (JSON libre editable desde la UI), `last_seen_at` |
+| `dispositivos` | 35 columnas — `id`, `uuid`, `nombre`, `dominio` (FK), `agente` / `modelo` / `producto` / `transceptor` / `chip` / `adopcion` (FK), `mac`, `ip`, `senal`, `firmware`, `serial`, `identidad`, `llave`, `habilitado` / `enlace` / `adoptado` / `monitoreo` (smallint booleanos), contadores, fechas y monitoreo (ver `db/schema.sql`). El listado las expone bajo nombres de UI (`uid` = `uuid`, `tipo` = nombre del modelo, `ubicacion` = `coordenadas`, `estado` derivado de `habilitado`/`enlace`); los modales de Consultar y Editar hablan el esquema real |
 | `usuarios`     | `id`, `email`, `nombre`, `password_hash`, `rol`, `activo`, `last_login_at`            |
 | `perfiles`     | `id`, `usuario_id` (FK), `dominio_id` (FK), `rol` (`admin`/`operador`) — UNIQUE `(usuario_id, dominio_id)` |
 | `senales`      | `id`, `serie`, `fecha`, `sentido` (`I`/`O`), `transceptor` (FK), `dispositivo` (FK a `dispositivos.id`), `canal`, `topic`, `mensaje`, `estado` — historial inmutable de mensajes generados por los dispositivos (ver `db/schema.sql`) |

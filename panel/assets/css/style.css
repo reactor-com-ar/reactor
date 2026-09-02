@@ -687,91 +687,91 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 .modal-tabpanel-body { display: flex; flex-direction: column; gap: 16px; }
 
 /* ---------- 11f. Grafico de nivel de señal (Consultar dispositivo) ----------
- * Barras horizontales, una por medicion, de la mas reciente a la mas vieja
- * (el orden de todos los listados del panel). El largo es el % de la escala
- * del producto: -90 dBm = 0%, -10 dBm = 100%, o sea 20 dBm cada 25%. Por eso
- * las guias del track caen justo en -70 / -50 / -30.
+ * Serie temporal: eje X = tiempo en horas, eje Y = nivel en dBm sobre la
+ * escala del producto (-90 = 0%, -10 = 100%). Las horas sin reporte son un
+ * corte en la linea, NO una interpolacion: que el equipo deje de informar es
+ * parte del dato.
  *
- * El color es una banda de calidad (buena / regular / debil), no una serie:
- * nunca queda solo -- cada fila lleva ademas el ícono de la banda y el valor
- * en dBm, y el largo de la barra ya dice lo mismo. */
-.senal-chart { display: flex; flex-direction: column; gap: 10px; }
+ * Las bandas de calidad (buena / regular / debil) van de fondo como zonas
+ * horizontales, no pintando la linea: la serie es una sola y no necesita
+ * color propio para distinguirse. Asi el color nunca queda como unico
+ * portador del significado -- estan la posicion vertical, los rotulos del eje
+ * y el tooltip diciendo lo mismo.
+ *
+ * El SVG se dibuja a mano (el panel no tiene build step ni librerias). El
+ * viewBox mide lo mismo que el ancho util del modal ancho, asi que a tamaño
+ * normal 1 unidad = 1 pixel. */
 
-/* Sin scroll propio: el scroll es el del .modal-body, asi las filas y el eje
-   comparten exactamente el mismo ancho de columna (un scrollbar interno se
-   comeria unos pixeles de las filas y desalinearia los rotulos del eje). */
-.senal-rows { display: flex; flex-direction: column; gap: 2px; }
-.senal-row {
-    display: grid; grid-template-columns: 104px 1fr 86px;
-    align-items: center; gap: 10px;
-    padding: 3px 6px; border-radius: 6px;
-}
-.senal-row:hover { background: var(--row-hover); }
-.senal-row-fecha { font-size: .74rem; color: var(--muted); white-space: nowrap; }
+.senal-toolbar       { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.senal-toolbar-label { font-size: .74rem; font-weight: 600; text-transform: uppercase;
+                       letter-spacing: .04em; color: var(--muted); }
+.senal-chips         { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* Track = la escala completa. Las guias son el grid del grafico: van al
-   fondo, en un blanco muy tenue, para no competir con la barra. */
-.senal-track {
-    position: relative; height: 14px; border-radius: 4px;
-    background:
-        linear-gradient(to right, rgba(255,255,255,.10) 1px, transparent 1px) 25% 0 / 25% 100% repeat-x,
-        color-mix(in srgb, var(--surface) 80%, #000);
-    overflow: hidden;
+.senal-plot { position: relative; }
+.senal-svg  {
+    display: block; width: 100%; height: auto;
+    background: color-mix(in srgb, var(--surface) 88%, #000);
+    border-radius: var(--radius);
+    overflow: visible;
 }
-.senal-bar {
-    display: block; height: 100%;
-    border-radius: 0 4px 4px 0;
-    min-width: 3px;
-    transition: width .2s;
-}
-.senal-bar-buena   { background: var(--success); }
-.senal-bar-regular { background: var(--warn); }
-.senal-bar-debil   { background: var(--danger); }
 
-/* El ícono de la banda acompaña al valor en las filas y en las tarjetas del
-   resumen, asi que el color va suelto (no anidado bajo .senal-row-valor). */
+/* Zonas de calidad: alfa muy baja para que queden claramente detras de la
+   linea. Son referencia, no dato. */
+.senal-zona         { stroke: none; }
+.senal-zona-buena   { fill: var(--success); fill-opacity: .10; }
+.senal-zona-regular { fill: var(--warn);    fill-opacity: .10; }
+.senal-zona-debil   { fill: var(--danger);  fill-opacity: .10; }
+
+.senal-grid { stroke: rgba(255,255,255,.10); stroke-width: 1; shape-rendering: crispEdges; }
+.senal-tick { fill: var(--muted); font-size: 10px; font-family: monospace; }
+.senal-unidad { font-size: 9px; letter-spacing: .04em; }
+
+/* `non-scaling-stroke`: el SVG escala con el modal y sin esto la linea
+   engordaria o adelgazaria con el ancho de la pantalla. */
+.senal-linea {
+    fill: none; stroke: var(--info); stroke-width: 2;
+    stroke-linejoin: round; stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+}
+.senal-punto { fill: var(--info); }
+.senal-cross {
+    stroke: rgba(255,255,255,.35); stroke-width: 1; stroke-dasharray: 3 3;
+    vector-effect: non-scaling-stroke; pointer-events: none;
+}
+.senal-cross[hidden] { display: none; }
+
+/* Columna sensible del hover: una por hora, invisible pero clickeable. */
+.senal-hit        { fill: transparent; }
+.senal-hit:hover  { fill: rgba(255,255,255,.05); }
+
+.senal-tip {
+    position: absolute; z-index: 2; pointer-events: none;
+    transform: translate(-50%, calc(-100% - 8px));
+    background: #0d0d0d; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; font-size: .74rem; line-height: 1.35;
+    white-space: nowrap; box-shadow: var(--shadow-lg);
+}
+.senal-tip[hidden] { display: none; }
+
+/* El icono de la banda acompaña al valor en las tarjetas del resumen. */
 .senal-icon-buena   { color: var(--success); }
 .senal-icon-regular { color: var(--warn); }
 .senal-icon-debil   { color: var(--danger); }
 
-.senal-row-valor {
-    font-family: monospace; font-size: .78rem; color: var(--text);
-    display: flex; align-items: center; justify-content: flex-end; gap: 6px;
-    white-space: nowrap;
-}
-.senal-row-valor i { font-size: .8rem; }
-
-/* Eje: las mismas cuatro guias del track, rotuladas en dBm. Se alinea con
-   la columna del track repitiendo la grilla de la fila. */
-.senal-axis {
-    display: grid; grid-template-columns: 104px 1fr 86px;
-    gap: 10px; padding: 0 6px;
-}
-/* Los rótulos van posicionados sobre la guía que rotulan (left: 0/25/50/75/
-   100%), no repartidos con space-between: como no miden todos lo mismo, el
-   reparto los correría de la línea. Los de las puntas se alinean por dentro
-   para no desbordar el track. */
-.senal-axis-scale {
-    grid-column: 2; position: relative; height: 12px;
-    font-size: .68rem; color: var(--muted); font-family: monospace;
-}
-.senal-axis-scale span             { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
-.senal-axis-scale span:first-child { transform: none; }
-.senal-axis-scale span:last-child  { transform: translateX(-100%); }
-
-/* Referencia de bandas. Va siempre: es lo que evita que el color sea el
-   único portador del significado. */
+/* Referencia de las zonas. Va siempre: es lo que evita que el color sea el
+   unico portador del significado. */
 .senal-legend {
     display: flex; flex-wrap: wrap; gap: 14px;
     font-size: .74rem; color: var(--muted);
 }
 .senal-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .senal-legend-dot  { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
-
-@media (max-width: 640px) {
-    .senal-row, .senal-axis { grid-template-columns: 78px 1fr 78px; }
-    .senal-row-fecha        { font-size: .7rem; }
-}
+/* En la referencia las zonas se muestran opacas: a .10 sobre el fondo del
+   modal un cuadradito de 10px no se veria. */
+.senal-legend-dot.senal-zona-buena   { background: var(--success); }
+.senal-legend-dot.senal-zona-regular { background: var(--warn); }
+.senal-legend-dot.senal-zona-debil   { background: var(--danger); }
 
 /* ---------- 12. Toasts ---------- */
 .toast {
@@ -947,7 +947,10 @@ body.login-page { background: var(--bg); }
 
 .login-form { display: flex; flex-direction: column; gap: 14px; }
 .login-form .form-group label { color: rgba(255,255,255,.88); }
+/* Los cuatro tipos que usan el login y el alta de la invitacion publica. */
 .login-form input[type=text],
+.login-form input[type=email],
+.login-form input[type=tel],
 .login-form input[type=password] {
     background: rgba(0,0,0,.22);
     border: 1px solid rgba(0,0,0,.35);
@@ -980,3 +983,58 @@ body.login-page { background: var(--bg); }
 .login-page .btn-primary:hover    { background: rgba(255,255,255,.9); color: var(--primary-h); }
 .login-page .btn-primary:disabled { background: rgba(255,255,255,.6); color: var(--primary); cursor: not-allowed; }
 .login-submit                     { justify-content: center; padding: 10px 16px; margin-top: 4px; }
+
+/* ---------- 19. Invitacion publica (invitacion/) ----------
+ * Las tres pantallas que ve el invitado (ver / aceptar / rechazar) NO son
+ * parte de la SPA: son paginas sueltas, sin sesion, que reusan la tarjeta
+ * roja del login. Todo lo de abajo vive dentro de .login-card, asi que
+ * sigue las reglas del chrome rojo (blanco y negros translucidos, nunca
+ * --text / --muted / --border).
+ */
+.inv-card  { max-width: 420px; }
+.inv-lead  { font-size: .87rem; color: rgba(255,255,255,.85); line-height: 1.5; text-align: center; }
+
+.inv-datos { display: flex; flex-direction: column; gap: 8px; }
+.inv-dato  {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(0,0,0,.3);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+}
+.inv-dato-label { font-size: .76rem; color: rgba(255,255,255,.7); white-space: nowrap; }
+.inv-dato-valor { font-size: .85rem; font-weight: 600; color: #fff; text-align: right; overflow-wrap: anywhere; }
+
+/* Dos acciones de igual peso (Aceptar / Rechazar): reparten el ancho.
+   "Rechazar" va dentro de un <form> POST — un GET que cambia el estado lo
+   dispararia cualquier prefetch —, asi que el reparto tiene que atravesar
+   ese form hasta el boton. */
+.inv-acciones               { display: flex; gap: 10px; }
+.inv-acciones > *           { flex: 1; justify-content: center; }
+.inv-acciones form          { display: flex; }
+.inv-acciones form > .btn   { flex: 1; justify-content: center; }
+
+/* Secundario sobre rojo: .btn-ghost esta calibrado para gris y ahi se pierde. */
+.login-page .btn-alt       { background: rgba(0,0,0,.22); color: #fff; border: 1px solid rgba(255,255,255,.45); }
+.login-page .btn-alt:hover { background: rgba(0,0,0,.34); border-color: #fff; }
+
+/* Aviso dentro de la tarjeta. Hereda la caja de .login-error y solo cambia
+   el filete lateral, porque sobre rojo los fondos de color de .alert-* no
+   se distinguen entre si. */
+.inv-note {
+    display: block;
+    color: #fff;
+    background: rgba(0,0,0,.28);
+    border: 1px solid rgba(0,0,0,.35);
+    border-left: 3px solid rgba(255,255,255,.85);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font-size: .82rem;
+    line-height: 1.45;
+}
+.inv-note-ok   { border-left-color: var(--success); }
+.inv-note-bad  { border-left-color: #fff; }
+.inv-note code { font-weight: 700; }

@@ -114,10 +114,24 @@ implementes cada uno.
 ### Dispositivos → modal Consultar → pestaña Conexión
 
 `api/dispositivo_conexion.php` + `vistaConexion()` agregan al modal de
-Consultar una segunda pestaña con la serie del nivel de señal del equipo
-(la primera, **General**, es la ficha completa de siempre). Reglas que no se
+Consultar una segunda pestaña con la **serie temporal** del nivel de señal
+(la primera, **General**, es la ficha completa de siempre). Es un gráfico de
+línea dibujado a mano en SVG: eje X = tiempo, eje Y = nivel en dBm, un punto
+por hora, con selector de período (24 h / 48 h / 7 días). Reglas que no se
 deducen del esquema:
 
+- **La serie tiene un punto por cada hora de la ventana, reporte o no el
+  equipo.** Las horas sin mediciones viajan con `dbm = null` y se dibujan
+  como un **corte** en la línea, nunca interpoladas: que un equipo deje de
+  informar tres horas es exactamente lo que hay que poder ver. Cuando una
+  hora con dato queda aislada entre dos cortes se le dibuja el punto aunque
+  no haya segmento, si no sería invisible.
+- **El valor de la hora es el promedio de esa hora**, no una muestra: un
+  equipo activo informa decenas de veces por hora. `minimo` / `maximo` van
+  aparte, para el tooltip. En cambio `promedio` / `mejor` / `peor` del
+  resumen salen de las **mediciones crudas**, no de los promedios horarios —
+  una hora con 40 lecturas y otra con 1 no pesan igual, y el mínimo real se
+  perdería dentro del promedio de su hora.
 - **El nivel no es una columna: viaja adentro de `senales.mensaje`**, en el
   protocolo de etiquetas `CLAVE=valor` separadas por `|`. Hay dos formas, las
   dos entrantes (`sentido = 'E'`): `REP=CNX|…|WSN=-65|…` (y `REP=INI`), que es
@@ -130,25 +144,70 @@ deducen del esquema:
   inventar otra — el mismo equipo tiene que leerse igual acá y en el back
   office viejo. La conversión vive **sólo en el endpoint**: el front recibe
   `{dbm, porcentaje}` ya resuelto y no repite la fórmula.
-- **Las bandas caen en números redondos de esa escala**: 50% es exactamente
-  -50 dBm y 25% exactamente -70 dBm, los dos cortes clásicos de señal WiFi.
-  Por eso son tres (Buena / Regular / Débil) y por eso las guías del gráfico
-  van en -70 / -50 / -30.
-- **El color de la barra nunca es el único portador**: cada fila lleva además
-  el ícono de la banda y el valor en dBm, y el largo ya dice lo mismo. Es un
-  requisito de accesibilidad, no decoración — verde y ámbar son
+- **Las bandas de calidad caen en números redondos de esa escala**: 50% es
+  exactamente -50 dBm y 25% exactamente -70 dBm, los dos cortes clásicos de
+  señal WiFi. Por eso son tres (Buena / Regular / Débil), van de **fondo como
+  zonas horizontales** (no pintando la línea, que es una sola serie) y las
+  guías del eje Y caen en -90 / -70 / -50 / -30 / -10.
+- **El color nunca es el único portador del significado**: la posición
+  vertical, los rótulos del eje, la referencia de zonas y el tooltip dicen lo
+  mismo. Es un requisito de accesibilidad, no decoración — verde y ámbar son
   indistinguibles con daltonismo protán.
-- **La consulta va acotada a las últimas 5.000 señales *de ese dispositivo*,
-  no a una ventana global de ids**: `senales` sólo tiene PK y FKs, así que el
-  `LIKE` sobre `mensaje` se resuelve fila por fila. Sin la cota, el equipo más
-  cargado (348K señales en dev) tardaba 1,6 s cuando no reportaba señal; con
-  ella, 0,05 s. La ventana es relativa al equipo para que también sirva a los
-  que reportan poco y hace meses.
+- **El rango se acota por PK con una búsqueda binaria, no por fecha sola**
+  (`pisoPorFecha()`): `senales` no tiene índice por `fecha`, así que filtrar
+  por rango sobre el índice de `dispositivo` obliga a mirar fila por fila
+  todo el historial del equipo (348K filas / 1,6 s en el peor caso medido en
+  dev). Como `fecha` crece junto con `id`, ~25 sondas por clave primaria
+  acotan la tabla de 35M ids y el `WHERE` arranca cerca de la ventana: 7 días
+  del equipo más cargado bajan a 0,13 s, con el mismo resultado exacto que el
+  SQL sin cota (verificado). Al piso se le resta un margen de 2.000 ids
+  porque la monotonía `fecha`/`id` no la garantiza nada: pasarse hacia atrás
+  sólo cuesta scan, quedarse corto perdería mediciones.
+- **La ventana termina en la hora en curso**, así que en dev el gráfico sale
+  vacío: la base de desarrollo es una copia con datos hasta mayo de 2026.
 - **La pestaña se carga recién al abrirla** (y sólo una vez): la consulta es
-  cara y la mayoría de las consultas al dispositivo no la miran.
+  cara y la mayoría de las consultas al dispositivo no la miran. Cambiar de
+  período sí vuelve a pedir.
 - **`dispositivos.senal` es varchar y arrastra valores escritos a mano**
   ("-59dB alta", 2 de 250 filas en dev): se toma el entero con signo del
   principio, no `is_numeric()` sobre el texto entero.
+
+### Dispositivos → modal Nuevo dispositivo = adoptar
+
+El módulo **no tiene alta**. El cliente no fabrica equipos: los fabrica Reactor
+y el panel sólo los adopta. El botón `+ Nuevo dispositivo` abre un modal con
+**un solo campo, el número de serie**, y su acción primaria dice `Continuar`
+(`POST api/dispositivos.php?accion=adoptar`, body `{serial}`). Reglas que no se
+deducen del esquema:
+
+- **Es la inversa exacta de Liberar**: abre una fila en `adopciones`
+  (`vigente = '1'`, `adoptado = NOW()`, `adoptador` = usuario de la sesión,
+  `liberado` con el centinela `'1500-01-01 00:00:00'`) y mueve el dispositivo
+  al dominio con `adoptado = 1`, `adopcion` = la fila nueva y `habilitado = 1`,
+  para que quede operativo sin un segundo paso.
+- **Sólo se puede adoptar lo que está en el pool** (`dominio = 1`, `Liberado`).
+  Si el serial existe pero está en otro dominio, 409 con el mensaje que
+  corresponda — se distingue "ya está en tu cuenta" de "es de otra cuenta",
+  porque el genérico confunde cuando el equipo es propio.
+- **`serial` NO es único y no hay UNIQUE que lo impida**: hay 3 repetidos en
+  dev y uno de ellos tiene **las dos filas en el pool**. Si la búsqueda trae
+  más de un equipo libre no se adivina cuál: 409 pidiendo contactar a Reactor.
+- **El `UPDATE` final lleva `AND dominio = 1`**: es el candado contra la
+  carrera de dos cuentas adoptando el mismo equipo. Si afecta 0 filas se
+  deshace la transacción en lugar de robárselo al que llegó primero.
+- **Antes de insertar se cierran las adopciones vigentes** del equipo. Un
+  equipo del pool no debería tener ninguna abierta, pero los datos traen de
+  todo (24 filas del pool siguen con `adoptado = 1`).
+- **El segundo modal, `Dispositivo adoptado`, es informativo**: cuando se abre,
+  la adopción ya está registrada por el `POST`. No tiene acción primaria, sólo
+  `Cerrar`, y muestra qué equipo entró.
+- **La adopción no toca `nombre`**: el equipo conserva el que traía del dueño
+  anterior y se renombra desde `Editar` — que es justamente el único campo que
+  ese modal edita.
+- Al desaparecer el formulario de alta, `catalogos()` quedó con **un solo
+  catálogo, `modelos`** (el del filtro del listado). Los de `agentes`,
+  `productos`, `transceptores` y `chips` eran 4 queries por cada carga del
+  listado para selects que ya no existen.
 
 ### Dispositivos → modal Editar
 
@@ -227,6 +286,75 @@ esquema:
   (`VISOR_BASE` en el endpoint, `https://www.reactor.com.ar/comprobante/`):
   este repo todavía no tiene visor propio. Cuando exista, se cambia esa
   constante y nada más.
+
+### Invitaciones (alta, envío por correo y páginas públicas)
+
+`api/invitaciones.php` (listado + `POST` de alta), `lib/invitaciones.php`,
+`lib/databox.php` y las tres páginas públicas de `invitacion/` portan el
+ciclo completo de `cInvitacion` del legacy
+(`reactor-api/framework/subframework.php`). **El legacy no se toca**: sigue
+emitiendo por WhatsApp desde `reactor-app` y resolviendo en
+`app.reactor.com.ar/invitacion/`. Los dos circuitos conviven sobre las
+mismas tablas. Reglas que no se deducen del esquema:
+
+- **El canal es correo, no WhatsApp.** El envío va por el microservicio de
+  Databox (`POST https://api.databox.net.ar/v4/aws/mensajes`, Bearer con
+  `DATABOX_APIKEY` del `.env`). Los slugs por defecto son los mismos que
+  usaba el legacy en `reactor-api/framework/dataframework.env` — proyecto
+  `reactor`, canal `databox`, plantilla `reactor`, remite
+  `info@reactor.com.ar` — para que los correos salgan por la misma cuenta
+  SES e identidad visual. Se pisan con `DATABOX_PROYECTO` / `DATABOX_CANAL`
+  / `DATABOX_PLANTILLA` / `DATABOX_REMITENTE` / `DATABOX_REMITE` en el
+  `.env`; `DATABOX_PLANTILLA=` vacía desactiva la plantilla y manda
+  remitente/remite/formato explícitos.
+- **El alta pide un solo campo, el correo.** Es el destino del mensaje.
+  Nombre y celular los completa el invitado al aceptar — el espejo exacto
+  del alta legacy, que pedía sólo el celular porque era el destino de
+  WhatsApp, y capturaba nombre y correo en la aceptación.
+- **El alta y el envío van en una transacción**: si el microservicio no
+  aceptó el mensaje se revierte el `INSERT`. Una invitación pendiente que
+  nadie recibió es peor que ninguna fila, porque nada indica que hay que
+  reintentar. Por eso el modal del front espera la respuesta del `POST` en
+  vez de cerrarse optimista.
+- **La URL base de producción es fija** (`https://panel.reactor.com.ar`,
+  `panelBaseUrl()`), **no se deriva del `Host`**: el enlace viaja dentro de
+  un correo, y un `Host` falseado mandaría a los invitados a otro dominio.
+  En desarrollo sí se deriva de la request. `PANEL_BASE_URL` en el `.env`
+  pisa las dos.
+- **`invitacion/` es lo único del panel que se sirve sin sesión.** No pasa
+  por `api/bootstrap.php` (que exige JWT) sino por `invitacion/_layout.php`,
+  que reusa la tarjeta roja del login. La credencial es el `uuid` del
+  enlace, igual que en el legacy, pero se genera con `random_int` (CSPRNG) y
+  se verifica que no exista: `invitaciones.uuid` no tiene `UNIQUE` en la base.
+- **`abierta` se sella sólo la primera vez.** El legacy la reescribe en cada
+  visita, así que su columna termina siendo "última apertura" y no la
+  primera, que es lo que el listado dice mostrar.
+- **Rechazar es `POST`, no un link.** En el legacy es un `<a href>` y
+  cualquier prefetch (antivirus de correo, preview del cliente de mail) puede
+  rechazar una invitación que la persona nunca vio.
+- **La aceptación cierra la invitación en los dos caminos.** Si la persona ya
+  tenía cuenta, el legacy le da el perfil pero deja la fila en pendiente para
+  siempre; acá pasa a estado 3 igual. Esas pendientes eternas son las que
+  ensucian el listado.
+- **A una cuenta que ya existía no se le toca la contraseña ni el dominio
+  activo**: sólo se le agrega el perfil, y el dominio nuevo le aparece en
+  *Cambiar dominio*. Pisarle `usuarios.dominio` la sacaría del dominio en el
+  que está trabajando.
+- **No hay columna `apellido`** en `usuarios` ni en `invitaciones`: el
+  formulario de aceptación pide nombre y apellido por separado porque es lo
+  que la persona espera completar, pero se guardan concatenados en `nombre`.
+  No se modificó el esquema por esto.
+- **El perfil nuevo va con `rol` y `panel` en `NULL`, no en `0`.** El legacy
+  (`cPerfil::nuevo()`) escribe `0`, que con las FK declaradas en
+  `db/schema.sql` ya no es un valor válido. `perfiles.habilitado` es
+  `'1'`/`'0'`, mientras que `usuarios.habilitado` es `'S'`/`'N'` — no
+  confundirlos.
+- **La contraseña inicial se genera y se muestra en pantalla, además de
+  mandarse por correo.** No hay pantalla de "definir contraseña" y la columna
+  guarda la contraseña de forma reversible (cifrado histórico), así que es el
+  mismo criterio del legacy en `reactor-app/sesion/recuperar.php`. Si el
+  correo de credenciales falla, la cuenta **no** se revierte: ya es válida, y
+  la persona está mirando la pantalla que se las muestra.
 
 ### Módulos de ficha única
 

@@ -111,6 +111,91 @@ Herramientas y sus utilidades tienen sus propias skills dedicadas
 (`abm_design`, `crear_modulo_herramientas`, etc.) — respetalas cuando
 implementes cada uno.
 
+### Dashboard → gráfico "Uso por dispositivo"
+
+`api/dashboard_senales.php` + `renderDashboard()` agregan debajo de las stat
+cards un gráfico de líneas multi-serie: una línea por dispositivo del dominio,
+un punto por día, sobre los últimos 30 días. SVG dibujado a mano, como el de
+Conexión. Reglas que no se deducen del esquema:
+
+- **Sólo cuentan los mensajes que empiezan con `RET=`.** `senales` mezcla
+  varias familias en la misma tabla y la mayoría no es uso del equipo:
+  `REP=LAT` / `REP=CNX` / `REP=INI` son latido, conexión y arranque (llegan
+  igual sin que nadie toque el equipo), `REP=SNS` / `REP=CAP` / `REP=CEN` son
+  reportes periódicos de sensores, y `CMD=…` (sentido `'S'`) es la orden que
+  sale hacia el equipo. `RET=…` es la **respuesta** del equipo a esa orden y
+  es la única familia que prueba que alguien lo operó. En la ventana medida
+  son 17.516 de 70.290 filas de un dominio — el filtro cambia el ranking, no
+  sólo la escala: un equipo puede ser el 2º en señales totales y el 8º en uso
+  real. Se cuenta la respuesta y no el `CMD=` que la provoca, para no contar
+  dos veces la misma interacción. Al ser todas entrantes **no hace falta
+  filtrar por `sentido`**: el prefijo ya lo determina.
+- **Un día sin respuestas vale 0, no "sin dato".** Es la diferencia de fondo
+  con el gráfico de Conexión: allá el eje Y es una *medición* y las horas sin
+  reporte son un corte en la línea; acá es un *conteo* y que nadie haya usado
+  el equipo es el dato. Las líneas van enteras, sin huecos.
+- **La paleta tiene SEIS ranuras y el tope no es negociable** (`style.css`
+  §15b). Es de la familia del rojo institucional por decisión de marca —
+  rojo, durazno, amarillo, blanco, rosa y oro, sin azules ni verdes — y
+  dentro de una familia cálida el tono casi no varía: lo que separa una serie
+  de otra es la **luminosidad**, y sólo entran seis escalones. Medido: sumar
+  un naranja medio (`#e8801a`) junto al oro (`#b39400`) los deja en ΔE 1,8
+  bajo daltonismo, indistinguibles. Verificada con el validador de la skill
+  `dataviz` contra el fondo real del plot y sobre **todos** los pares (las
+  líneas se cruzan): daltonismo ΔE 8,3 ≥ 8, visión normal ΔE 16,2 ≥ 15,
+  contraste ≥ 3:1. Incumple a propósito "banda de luminosidad" y "piso de
+  croma" — la primera da por sentado que separa el tono, y el blanco tiene
+  croma 0 por definición.
+- **La ranura la asigna el backend (`series[].slot`), no el orden del array**:
+  el color sigue al equipo. Si lo eligiera el front por índice, cualquier
+  reordenamiento repintaría las líneas.
+- **La identidad de la serie la lleva sólo la referencia de arriba**, más el
+  tooltip y la vista de tabla. **No hay rótulos al final de las líneas**:
+  reservarles una canaleta a la derecha dejaba un vacío que se leía como si
+  al gráfico le faltaran días. Si alguna vez se vuelven a querer, hay que
+  sumarle el ancho del rótulo a `padR`, no dibujarlos sobre el área del plot.
+- **Los rótulos del eje X se cuentan desde el último día hacia atrás**, no
+  desde el primero. Si el paso no divide justo a la ventana (30 días con paso
+  2 sí, pero no es garantía), contando desde el principio el último rótulo
+  cae días antes del final y el gráfico se lee como si le faltara el tramo
+  más reciente, que es justo el que más se mira. El costo es que el día más
+  viejo puede quedar sin rótulo, que importa mucho menos.
+- **El tope de colores decide qué se dibuja, no qué se informa.** `series`
+  viaja completo, con `slot = null` en los que no entraron, y además un
+  agregado `otros` (gris, no es una ranura). El gráfico dibuja las seis + el
+  agregado; **la vista de tabla lista los equipos uno por uno**, así ninguna
+  cifra queda escondida. El dominio más grande de los datos actuales tiene 10
+  equipos con uso.
+- **Sólo se devuelven los equipos con uso en la ventana**: 13 equipos de los
+  que 4 responden son 4 series, no 13 líneas planas pisándose en el cero.
+  Cuántos quedaron afuera viaja en `resumen` y el encabezado lo dice
+  ("10 de 13 dispositivos").
+- **`senales` no tiene columna `dominio`**: el único camino al inquilino es
+  `senales.dispositivo → dispositivos.dominio`. Se resuelven primero los
+  equipos del dominio y después se agrega con un `IN` explícito sobre esos
+  ids. El `IN` no es cosmético: ataca `fk_senales_dispositivo` — que en InnoDB
+  es `(dispositivo, id)` — así que el `id >= :piso` recorta cada rango por su
+  propio prefijo. Con un `JOIN` contra `dispositivos` el optimizador puede
+  elegir el otro plan (barrer la PK entera desde el piso), que para un dominio
+  chico es leer cientos de miles de filas ajenas.
+- **El rango se acota por PK, igual que en Conexión** (`senalesPisoPorFecha()`,
+  ahora en `lib/senales.php` y compartida con `api/dispositivo_conexion.php`).
+  Costo medido en dev: 0,04 s la búsqueda del piso + 0,07 s la agregación del
+  dominio más cargado.
+- **La ventana termina hoy, así que en dev el gráfico sale vacío**: la base de
+  desarrollo tiene datos hasta el 19/05/2026. Por eso el estado vacío no es un
+  cartel genérico — dice cuántos equipos tiene el dominio y **cuándo fue la
+  última actividad conocida**, que sale de `dispositivos.latido` / `.conexion`
+  y no de un `MAX(fecha)` sobre `senales`: ese `MAX` no se puede acotar por PK
+  (justamente busca lo más nuevo, que puede ser muy viejo) y recorrería el
+  historial completo de cada equipo.
+- **Dashboard hace dos cargas independientes**, no una: el inventario es
+  instantáneo y el gráfico agrega cientos de miles de filas. Unirlas haría
+  esperar a los números de arriba sin necesidad.
+- El botón ☰ del encabezado alterna gráfico ↔ tabla **sin volver a pedir** (es
+  la misma información mirada de dos formas y la consulta no es barata); el de
+  refrescar sí re-consulta.
+
 ### Dispositivos → modal Consultar → pestaña Conexión
 
 `api/dispositivo_conexion.php` + `vistaConexion()` agregan al modal de
@@ -154,7 +239,8 @@ deducen del esquema:
   mismo. Es un requisito de accesibilidad, no decoración — verde y ámbar son
   indistinguibles con daltonismo protán.
 - **El rango se acota por PK con una búsqueda binaria, no por fecha sola**
-  (`pisoPorFecha()`): `senales` no tiene índice por `fecha`, así que filtrar
+  (`senalesPisoPorFecha()`, en `lib/senales.php` — se comparte con el gráfico
+  del Dashboard): `senales` no tiene índice por `fecha`, así que filtrar
   por rango sobre el índice de `dispositivo` obliga a mirar fila por fila
   todo el historial del equipo (348K filas / 1,6 s en el peor caso medido en
   dev). Como `fecha` crece junto con `id`, ~25 sondas por clave primaria

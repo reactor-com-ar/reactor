@@ -859,6 +859,203 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 .stat-value.red    { color: var(--danger); }
 .stat-value.muted  { color: var(--muted); }
 
+/* ---------- 15b. Dashboard: uso por dispositivo ----------
+ * Grafico de lineas multi-serie: una linea por dispositivo del dominio, un
+ * punto por dia, sobre la ventana movil de los ultimos 30 dias. Vive abajo
+ * de las stat cards del Dashboard.
+ *
+ * SVG a mano, sin librerias (el panel no tiene build step), igual que el
+ * grafico de senal de Dispositivos (§11c). La diferencia de fondo entre los
+ * dos: alla el eje Y es una MEDICION y las horas sin reporte son un corte en
+ * la linea; aca es un CONTEO y un dia sin senales vale cero, asi que las
+ * lineas no llevan huecos.
+ *
+ * PALETA (--serie-1..6): FAMILIA DEL ROJO INSTITUCIONAL. Rojo, durazno,
+ * amarillo, blanco, rosa y oro -- nada de azules, verdes ni violetas. Esa
+ * restriccion de marca es la que fija el tope en SEIS ranuras, y el tope no
+ * es negociable: dentro de la familia calida el tono casi no varia, asi que
+ * lo que separa una serie de otra es sobre todo la LUMINOSIDAD, y solo
+ * entran seis escalones antes de que dos lineas se vuelvan la misma linea.
+ * Probado: agregar un naranja medio de verdad (#e8801a) junto al oro
+ * (#b39400) los deja en ΔE 1,8 bajo daltonismo -- indistinguibles.
+ *
+ * Verificada con el validador de la skill `dataviz` contra el fondo real del
+ * plot (#202121, el color-mix de .uso-svg) y sobre TODOS los pares, no solo
+ * los adyacentes (las lineas se cruzan: cualquier par puede confundirse):
+ *   - separacion bajo daltonismo: peor par ΔE 8,3 (deutan), sobre el
+ *     objetivo de 8;
+ *   - vision normal: peor par ΔE 16,2, sobre el piso de 15;
+ *   - contraste contra el fondo: las seis >= 3:1.
+ *
+ * Dos comprobaciones del validador se incumplen A PROPOSITO, y las dos por
+ * la misma razon -- es una paleta de una sola familia, no una categorica
+ * clasica:
+ *   - "banda de luminosidad": exige que las series tengan luminosidad
+ *     pareja, porque da por sentado que separa el TONO. Aca separa la
+ *     luminosidad, asi que la banda tiene que abrirse (L 0,58 el rojo a
+ *     0,99 el blanco) o no hay paleta posible.
+ *   - "piso de croma": el blanco tiene croma 0 por definicion. El check
+ *     existe para que ninguna serie se confunda con la grilla; la grilla es
+ *     rgba(255,255,255,.09) y el blanco va opaco, asi que no se confunden.
+ * Las tres que si protegen la lectura -- daltonismo, vision normal y
+ * contraste -- pasan.
+ *
+ * No agregar una septima: no seria distinguible de las que ya estan. El
+ * backend recorta en 6 y suma el resto en "otros" (gris, NO es una ranura
+ * mas), pero manda igual la serie de cada equipo para que la vista de tabla
+ * los liste uno por uno. El tope decide que se DIBUJA, no que se informa.
+ *
+ * La ranura la asigna el BACKEND (`series[].slot`), no la posicion en el
+ * array: el color sigue al equipo. Si lo eligiera el front por indice,
+ * cualquier reordenamiento repintaria las lineas y el que aprendio "el
+ * Comedor es rojo" leeria mal el grafico. */
+.uso-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px 18px 14px;
+    margin-bottom: 20px;
+
+    --serie-1: #dc3220;   /* rojo institucional, aclarado para fondo oscuro */
+    --serie-2: #f9ac95;   /* durazno */
+    --serie-3: #f5d922;   /* amarillo */
+    --serie-4: #fcfcfc;   /* blanco */
+    --serie-5: #ef6fb0;   /* rosa */
+    --serie-6: #b39400;   /* oro */
+    --serie-otros: #8a8580;   /* gris: el agregado, no una ranura */
+}
+
+/* Una sola indireccion: el elemento (o su contenedor) declara su ranura con
+   .uso-sN y despues cada rol -- trazo, relleno, muestra de la referencia --
+   lee var(--serie). Asi el color de una serie se escribe una vez y no hay
+   que repetir seis reglas por cada lugar donde aparece. */
+.uso-s1 { --serie: var(--serie-1); }
+.uso-s2 { --serie: var(--serie-2); }
+.uso-s3 { --serie: var(--serie-3); }
+.uso-s4 { --serie: var(--serie-4); }
+.uso-s5 { --serie: var(--serie-5); }
+.uso-s6 { --serie: var(--serie-6); }
+.uso-s0 { --serie: var(--serie-otros); }   /* el agregado "otros" */
+
+.uso-linea { stroke: var(--serie); }
+.uso-punto { fill:   var(--serie); }
+.uso-legend-line,
+.uso-tabla-serie i,
+.uso-tip-fila i       { background: var(--serie); }
+
+.uso-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.uso-title {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    font-size: .95rem; font-weight: 600; color: var(--text);
+}
+.uso-title i    { color: var(--muted); font-size: .9rem; }
+.uso-hint       { font-size: .78rem; font-weight: 400; color: var(--muted); }
+.uso-actions    { display: flex; gap: 2px; flex-shrink: 0; }
+.uso-actions .btn-icon-sm.active { color: var(--primary); background: var(--bg); }
+
+/* Referencia. Va SIEMPRE que haya dos series o mas: es lo que evita que el
+   color sea el unico portador de la identidad. El nombre y el total van en
+   tokens de texto, no en el color de la serie -- el color lo carga el
+   trazo de la izquierda. */
+.uso-legend {
+    display: flex; flex-wrap: wrap; gap: 6px 16px;
+    margin-bottom: 10px; font-size: .78rem; color: var(--muted);
+}
+.uso-legend-item { display: inline-flex; align-items: center; gap: 7px; }
+.uso-legend-item strong { color: var(--text); font-weight: 600; }
+
+.uso-plot { position: relative; }
+.uso-svg  {
+    display: block; width: 100%; height: auto;
+    background: color-mix(in srgb, var(--surface) 88%, #000);
+    border-radius: var(--radius);
+    overflow: visible;
+}
+
+/* Grilla y ejes: hairline solido, un tono por encima del fondo. Sin
+   punteado -- el dash lee como "proyeccion" o "umbral" y esto es una grilla. */
+.uso-grid { stroke: rgba(255,255,255,.09); stroke-width: 1; shape-rendering: crispEdges; }
+.uso-tick { fill: var(--muted); font-size: 10px; font-family: monospace; }
+
+/* `non-scaling-stroke`: el viewBox escala con el ancho del contenido y sin
+   esto la linea engordaria o adelgazaria con el tamaño de la pantalla. */
+.uso-linea {
+    fill: none; stroke-width: 2;
+    stroke-linejoin: round; stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+}
+/* Un punto por serie, que el hover mueve a la columna que se esta mirando.
+   `[hidden]` necesita la regla: en SVG el atributo HTML `hidden` no oculta
+   nada por si solo, y sin esto los puntos quedan apilados en el origen del
+   viewBox como una mancha en la esquina del grafico. */
+.uso-punto         { stroke: none; }
+.uso-punto[hidden] { display: none; }
+
+.uso-cross {
+    stroke: rgba(255,255,255,.35); stroke-width: 1; stroke-dasharray: 3 3;
+    vector-effect: non-scaling-stroke; pointer-events: none;
+}
+.uso-cross[hidden] { display: none; }
+
+/* Columna sensible del hover: una por dia, invisible pero mucho mas ancha
+   que la linea, asi no hay que apuntarle al pixel. */
+.uso-hit       { fill: transparent; }
+.uso-hit:hover { fill: rgba(255,255,255,.05); }
+
+/* Cuelga hacia ABAJO desde el borde superior del area de dibujo, no hacia
+   arriba desde el punto: la columna sensible mide toda la altura del plot,
+   asi que un tooltip "encima del punto" quedaria siempre por arriba del
+   grafico, tapando la referencia y desbordando la tarjeta. */
+.uso-tip {
+    position: absolute; z-index: 2; pointer-events: none;
+    transform: translate(-50%, 8px);
+    background: #0d0d0d; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: .74rem; line-height: 1.5;
+    white-space: nowrap; box-shadow: var(--shadow-lg);
+}
+.uso-tip[hidden]  { display: none; }
+.uso-tip-fecha    { font-weight: 600; margin-bottom: 4px; }
+.uso-tip-fila     { display: flex; align-items: center; gap: 7px; }
+.uso-tip-nombre   { flex: 1; color: var(--muted); }
+.uso-tip-valor    { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Muestra de color de una serie: el mismo trazo corto en la referencia, en
+   el tooltip y en la tabla, para que las tres se lean como lo mismo. */
+.uso-legend-line,
+.uso-tabla-serie i,
+.uso-tip-fila i {
+    display: inline-block;
+    width: 14px; height: 3px; border-radius: 2px; flex: 0 0 auto;
+}
+.uso-tabla-serie i, .uso-tip-fila i { width: 10px; }
+
+/* Vista tabla: el gemelo accesible del grafico. Toda cifra que el grafico
+   solo muestra como posicion se lee aca como numero. */
+.uso-tabla-wrap    { max-height: 340px; overflow: auto; border-radius: var(--radius); }
+.uso-tabla th,
+.uso-tabla td      { white-space: nowrap; }
+/* Las columnas de cifras van a la derecha y con cifras de ancho fijo: son 30
+   filas por 10 equipos y alineadas a la izquierda no hay forma de comparar
+   un 212 con un 3.634 de un vistazo. La primera columna es la fecha y se
+   queda a la izquierda. */
+.uso-tabla td:not(:first-child),
+.uso-tabla th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.uso-tabla thead th { position: sticky; top: 0; z-index: 1; }
+.uso-tabla tfoot td {
+    position: sticky; bottom: 0;
+    background: var(--bg); font-weight: 700; border-top: 1px solid var(--border);
+}
+.uso-tabla-serie   { display: inline-flex; align-items: center; gap: 6px; }
+/* Un dia sin senales es un cero real, no un dato faltante, pero en una
+   tabla de 30 filas los ceros son ruido: se atenuan para que las cifras que
+   importan salten a la vista. */
+.uso-cero          { color: var(--muted); }
+
 /* ---------- 16. Tile grid (menu de tarjetas) ---------- */
 .tile-grid {
     display: grid;

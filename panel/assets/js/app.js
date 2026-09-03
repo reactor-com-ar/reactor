@@ -2518,7 +2518,6 @@
         ...CHIPS_DEFAULTS,
         filas: [],
         combos: { compania: [], plan: [], responsable: [], pais: [] },
-        articulos: [],
         resumen: null,
     };
 
@@ -2587,9 +2586,6 @@
                             <i class="fa-solid fa-rotate"></i>
                         </button>
                     </div>
-                    <div class="toolbar-right">
-                        <button type="button" class="btn btn-primary" id="ch-nuevo">+ Nuevo chip</button>
-                    </div>
                 </div>
 
                 <div class="table-card">
@@ -2629,7 +2625,6 @@
 
         container.querySelector('#ch-filtros').addEventListener('click', abrirFiltrosChips);
         container.querySelector('#ch-refrescar').addEventListener('click', () => cargarChips());
-        container.querySelector('#ch-nuevo').addEventListener('click', () => formChip(null));
 
         cargarChips();
     }
@@ -2655,7 +2650,6 @@
             const data = await api(`api/chips.php?${qs}`);
             chips.filas     = data.chips     || [];
             chips.combos    = data.combos    || chips.combos;
-            chips.articulos = data.articulos || [];
             chips.resumen   = data.resumen   || null;
         } catch (err) {
             tbody.innerHTML = `<tr><td colspan="8" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
@@ -2732,21 +2726,12 @@
         `;
     }
 
-    // Menu contextual de fila (skill abm_design): Consultar -> acciones del
-    // recurso -> separador -> Editar -> Eliminar (destructiva, al final).
+    /* Menu contextual de fila: solo Consultar. El chip se da de alta y se
+     * administra desde cloud, asi que el panel no ofrece Editar, Eliminar ni
+     * Habilitar/Deshabilitar sobre la fila. */
     function menuChip(c) {
         return [
             { label: 'Consultar', icon: 'fa-eye', onSelect: () => verChip(c.id) },
-            {
-                label: c.habilitado ? 'Deshabilitar' : 'Habilitar',
-                icon:  c.habilitado ? 'fa-circle-xmark' : 'fa-circle-check',
-                onSelect: () => toggleChip(c),
-            },
-            c.telefono ? { label: 'Copiar teléfono', icon: 'fa-copy', onSelect: () => copiar(c.telefono) } : null,
-            c.serie    ? { label: 'Copiar serie',    icon: 'fa-copy', onSelect: () => copiar(c.serie) }    : null,
-            { sep: true },
-            { label: 'Editar',   icon: 'fa-pen',   onSelect: () => formChip(c.id) },
-            { label: 'Eliminar', icon: 'fa-trash', danger: true, onSelect: () => eliminarChip(c) },
         ];
     }
 
@@ -2760,270 +2745,22 @@
             return;
         }
 
-        const num = (v) => (v === null || v === undefined ? '' : String(v));
-
         const body = `<div class="view-grid">${[
-            viewCard('Código',              `<code>#${c.id}</code>`),
-            viewCard('Teléfono',            c.telefono ? `<code>${escapeHtml(c.telefono)}</code>` : ''),
-            viewCard('Serie',               c.serie ? `<code>${escapeHtml(c.serie)}</code>` : ''),
-            viewCard('Compañía',            textoCombo(c.compania_texto, c.compania)),
-            viewCard('Plan',                textoCombo(c.plan_texto, c.plan)),
-            viewCard('Estado',              badgeHabilitado(c.habilitado)),
-            viewCard('Titular de línea',    escapeHtml(c.titular), true),
-            viewCard('Responsable de pago', textoCombo(c.responsable_texto, c.responsable)),
-            viewCard('País',                textoCombo(c.pais_texto, c.pais)),
-            viewCard('Artículo',            c.articulo_nombre ? escapeHtml(c.articulo_nombre) : (c.articulo ? `<code>#${c.articulo}</code>` : ''), true),
-            viewCard('Datos (mb)',          escapeHtml(num(c.datos))),
-            viewCard('Mensajes (sms)',      escapeHtml(num(c.mensajes))),
-            viewCard('Registrado',          escapeHtml(formatDate(c.registrado) || '')),
-            viewCard('Recargado',           escapeHtml(formatDate(c.recargado) || '')),
-            viewCard('Vencimiento',         escapeHtml(formatDate(c.vencimiento) || '')),
-            viewCard('Dominio',             c.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(c.dominio_nombre)}</span>` : ''),
-            viewCard('Comentario',          escapeHtml(c.comentario), true),
+            viewCard('Teléfono',    c.telefono ? `<code>${escapeHtml(c.telefono)}</code>` : ''),
+            viewCard('Serie',       c.serie ? `<code>${escapeHtml(c.serie)}</code>` : ''),
+            viewCard('Compañía',    textoCombo(c.compania_texto, c.compania)),
+            viewCard('Estado',      badgeHabilitado(c.habilitado)),
+            viewCard('País',        textoCombo(c.pais_texto, c.pais)),
+            viewCard('Artículo',    c.articulo_nombre ? escapeHtml(c.articulo_nombre) : (c.articulo ? `<code>#${c.articulo}</code>` : ''), true),
+            viewCard('Registrado',  escapeHtml(formatDate(c.registrado) || '')),
+            viewCard('Recargado',   escapeHtml(formatDate(c.recargado) || '')),
+            viewCard('Vencimiento', escapeHtml(formatDate(c.vencimiento) || '')),
+            viewCard('Dominio',     c.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(c.dominio_nombre)}</span>` : ''),
         ].join('')}</div>`;
 
-        const m = openModal(`Consultar chip <span class="muted">#${c.id}</span>`, body, {
-            footerHtml:  '<button class="btn btn-ghost btn-icon" data-act="menu" title="Más acciones"><i class="fa-solid fa-bars"></i></button>',
-            primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
-        });
-
-        m.backdrop.querySelector('[data-act="editar"]').addEventListener('click', () => {
-            m.close();
-            formChip(c.id);
-        });
-        m.backdrop.querySelector('[data-act="menu"]').addEventListener('click', (e) => {
-            e.stopPropagation();
-            openRowMenu([
-                c.telefono ? { label: 'Copiar teléfono', icon: 'fa-copy', onSelect: () => copiar(c.telefono) } : null,
-                c.serie    ? { label: 'Copiar serie',    icon: 'fa-copy', onSelect: () => copiar(c.serie) }    : null,
-                { sep: true },
-                {
-                    label: c.habilitado ? 'Deshabilitar' : 'Habilitar',
-                    icon:  c.habilitado ? 'fa-circle-xmark' : 'fa-circle-check',
-                    onSelect: () => { m.close(); toggleChip(c); },
-                },
-            ], e.currentTarget);
-        });
-    }
-
-    /* ---------- Alta / Edición ---------- */
-    async function formChip(id) {
-        const esEdicion = id != null;
-        let c = {
-            telefono: '', serie: '', titular: '', responsable: '', pais: '',
-            compania: '', plan: '', datos: null, mensajes: null, articulo: null,
-            registrado: '', recargado: '', vencimiento: '', comentario: '',
-            habilitado: true,
-        };
-
-        if (esEdicion) {
-            try {
-                c = (await api(`api/chips.php?id=${id}`)).chip;
-            } catch (err) {
-                toast(err.message, { error: true });
-                return;
-            }
-        }
-
-        const articuloOpts = ['<option value="">— Sin artículo —</option>'].concat(
-            chips.articulos.map((a) =>
-                `<option value="${a.id}"${a.id === c.articulo ? ' selected' : ''}>${escapeHtml(a.etiqueta)}</option>`)
-        ).join('');
-
-        const dominio = sesion.dominio_nombre || (sesion.dominio ? `#${sesion.dominio}` : '—');
-        const num     = (v) => (v === null || v === undefined ? '' : String(v));
-
-        const body = `
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-telefono">Teléfono *</label>
-                    <input type="tel" id="cf-telefono" maxlength="30" value="${escapeHtml(c.telefono)}">
-                </div>
-                <div class="form-group">
-                    <label for="cf-serie">Serie</label>
-                    <input type="text" id="cf-serie" maxlength="32" value="${escapeHtml(c.serie)}"
-                           placeholder="ICCID">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-compania">Compañía</label>
-                    <select id="cf-compania">${opcionesCombo(chips.combos.compania, c.compania, '— Sin compañía —')}</select>
-                </div>
-                <div class="form-group">
-                    <label for="cf-plan">Plan</label>
-                    <select id="cf-plan">${opcionesCombo(chips.combos.plan, c.plan, '— Sin plan —')}</select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-titular">Titular de línea</label>
-                    <input type="text" id="cf-titular" maxlength="255" value="${escapeHtml(c.titular)}">
-                </div>
-                <div class="form-group">
-                    <label for="cf-responsable">Responsable de pago</label>
-                    <select id="cf-responsable">${opcionesCombo(chips.combos.responsable, c.responsable, '— Sin responsable —')}</select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-pais">País</label>
-                    <select id="cf-pais">${opcionesCombo(chips.combos.pais, c.pais, '— Sin país —')}</select>
-                </div>
-                <div class="form-group">
-                    <label for="cf-articulo">Artículo</label>
-                    <select id="cf-articulo">${articuloOpts}</select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-datos">Datos (mb)</label>
-                    <input type="number" min="0" id="cf-datos" value="${escapeHtml(num(c.datos))}">
-                </div>
-                <div class="form-group">
-                    <label for="cf-mensajes">Mensajes (sms)</label>
-                    <input type="number" min="0" id="cf-mensajes" value="${escapeHtml(num(c.mensajes))}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-registrado">Registrado</label>
-                    <input type="date" id="cf-registrado" value="${escapeHtml(c.registrado)}">
-                </div>
-                <div class="form-group">
-                    <label for="cf-recargado">Recargado</label>
-                    <input type="date" id="cf-recargado" value="${escapeHtml(c.recargado)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="cf-vencimiento">Vencimiento</label>
-                    <input type="date" id="cf-vencimiento" value="${escapeHtml(c.vencimiento)}">
-                </div>
-                <div class="form-group">
-                    <label>Dominio</label>
-                    <input type="text" value="${escapeHtml(dominio)}" readonly title="Se asigna desde tu sesión">
-                </div>
-            </div>
-            <div class="form-group">
-                <label for="cf-comentario">Comentario</label>
-                <textarea id="cf-comentario" maxlength="255" rows="2">${escapeHtml(c.comentario)}</textarea>
-            </div>
-            <div class="form-group">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                    <input type="checkbox" id="cf-habilitado" ${c.habilitado ? 'checked' : ''}>
-                    Chip habilitado
-                </label>
-            </div>
-            <div class="field-error" id="cf-error" style="display:none"></div>
-        `;
-
-        const m = openModal(
-            esEdicion ? `Editar chip <span class="muted">#${c.id}</span>` : 'Nuevo chip',
-            body,
-            {
-                closeLabel:  'Cancelar',
-                primaryHtml: `<button class="btn btn-primary" data-act="guardar">${esEdicion ? 'Guardar cambios' : 'Crear chip'}</button>`,
-            }
-        );
-
-        const err = m.backdrop.querySelector('#cf-error');
-        const btn = m.backdrop.querySelector('[data-act="guardar"]');
-        const val = (sel) => m.backdrop.querySelector(sel).value.trim();
-
-        btn.addEventListener('click', async () => {
-            const payload = {
-                telefono:    val('#cf-telefono'),
-                serie:       val('#cf-serie'),
-                titular:     val('#cf-titular'),
-                responsable: val('#cf-responsable'),
-                pais:        val('#cf-pais'),
-                compania:    val('#cf-compania'),
-                plan:        val('#cf-plan'),
-                datos:       val('#cf-datos'),
-                mensajes:    val('#cf-mensajes'),
-                articulo:    val('#cf-articulo'),
-                registrado:  val('#cf-registrado'),
-                recargado:   val('#cf-recargado'),
-                vencimiento: val('#cf-vencimiento'),
-                comentario:  val('#cf-comentario'),
-                habilitado:  m.backdrop.querySelector('#cf-habilitado').checked,
-            };
-            if (esEdicion) payload.id = c.id;
-
-            btn.disabled = true;
-            try {
-                await api('api/chips.php', {
-                    method:  esEdicion ? 'PUT' : 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify(payload),
-                });
-                m.close();
-                toast(esEdicion ? 'Chip actualizado' : 'Chip creado');
-                cargarChips();
-            } catch (e2) {
-                err.textContent   = e2.message;
-                err.style.display = '';
-                btn.disabled = false;
-            }
-        });
-    }
-
-    /* El PUT reescribe la fila entera, asi que el toggle relee el registro
-       completo y solo invierte `habilitado`. */
-    function payloadChip(c) {
-        const num = (v) => (v === null || v === undefined ? '' : String(v));
-        return {
-            telefono:    c.telefono    || '',
-            serie:       c.serie       || '',
-            titular:     c.titular     || '',
-            responsable: c.responsable || '',
-            pais:        c.pais        || '',
-            compania:    c.compania    || '',
-            plan:        c.plan        || '',
-            datos:       num(c.datos),
-            mensajes:    num(c.mensajes),
-            articulo:    c.articulo    || '',
-            registrado:  c.registrado  || '',
-            recargado:   c.recargado   || '',
-            vencimiento: c.vencimiento || '',
-            comentario:  c.comentario  || '',
-            habilitado:  !!c.habilitado,
-        };
-    }
-
-    async function toggleChip(c) {
-        try {
-            const full = (await api(`api/chips.php?id=${c.id}`)).chip;
-            await api('api/chips.php', {
-                method:  'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ...payloadChip(full),
-                    id:         full.id,
-                    habilitado: !full.habilitado,
-                }),
-            });
-            toast(full.habilitado ? 'Chip deshabilitado' : 'Chip habilitado');
-            cargarChips();
-        } catch (err) {
-            toast(err.message, { error: true });
-        }
-    }
-
-    function eliminarChip(c) {
-        confirmarBaja(
-            `¿Eliminar el chip <strong>${escapeHtml(c.telefono || `#${c.id}`)}</strong>${c.titular ? ` (${escapeHtml(c.titular)})` : ''}? Esta acción no se puede deshacer.`,
-            async () => {
-                try {
-                    await api(`api/chips.php?id=${c.id}`, { method: 'DELETE' });
-                    toast('Chip eliminado');
-                    cargarChips();
-                } catch (err) {
-                    toast(err.message, { error: true });
-                }
-            }
-        );
+        // Solo lectura: el chip se administra desde cloud, asi que el modal no
+        // lleva accion primaria ni menu de pie — unicamente "Cerrar".
+        openModal(`Consultar chip <span class="muted">#${c.id}</span>`, body);
     }
 
     /* ---------- Modal de filtros (skill abm_design §Modal de filtros) ----
@@ -4203,6 +3940,12 @@
      * y chips tiene asociados el dominio de la sesion. Los numeros los
      * cuenta el backend (api/dashboard.php -> requireDominioId()); aca
      * solo se muestra de que dominio se trata.
+     *
+     * Debajo de las tarjetas va el grafico de uso por dispositivo
+     * (api/dashboard_senales.php). Son dos cargas independientes a
+     * proposito: la del inventario es instantanea y la del grafico agrega
+     * ~400K filas de `senales`, asi que si fueran una sola espera los
+     * numeros de arriba tardarian de mas sin necesidad.
      * ======================================================= */
 
     function renderDashboard(container) {
@@ -4221,10 +3964,12 @@
 
                 <div class="stats-bar" id="db-stats"></div>
                 <div id="db-error"></div>
+                <div id="db-uso"></div>
             </div>
         `;
 
         cargarDashboard();
+        cargarUso();
     }
 
     // `icono` es una clase FontAwesome (ej. 'fa-users'), no un emoji: el
@@ -4266,6 +4011,351 @@
             stats.innerHTML = '';
             error.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
         }
+    }
+
+    /* ---------- Uso por dispositivo (grafico del dashboard) ----------
+     * Lineas multi-serie: una por dispositivo del dominio, un punto por dia,
+     * sobre los ultimos 30 dias. SVG a mano, sin librerias (el panel no tiene
+     * build step), igual que el grafico de senal de Dispositivos.
+     *
+     * Diferencia de fondo con aquel: alla el eje Y es una MEDICION y las horas
+     * sin reporte son un corte en la linea; aca es un CONTEO y un dia sin
+     * senales vale cero, asi que las lineas van enteras, sin huecos.
+     *
+     * El color de cada serie lo decide el BACKEND (`slot`), no el orden del
+     * array: el color sigue al equipo. Ver el comentario de la paleta en
+     * style.css §15b, que ademas explica por que hay solo seis ranuras. */
+
+    /* La identidad de cada serie la lleva SOLO la referencia de arriba (mas
+     * el tooltip y la vista de tabla). No hay rotulos al final de las lineas:
+     * reservarles una canaleta a la derecha dejaba un vacio que se leia como
+     * si al grafico le faltaran dias. Si se vuelven a querer, hay que sumar
+     * el ancho del rotulo a padR -- no dibujarlos sobre el area del plot. */
+    const USO_VB = { w: 1200, h: 280, padL: 56, padR: 16, padT: 16, padB: 34 };
+
+    // Ultimo payload + vista elegida. Se guardan para poder alternar entre
+    // grafico y tabla sin volver a pedir: es la misma informacion mirada de
+    // dos formas, y la consulta no es barata.
+    let usoDatos = null;
+    let usoVista = 'grafico';
+
+    async function cargarUso() {
+        const cont = document.getElementById('db-uso');
+        if (!cont) return;
+
+        cont.innerHTML = `<div class="uso-card"><div class="uso-head"><div class="uso-title">
+                <i class="fa-solid fa-chart-line"></i><span>Señales por dispositivo</span>
+                <span class="uso-hint">cargando…</span>
+            </div></div></div>`;
+
+        try {
+            usoDatos = await api('api/dashboard_senales.php');
+        } catch (err) {
+            cont.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+            return;
+        }
+        pintarUso();
+    }
+
+    function pintarUso() {
+        const cont = document.getElementById('db-uso');
+        if (!cont || !usoDatos) return;
+        cont.innerHTML = vistaUso(usoDatos);
+        activarUso(cont);
+    }
+
+    /* Las series que se DIBUJAN: las que tienen ranura de color mas, si hay,
+     * el agregado "otros". El resto viaja igual en `data.series` y se lista
+     * en la vista de tabla -- el tope de colores decide que se dibuja, no
+     * que se informa. */
+    function usoDibujadas(data) {
+        const conColor = (data.series || []).filter((s) => s.slot);
+        return data.otros ? conColor.concat([{ ...data.otros, slot: null }]) : conColor;
+    }
+
+    const claseSlot = (s) => `uso-s${s.slot || 0}`;
+
+    function vistaUso(data) {
+        const r     = data.resumen || {};
+        const tabla = usoVista === 'tabla';
+
+        // "Respuestas" y no "señales": el grafico cuenta solo los mensajes
+        // `RET=` -- lo que el equipo contesta cuando lo operan -- y no los
+        // latidos ni los reportes periodicos, que llegan igual sin que nadie
+        // toque el equipo. Ver la cabecera de api/dashboard_senales.php.
+        const hint = [
+            `últimos ${r.dias || 30} días`,
+            `${formatNumero(r.total || 0)} ${r.total === 1 ? 'respuesta' : 'respuestas'}`,
+            `${r.equipos_activos || 0} de ${r.equipos_dominio || 0} dispositivos`,
+        ].join(' · ');
+
+        return `
+            <div class="uso-card">
+                <div class="uso-head">
+                    <div class="uso-title">
+                        <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+                        <span>Uso por dispositivo</span>
+                        <span class="uso-hint">${escapeHtml(hint)}</span>
+                    </div>
+                    <div class="uso-actions">
+                        <button type="button" class="btn-icon-sm${tabla ? ' active' : ''}" data-act="vista"
+                                title="${tabla ? 'Ver gráfico' : 'Ver tabla'}" aria-pressed="${tabla}">
+                            <i class="fa-solid ${tabla ? 'fa-chart-line' : 'fa-list'}" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="btn-icon-sm" data-act="refrescar"
+                                title="Refrescar" aria-label="Refrescar">
+                            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+                ${cuerpoUso(data)}
+            </div>`;
+    }
+
+    function cuerpoUso(data) {
+        const r = data.resumen || {};
+
+        if (!(data.series || []).length) {
+            return `<div class="alert alert-info" style="margin:0">${sinUso(r)}</div>`;
+        }
+        if (usoVista === 'tabla') {
+            return tablaUso(data);
+        }
+
+        const dibujadas = usoDibujadas(data);
+        const leyenda = dibujadas.map((s) => `
+            <span class="uso-legend-item ${claseSlot(s)}">
+                <span class="uso-legend-line"></span>${escapeHtml(s.nombre)}
+                <strong>${formatNumero(s.total)}</strong>
+            </span>`).join('');
+
+        return `<div class="uso-legend">${leyenda}</div>${graficoUso(data, dibujadas)}`;
+    }
+
+    // Mensaje de la ventana vacia. Que el dominio no haya registrado nada en
+    // 30 dias es un dato en si mismo, asi que se dice cuando fue la ultima
+    // senal de vida conocida en lugar de dejar el grafico en blanco.
+    function sinUso(r) {
+        if (!r.equipos_dominio) {
+            return 'El dominio todavía no tiene dispositivos adoptados.';
+        }
+        const cuando = formatDate(r.ultima_actividad);
+        return `Ninguno de los ${r.equipos_dominio} dispositivos del dominio registró uso `
+             + `en los últimos ${r.dias || 30} días.`
+             + (cuando ? ` La última actividad conocida es del ${escapeHtml(cuando)}.` : '');
+    }
+
+    /* Geometria del plot. Sale de aca y no de cada funcion porque el render y
+     * el hover tienen que usar EXACTAMENTE la misma escala: los puntos del
+     * hover son circulos sueltos, no vertices de la polilinea, asi que si las
+     * dos cuentas se separan el punto queda al lado de su linea. */
+    function geometriaUso(data) {
+        const n = (data.dias || []).length || 1;
+        const { w, h, padL, padR, padT, padB } = USO_VB;
+        const plotW = w - padL - padR;
+        const plotH = h - padT - padB;
+        const { tope, ticks } = escalaUso(data.resumen?.maximo || 0);
+
+        return {
+            n, w, h, padL, padR, padT, padB, plotW, plotH, tope, ticks,
+            x: (i) => padL + (plotW * (i + 0.5)) / n,
+            y: (v) => padT + plotH - (plotH * v) / tope,
+        };
+    }
+
+    function graficoUso(data, dibujadas) {
+        const dias = data.dias || [];
+        const { n, w, h, padL, padR, padT, padB, plotW, plotH, ticks, x, y } = geometriaUso(data);
+
+        // Guias y rotulos del eje Y en cifras redondas.
+        const ejeY = ticks.map((v) => `
+            <line class="uso-grid" x1="${padL}" y1="${y(v).toFixed(1)}" x2="${(w - padR).toFixed(1)}" y2="${y(v).toFixed(1)}"/>
+            <text class="uso-tick" x="${padL - 8}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${formatNumero(v)}</text>`).join('');
+
+        // Eje X: un paso que deje las etiquetas sin pisarse, contado DESDE EL
+        // ULTIMO DIA hacia atras. Anclarlo al ultimo y no al primero es lo que
+        // garantiza que el dia de hoy siempre lleve rotulo: si el paso no
+        // divide justo a la ventana, contando desde el principio el ultimo
+        // rotulo cae dias antes del final y el grafico se lee como si le
+        // faltara el tramo mas reciente, que es el que mas se mira.
+        const paso   = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 46))));
+        const rotula = new Set();
+        for (let i = n - 1; i >= 0; i -= paso) rotula.add(i);
+
+        const ejeX = dias.map((d, i) => (!rotula.has(i) ? '' : `
+            <text class="uso-tick" x="${x(i).toFixed(1)}" y="${h - padB + 16}" text-anchor="middle">${etiquetaDia(d)}</text>`)).join('');
+
+        const lineas = dibujadas.map((s) => {
+            const pts = (s.valores || []).map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+            return `<polyline class="uso-linea ${claseSlot(s)}" points="${pts}"/>`;
+        }).join('');
+
+        // Un punto por serie, escondido: el hover lo mueve a la columna que
+        // se esta mirando en lugar de dibujar 30 x 7 circulos permanentes.
+        const puntos = dibujadas.map((s) => `
+            <circle class="uso-punto ${claseSlot(s)}" r="3.5" cx="0" cy="0" hidden/>`).join('');
+
+        // Columnas invisibles: una por dia, el area sensible del hover. Son
+        // mucho mas anchas que la linea, asi no hay que apuntarle al pixel.
+        const hit = dias.map((d, i) => `
+            <rect class="uso-hit" x="${(padL + (plotW * i) / n).toFixed(1)}" y="${padT}"
+                  width="${(plotW / n).toFixed(2)}" height="${plotH}"
+                  data-i="${i}" data-x="${x(i).toFixed(1)}"/>`).join('');
+
+        return `
+            <div class="uso-plot">
+                <svg class="uso-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet"
+                     role="img" aria-label="Señales registradas por dispositivo y por día en los últimos ${n} días">
+                    ${ejeY}${ejeX}
+                    <line class="uso-cross" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" hidden/>
+                    ${lineas}${puntos}${hit}
+                </svg>
+                <div class="uso-tip" hidden></div>
+            </div>`;
+    }
+
+    const recortar = (t, max) => (String(t ?? '').length > max ? String(t).slice(0, max - 1) + '…' : String(t ?? ''));
+
+    /* Tope y guias del eje Y en cifras redondas: el paso se elige de
+     * 1/2/2.5/5/10 x 10^k para que caigan ~4 intervalos. Con el maximo crudo
+     * como tope las guias darian numeros como 33 y 67. */
+    function escalaUso(maximo) {
+        const max   = Math.max(1, maximo);
+        const crudo = max / 4;
+        const pot   = Math.pow(10, Math.floor(Math.log10(crudo)));
+        const paso  = [1, 2, 2.5, 5, 10].map((m) => m * pot).find((p) => p >= crudo) || 10 * pot;
+        const tope  = Math.ceil(max / paso) * paso;
+
+        const ticks = [];
+        for (let v = 0; v <= tope + paso / 1000; v += paso) ticks.push(Math.round(v));
+        return { tope, ticks };
+    }
+
+    // 'YYYY-MM-DD' -> 'DD/MM'
+    function etiquetaDia(dia) {
+        const m = String(dia ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[3]}/${m[2]}` : '';
+    }
+
+    /* Vista de tabla: el gemelo accesible del grafico. Lista TODOS los
+     * equipos con actividad, no solo los seis que entran en la paleta, asi
+     * que ninguna cifra queda escondida atras de "otros" ni del hover. */
+    function tablaUso(data) {
+        const dias   = data.dias || [];
+        const series = data.series || [];
+
+        const cabecera = series.map((s) => `
+            <th><span class="uso-tabla-serie ${claseSlot(s)}">${s.slot ? '<i></i>' : ''}${escapeHtml(s.nombre)}</span></th>`).join('');
+
+        const filas = dias.map((d, i) => {
+            const celdas = series.map((s) => celdaUso(s.valores[i])).join('');
+            const total  = series.reduce((acc, s) => acc + (s.valores[i] || 0), 0);
+            return `<tr><td>${escapeHtml(formatDate(d) || d)}</td>${celdas}<td>${celdaValor(total)}</td></tr>`;
+        }).join('');
+
+        const totales = series.map((s) => `<td>${formatNumero(s.total)}</td>`).join('');
+
+        return `
+            <div class="uso-tabla-wrap table-card">
+                <table class="uso-tabla">
+                    <thead><tr><th>Fecha</th>${cabecera}<th>Total</th></tr></thead>
+                    <tbody>${filas}</tbody>
+                    <tfoot><tr><td>Total</td>${totales}<td>${formatNumero(data.resumen?.total || 0)}</td></tr></tfoot>
+                </table>
+            </div>`;
+    }
+
+    const celdaValor = (v) => (v ? formatNumero(v) : '<span class="uso-cero">0</span>');
+    const celdaUso   = (v) => `<td>${celdaValor(v || 0)}</td>`;
+
+    /* Cablea lo que el HTML no puede: los dos botones de la cabecera y el
+     * hover del grafico (cruz vertical + puntos + tooltip). Se llama despues
+     * de cada render. */
+    function activarUso(cont) {
+        const btnVista = cont.querySelector('[data-act="vista"]');
+        const btnRefr  = cont.querySelector('[data-act="refrescar"]');
+
+        btnVista?.addEventListener('click', () => {
+            usoVista = usoVista === 'tabla' ? 'grafico' : 'tabla';
+            pintarUso();
+        });
+
+        btnRefr?.addEventListener('click', () => {
+            btnRefr.querySelector('i')?.classList.add('fa-spin');
+            cargarUso();
+        });
+
+        const plot = cont.querySelector('.uso-plot');
+        if (!plot) return;
+
+        const tip    = plot.querySelector('.uso-tip');
+        const cruz   = plot.querySelector('.uso-cross');
+        const puntos = [...plot.querySelectorAll('.uso-punto')];
+        const dibujadas = usoDibujadas(usoDatos);
+        const geo    = geometriaUso(usoDatos);
+
+        plot.querySelectorAll('.uso-hit').forEach((celda) => {
+            celda.addEventListener('mouseenter', () => {
+                const i = +celda.dataset.i;
+
+                cruz.setAttribute('x1', celda.dataset.x);
+                cruz.setAttribute('x2', celda.dataset.x);
+                cruz.removeAttribute('hidden');
+
+                // Los puntos se crearon en el mismo orden que `dibujadas`, asi
+                // que el indice alcanza para emparejarlos con su serie.
+                puntos.forEach((p, k) => {
+                    const s = dibujadas[k];
+                    if (!s) return;
+                    p.setAttribute('cx', geo.x(i).toFixed(1));
+                    p.setAttribute('cy', geo.y(s.valores[i] || 0).toFixed(1));
+                    p.removeAttribute('hidden');
+                });
+
+                // El tooltip se muestra ANTES de medirlo: mientras esta
+                // `hidden` no tiene ancho, y sin ancho no se puede acotar a
+                // los bordes del grafico.
+                tip.innerHTML = tipUso(usoDatos, dibujadas, i);
+                tip.removeAttribute('hidden');
+
+                // Cuelga del borde de arriba del area de dibujo, no del
+                // punto: la columna sensible es toda la altura del plot, asi
+                // que anclarlo al cursor lo dejaria saltando. Y se corre para
+                // adentro en los extremos, si no en el primer y el ultimo dia
+                // se sale de la tarjeta.
+                const c    = celda.getBoundingClientRect();
+                const p    = plot.getBoundingClientRect();
+                const medio = tip.offsetWidth / 2;
+                const x     = c.left - p.left + c.width / 2;
+
+                tip.style.left = `${Math.max(medio + 2, Math.min(p.width - medio - 2, x))}px`;
+                tip.style.top  = `${c.top - p.top}px`;
+            });
+        });
+
+        plot.addEventListener('mouseleave', () => {
+            cruz.setAttribute('hidden', '');
+            tip.setAttribute('hidden', '');
+            puntos.forEach((p) => p.setAttribute('hidden', ''));
+        });
+    }
+
+    /* Contenido del tooltip: el dia y, debajo, cada serie dibujada con su
+     * cifra. Se ordena de mayor a menor para que el orden de las filas
+     * coincida con el orden vertical de las lineas en esa columna. */
+    function tipUso(data, dibujadas, i) {
+        const dia   = (data.dias || [])[i];
+        const filas = dibujadas
+            .map((s) => ({ s, v: s.valores[i] || 0 }))
+            .sort((a, b) => b.v - a.v)
+            .map(({ s, v }) => `
+                <div class="uso-tip-fila ${claseSlot(s)}">
+                    <i></i>
+                    <span class="uso-tip-nombre">${escapeHtml(recortar(s.nombre, 26))}</span>
+                    <span class="uso-tip-valor">${formatNumero(v)}</span>
+                </div>`).join('');
+
+        return `<div class="uso-tip-fecha">${escapeHtml(formatDate(dia) || dia || '')}</div>${filas}`;
     }
 
     /* =========================================================

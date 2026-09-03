@@ -48,10 +48,11 @@ declare(strict_types=1);
  * NO esta indexada, asi que filtrar por rango de fechas sobre el indice de
  * `dispositivo` obliga a mirar fila por fila todo el historial del equipo
  * (348K filas / 1,6 s en el peor caso medido). Por eso la consulta lleva
- * ademas una cota por PK -- ver pisoPorFecha().
+ * ademas una cota por PK -- ver senalesPisoPorFecha() en lib/senales.php.
  */
 
 require __DIR__ . '/bootstrap.php';
+require_once dirname(__DIR__) . '/lib/senales.php';
 
 /** Extremos de la escala en dBm: `senalMaximo` / `senalMinimo` del legacy. */
 const SENAL_MAXIMO = -10;   // 100%
@@ -60,16 +61,6 @@ const SENAL_MINIMO = -90;   //   0%
 /** Ventanas ofrecidas al front, en horas. La serie siempre es horaria. */
 const HORAS_OPCIONES = [24, 48, 168];
 const HORAS_DEFECTO  = 24;
-
-/**
- * Colchon de ids que se le resta al piso calculado por fecha. `fecha` es
- * monotona respecto de `id` en la practica (las senales se insertan a
- * medida que llegan) pero no lo garantiza nada: inserciones concurrentes o
- * un reloj corrido pueden desordenar unas pocas filas. Pasarse de largo
- * hacia atras solo cuesta unas filas de scan; quedarse corto perderia
- * mediciones, asi que el margen va siempre para el lado barato.
- */
-const MARGEN_PISO = 2000;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -111,7 +102,7 @@ function handleGet(int $id, int $horas): void
     $desde   = $hasta->modify('-' . ($horas - 1) . ' hours');
     $desdeDb = $desde->format('Y-m-d H:i:s');
 
-    $muestras = muestras($id, $desdeDb, pisoPorFecha($desdeDb));
+    $muestras = muestras($id, $desdeDb, senalesPisoPorFecha($desdeDb));
     $serie    = serie($muestras, $desde, $horas);
 
     json_ok([
@@ -132,43 +123,6 @@ function handleGet(int $id, int $horas): void
         'hasta'   => $hasta->modify('+1 hour')->format('Y-m-d H:i:s'),
         'opciones' => HORAS_OPCIONES,
     ]);
-}
-
-/**
- * Primer id de `senales` cuya fecha entra en la ventana, con margen.
- *
- * Es una busqueda binaria sobre la PK: `fecha` no tiene indice, pero crece
- * junto con `id`, asi que cada sonda es un lookup puntual por clave
- * primaria (instantaneo) y en ~25 sondas se acota una tabla de 35M ids. El
- * resultado NO se usa como filtro exacto -- de eso se encarga
- * `fecha >= :desde` -- sino para que el rango del indice de `dispositivo`
- * empiece cerca de la ventana en lugar de recorrer todo el historial del
- * equipo.
- */
-function pisoPorFecha(string $desde): int
-{
-    $lo = (int) db()->query('SELECT MIN(id) FROM senales')->fetchColumn();
-    $hi = (int) db()->query('SELECT MAX(id) FROM senales')->fetchColumn();
-    if ($lo <= 0 || $hi <= 0) {
-        return 0;
-    }
-
-    // Se busca el primer id cuya fecha ya no es anterior a la ventana.
-    $sonda = db()->prepare('SELECT fecha FROM senales WHERE id >= :probe ORDER BY id LIMIT 1');
-    while ($lo < $hi) {
-        $medio = intdiv($lo + $hi, 2);
-        $sonda->execute([':probe' => $medio]);
-        $fecha = (string) ($sonda->fetchColumn() ?: '');
-        // Sin fila o con fecha nula se busca hacia atras: un piso de menos
-        // solo cuesta scan, uno de mas se come mediciones.
-        if ($fecha !== '' && $fecha < $desde) {
-            $lo = $medio + 1;
-        } else {
-            $hi = $medio;
-        }
-    }
-
-    return max(0, $lo - MARGEN_PISO);
 }
 
 /** Mediciones crudas del equipo dentro de la ventana, de la mas vieja a la mas nueva. */

@@ -58,13 +58,13 @@ $cuerpo = '
     . '</div>
 
     <div class="inv-acciones">
-        <form method="post" action="rechazar.php">
+        <form method="post" action="rechazar">
             <input type="hidden" name="uid" value="' . $uid . '">
             <button type="submit" class="btn btn-alt">
                 <i class="fa-solid fa-xmark"></i> Rechazar
             </button>
         </form>
-        <a class="btn btn-primary" href="aceptar.php?uid=' . $uid . '">
+        <a class="btn btn-primary" href="aceptar?uid=' . $uid . '">
             <i class="fa-solid fa-check"></i> Aceptar
         </a>
     </div>

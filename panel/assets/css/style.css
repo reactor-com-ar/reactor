@@ -501,9 +501,16 @@ th.action-col, td.action-col {
 .alert-success { background: rgba(34,197,94,.12);  color: #86efac; border-color: rgba(34,197,94,.3); }
 
 /* ---------- 11. Modales ---------- */
+/* El aire alrededor del modal lo pone el backdrop con su padding, NO un margin
+ * del modal: asi el hueco es el mismo en los cuatro lados y sale de un solo
+ * numero. El modal se acota con `max-height: 100%` (100% del backdrop, que ya
+ * viene descontado el padding); el `90vh` que habia antes ataba el hueco
+ * vertical a un porcentaje de la pantalla (45px en un viewport de 904px, contra
+ * 16px de los costados), asi que no habia forma de que coincidieran. */
 .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.45);
     display: flex; align-items: center; justify-content: center;
+    padding: 24px;
     z-index: 100; opacity: 0; pointer-events: none; transition: opacity .2s;
 }
 .modal-backdrop.open { opacity: 1; pointer-events: all; }
@@ -512,11 +519,10 @@ th.action-col, td.action-col {
  * que el body contenga) para que el boton Cerrar quede siempre visible. */
 .modal {
     background: var(--surface); border-radius: 14px;
-    width: 100%; max-width: 520px; max-height: 90vh;
+    width: 100%; max-width: 520px; max-height: 100%;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: var(--shadow-lg);
     transform: scale(.96) translateY(12px); transition: transform .2s;
-    margin: 16px;
 }
 .modal-backdrop.open .modal { transform: scale(1) translateY(0); }
 .modal-wide { max-width: 880px; }

@@ -30,6 +30,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/_layout.php';
 require_once dirname(__DIR__) . '/api/legacy_crypto.php';
+require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 
 $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uuid   = (string) ($_POST['uid'] ?? $_GET['uid'] ?? '');
@@ -198,29 +199,17 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
 
         if ($nueva) {
             $contrasena = contrasenaGenerada();
-            $alta = $pdo->prepare(
-                'INSERT INTO usuarios
-                    (uuid, nombre, usuario, autenticacion, contrasena, correo, celular,
-                     habilitado, registrante, registrado, dominio)
-                 VALUES
-                    (:uuid, :nombre, :usuario, :auth, :contrasena, :correo, :celular,
-                     :habilitado, :registrante, NOW(), :dominio)'
-            );
-            $alta->execute([
-                ':uuid'        => bin2hex(random_bytes(8)),
-                ':nombre'      => $completo,
-                ':usuario'     => $correo,
-                // 'L' = login con contrasena, igual que el alta del panel.
-                ':auth'        => 'L',
-                ':contrasena'  => reactor_legacy_encriptar($contrasena),
-                ':correo'      => $correo,
-                ':celular'     => $celular,
-                // 'S' es lo que valida api/login.php (junto con '1' y 'Y').
-                ':habilitado'  => 'S',
-                ':registrante' => (int) $inv['emisor'] ?: null,
-                ':dominio'     => $dominioId,
+            // Mismo canal de alta que el BackOffice (panel/lib/usuarios_alta.php):
+            // cifra la contrasena y deja el espejo perfiles/dominios/paneles.
+            $usuarioId = usuarioAlta($pdo, [
+                'nombre'      => $completo,
+                'usuario'     => $correo,
+                'contrasena'  => $contrasena,
+                'correo'      => $correo,
+                'celular'     => $celular,
+                'registrante' => (int) $inv['emisor'],
+                'dominio'     => $dominioId,
             ]);
-            $usuarioId = (int) $pdo->lastInsertId();
         }
 
         $perfilId = perfilAsegurado($pdo, $usuarioId, $dominioId, $dominioNombre);
@@ -229,8 +218,7 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
         // ya existia no se le mueve el dominio con el que esta trabajando: el
         // acceso nuevo le aparece en "Cambiar dominio".
         if ($nueva) {
-            $pdo->prepare('UPDATE usuarios SET perfil = :p WHERE id = :id')
-                ->execute([':p' => $perfilId, ':id' => $usuarioId]);
+            usuarioPerfilActivo($pdo, $usuarioId, $perfilId);
         }
 
         $pdo->commit();

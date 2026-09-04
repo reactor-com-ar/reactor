@@ -2,7 +2,9 @@
 # ============================================================
 # deploy.sh - Sincroniza la app al servidor reactor
 # Host objetivo:  paloalto.reactor.com.ar
-# URL servida:    https://cloud.reactor.com.ar
+# URLs servidas:  https://cloud.reactor.com.ar
+#                 https://panel.reactor.com.ar
+#                 https://pwa.reactor.com.ar   (app end-user, dominio temporal)
 #
 # Uso:
 #   bash deploy.sh           # solo sube cambios (NO toca los contenedores)
@@ -10,10 +12,10 @@
 #   bash deploy.sh --rebuild # sube + reconstruye la imagen + recrea
 #                            # (necesario si cambio docker/Dockerfile)
 #
-# El modo por defecto no reinicia nada: cloud/ y panel/ estan bind-monteados
-# como directorios, asi que el codigo nuevo queda vivo apenas termina el
-# rsync. El script avisa al final si detecto un cambio que si requiere
-# --restart o --rebuild.
+# El modo por defecto no reinicia nada: cloud/, panel/ y app/ estan
+# bind-monteados como directorios, asi que el codigo nuevo queda vivo apenas
+# termina el rsync. El script avisa al final si detecto un cambio que si
+# requiere --restart o --rebuild.
 # ============================================================
 
 set -e
@@ -54,28 +56,29 @@ esac
 echo "================================================"
 echo ""
 
-# ---- 1. version.txt en cloud/ y panel/ ----
+# ---- 1. version.txt en cloud/, panel/ y app/ ----
 echo "$VERSION" > "$BASE_LOCAL/cloud/version.txt"
 echo "$VERSION" > "$BASE_LOCAL/panel/version.txt"
-echo "  version.txt actualizado en cloud/ y panel/"
+echo "$VERSION" > "$BASE_LOCAL/app/version.txt"
+echo "  version.txt actualizado en cloud/, panel/ y app/"
 echo ""
 
 # ---- 2. Verificar artefactos requeridos ----
-for f in .env.production env.php docker/Dockerfile cloud panel; do
+for f in .env.production env.php docker/Dockerfile cloud panel app; do
     if [ ! -e "$BASE_LOCAL/$f" ]; then
         echo "ERROR: falta $BASE_LOCAL/$f"
         exit 1
     fi
 done
 
-# ---- 3. Subir cloud/, panel/, docker/, db/, .env.production, env.php ----
+# ---- 3. Subir cloud/, panel/, app/, docker/, db/, .env.production, env.php ----
 # NO subimos docker-compose.yml: en el servidor vive docker-compose.prod.yml,
 # generado por aprovisionar_server.sh (sin servicio reactor-db).
 # .env.production y env.php se suben en cada deploy para mantener prod en sync.
-# env.php es require_once'd desde cloud/index.php y panel/index.php y carga
-# las constantes que leen las apps (APP_KEY_*, DB_*, MQTT_*) -- sin el, prod
-# queda 500.
-echo "  Subiendo cloud/, panel/, docker/, db/, .env.production y env.php (mirror con --delete)..."
+# env.php es require_once'd desde cloud/index.php, panel/index.php y app/lib/
+# db.php, y carga las constantes que leen las apps (APP_KEY_*, DB_*, MQTT_*)
+# -- sin el, prod queda 500.
+echo "  Subiendo cloud/, panel/, app/, docker/, db/, .env.production y env.php (mirror con --delete)..."
 cd "$BASE_LOCAL"
 
 # db/ se incluye porque CLAUDE.md lo declara como schema de referencia.
@@ -107,16 +110,19 @@ tar \
     --exclude='./panel/.git' \
     --exclude='./panel/node_modules' \
     --exclude='./panel/vendor' \
+    --exclude='./app/.git' \
+    --exclude='./app/node_modules' \
+    --exclude='./app/vendor' \
     --exclude='*.log' \
     --exclude='*.pem' \
     --exclude='*.key' \
-    -czf - cloud panel docker $INCLUDE_DB .env.production env.php | \
+    -czf - cloud panel app docker $INCLUDE_DB .env.production env.php | \
 ssh -i "$KEY" -o StrictHostKeyChecking=no \
     "$USER@$HOST" "
         set -e
         mkdir -p '$STAGING'
         tar -xzf - -C '$STAGING/'
-        for dir in cloud panel docker $INCLUDE_DB; do
+        for dir in cloud panel app docker $INCLUDE_DB; do
             if [ -d \"$STAGING/\$dir\" ]; then
                 # -i itemiza; filtramos a transferencias/borrados reales
                 # (las lineas que empiezan con '.' son solo atributos).
@@ -129,6 +135,12 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no \
                 fi
             fi
         done
+        # app/ es el ultimo docroot que se sumo: si el compose del server
+        # todavia no lo bind-montea, subir los archivos no alcanza -- el
+        # contenedor sirve /var/www/app vacio y pwa.reactor.com.ar da 404.
+        if ! grep -q '/var/www/app' \"$BASE_REMOTE/$COMPOSE_FILE\" 2>/dev/null; then
+            echo 'REACTOR_COMPOSE_SIN_APP'
+        fi
         for f in .env.production env.php; do
             [ -f \"$STAGING/\$f\" ] || continue
             # Si Docker hizo bind-mount cuando el archivo no existia, el
@@ -192,7 +204,7 @@ case "$MODE" in
         echo "  OK -- contenedores recreados"
         ;;
     sync)
-        echo "  Sin reinicio: cloud/ y panel/ son bind-mounts, los cambios ya estan vivos."
+        echo "  Sin reinicio: cloud/, panel/ y app/ son bind-mounts, los cambios ya estan vivos."
 
         # Avisos: cambios que el sync solo NO alcanza a activar.
         AVISOS=""
@@ -220,6 +232,19 @@ case "$MODE" in
 esac
 echo ""
 
+# ---- 4b. El compose del server no monta app/ ----
+# aprovisionar_server.sh genera docker-compose.prod.yml, pero deploy.sh NO lo
+# regenera: si el server quedo con la version previa a que app/ existiera,
+# ningun modo de este script alcanza para publicarla. Hay que re-aprovisionar.
+if echo "$SYNC_OUT" | grep -q '^REACTOR_COMPOSE_SIN_APP$'; then
+    echo "  AVISO -- el $COMPOSE_FILE del server no bind-montea ./app:/var/www/app."
+    echo "           Los archivos se subieron, pero el contenedor no los sirve todavia."
+    echo "           Correr una vez: bash scripts/aprovisionar.sh"
+    echo "           (regenera el compose con el puerto 8115, agrega el server block"
+    echo "            de nginx para pwa.reactor.com.ar y suma el dominio al cert SSL)."
+    echo ""
+fi
+
 # ---- 5. Migraciones SQL ----
 # Las migraciones viven en cloud/sql/migrations/ y son idempotentes.
 # Como el contenedor PHP no trae cliente mysql, se aplican manualmente
@@ -234,5 +259,6 @@ echo "================================================"
 echo "  Deploy completo"
 echo "    cloud: https://cloud.reactor.com.ar"
 echo "    panel: https://panel.reactor.com.ar"
+echo "    app:   https://pwa.reactor.com.ar   (temporal -- pasa a app.reactor.com.ar)"
 echo "================================================"
 echo ""

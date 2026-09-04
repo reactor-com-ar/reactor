@@ -97,13 +97,13 @@
         btnLogout.addEventListener('click', async (e) => {
             e.preventDefault();
             try {
-                await fetch('api/logout.php', {
+                await fetch('api/logout', {
                     method: 'POST',
                     headers: { 'Accept': 'application/json' },
                     credentials: 'same-origin',
                 });
             } catch (_) { /* aun si falla la llamada, vamos al login */ }
-            window.location.href = 'login.php';
+            window.location.href = 'login';
         });
     }
 
@@ -132,7 +132,7 @@
 
         // Sesion expirada o no autenticada → al login.
         if (res.status === 401) {
-            window.location.href = 'login.php';
+            window.location.href = 'login';
             throw new Error('No autenticado');
         }
 
@@ -379,8 +379,8 @@
             // Dispositivos alimenta las stat-cards de arriba; registros, la card
             // "Últimos registros" del grid. Fetch en paralelo para no encadenar.
             const [data, regData] = await Promise.all([
-                api('dispositivos.php'),
-                api('registros.php?sentido=S&limit=5'),
+                api('dispositivos'),
+                api('registros?sentido=S&limit=5'),
             ]);
             const s = data.resumen;
             const ultimosRegistros = (regData.registros || []).slice(0, 5);
@@ -485,7 +485,7 @@
                     btnRegRefresh.disabled = true;
                     icon?.classList.add('fa-spin');
                     try {
-                        const fresh = await api('registros.php?sentido=S&limit=5');
+                        const fresh = await api('registros?sentido=S&limit=5');
                         regCardBody.innerHTML = registrosDashboardTableBody(
                             (fresh.registros || []).slice(0, 5)
                         );
@@ -514,7 +514,7 @@
 
     /* Gráfico "Señales por minuto · últimas 24 h" (dashboard).
      *
-     * Polling a `signals_stats.php` cada 1 min. La ventana es móvil: el
+     * Polling a `signals_stats` cada 1 min. La ventana es móvil: el
      * servidor devuelve 1440 buckets de 1 minuto anclados al minuto en
      * curso, así que basta con re-render completo del SVG sin lógica
      * incremental. SVG inline (no librería) — una polilínea fluida + área
@@ -653,7 +653,7 @@
             const icon = btnReload?.querySelector('i');
             if (manual && icon) icon.classList.add('fa-spin');
             try {
-                const data = await api('signals_stats.php');
+                const data = await api('signals_stats');
                 renderChart(data);
                 if (lastError) { setStatus('En vivo · 1 min', false); lastError = false; }
             } catch (err) {
@@ -678,7 +678,7 @@
     /* Feed en vivo del dashboard (cada 500 ms).
      *
      * Mantiene un buffer de las últimas 20 señales y poll-ea
-     * `signals_live.php?since_id=…` para traer sólo las nuevas. Pausa
+     * `signals_live?since_id=…` para traer sólo las nuevas. Pausa
      * automáticamente al pasar el mouse sobre la card; el botón
      * pausa/play permite congelar el feed manualmente para inspeccionar
      * una señal. Devuelve una función de cleanup que apaga el timer —
@@ -757,7 +757,7 @@
                 const qs = new URLSearchParams();
                 qs.set('since_id', String(maxId));
                 qs.set('limit',    String(MAX_ROWS));
-                const data = await api('signals_live.php?' + qs.toString());
+                const data = await api('signals_live?' + qs.toString());
 
                 if (data.last_id > maxId) maxId = data.last_id;
                 if (data.senales && data.senales.length) {
@@ -827,8 +827,8 @@
     async function renderDispositivos(root) {
         try {
             const [data, domData] = await Promise.all([
-                api('dispositivos.php'),
-                api('dominios.php'),
+                api('dispositivos'),
+                api('dominios'),
             ]);
             const dispositivos = data.dispositivos;
             const dominios     = domData.dominios;
@@ -1089,9 +1089,9 @@
     // Trae el registro completo + catálogos. `id` null = alta (sólo catálogos).
     async function fetchDevice(id) {
         if (id == null) {
-            return { dispositivo: null, catalogos: (await api('dispositivos.php?catalogos=1')).catalogos };
+            return { dispositivo: null, catalogos: (await api('dispositivos?catalogos=1')).catalogos };
         }
-        return api('dispositivos.php?id=' + encodeURIComponent(id));
+        return api('dispositivos?id=' + encodeURIComponent(id));
     }
 
     async function openDeviceViewModal(row) {
@@ -1204,7 +1204,7 @@
             `¿Eliminar el dispositivo ${dev.nombre} (identificador ${dev.uid})? Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('dispositivos.php?id=' + dev.id, { method: 'DELETE' });
+                    await api('dispositivos?id=' + dev.id, { method: 'DELETE' });
                     toast('Dispositivo eliminado');
                     navigate();
                 } catch (e) {
@@ -1483,10 +1483,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('dispositivos.php', { method: 'PUT', body: { id: dev.id, ...payload } });
+                    await api('dispositivos', { method: 'PUT', body: { id: dev.id, ...payload } });
                     toast('Dispositivo actualizado');
                 } else {
-                    await api('dispositivos.php', { method: 'POST', body: payload });
+                    await api('dispositivos', { method: 'POST', body: payload });
                     toast('Dispositivo creado');
                 }
                 close();
@@ -1524,8 +1524,8 @@
     async function renderChips(root) {
         try {
             const [data, domData] = await Promise.all([
-                api('chips.php'),
-                api('dominios.php'),
+                api('chips'),
+                api('dominios'),
             ]);
             const r = data.resumen;
             const dominios = domData.dominios;
@@ -1947,10 +1947,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('chips.php', { method: 'PUT', body: { id: chip.id, ...payload } });
+                    await api('chips', { method: 'PUT', body: { id: chip.id, ...payload } });
                     toast('Chip actualizado');
                 } else {
-                    await api('chips.php', { method: 'POST', body: payload });
+                    await api('chips', { method: 'POST', body: payload });
                     toast('Chip creado');
                 }
                 close();
@@ -1968,7 +1968,7 @@
             `¿Eliminar el chip ${chip.operador} ${chip.numero} (ICCID ${chip.iccid})? Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('chips.php?id=' + chip.id, { method: 'DELETE' });
+                    await api('chips?id=' + chip.id, { method: 'DELETE' });
                     toast('Chip eliminado');
                     navigate();
                 } catch (e) {
@@ -1995,7 +1995,7 @@
 
     async function renderTransceptores(root) {
         try {
-            const data = await api('transceptores.php');
+            const data = await api('transceptores');
             const r = data.resumen;
             const transceptores = data.transceptores;
             const state = transceptoresDefaults();
@@ -2359,10 +2359,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('transceptores.php', { method: 'PUT', body: { id: t.id, ...payload } });
+                    await api('transceptores', { method: 'PUT', body: { id: t.id, ...payload } });
                     toast('Transceptor actualizado');
                 } else {
-                    await api('transceptores.php', { method: 'POST', body: payload });
+                    await api('transceptores', { method: 'POST', body: payload });
                     toast('Transceptor creado');
                 }
                 close();
@@ -2383,7 +2383,7 @@
             `¿Eliminar el transceptor "${t.nombre ?? '#' + t.id}" (${t.host ?? '—'}:${t.puerto ?? '—'})?${refNote} Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('transceptores.php?id=' + t.id, { method: 'DELETE' });
+                    await api('transceptores?id=' + t.id, { method: 'DELETE' });
                     toast('Transceptor eliminado');
                     navigate();
                 } catch (e) {
@@ -2409,7 +2409,7 @@
 
     async function renderDominios(root) {
         try {
-            const data = await api('dominios.php');
+            const data = await api('dominios');
             const dominios = data.dominios;
             const state = dominiosDefaults();
 
@@ -2651,10 +2651,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('dominios.php', { method: 'PUT', body: { id: dom.id, nombre, descripcion } });
+                    await api('dominios', { method: 'PUT', body: { id: dom.id, nombre, descripcion } });
                     toast('Dominio actualizado');
                 } else {
-                    await api('dominios.php', { method: 'POST', body: { nombre, descripcion } });
+                    await api('dominios', { method: 'POST', body: { nombre, descripcion } });
                     toast('Dominio creado');
                 }
                 close();
@@ -2771,7 +2771,7 @@
             `¿Eliminar el dominio "${dom.nombre}"?` + reassignNote + ' Esta acción no se puede deshacer.',
             async () => {
                 try {
-                    await api('dominios.php?id=' + dom.id, { method: 'DELETE' });
+                    await api('dominios?id=' + dom.id, { method: 'DELETE' });
                     toast('Dominio eliminado');
                     navigate();
                 } catch (e) {
@@ -2835,7 +2835,7 @@
 
     async function renderUsers(root) {
         try {
-            const data = await api('users.php');
+            const data = await api('users');
             const r = data.resumen;
             const usuarios = data.usuarios;
             const state = usuariosDefaults();
@@ -3125,7 +3125,7 @@
             if (perfLoaded) return;
             perfLoaded = true;
             try {
-                const data = await api('profiles.php?usuario_id=' + encodeURIComponent(usr.id));
+                const data = await api('profiles?usuario_id=' + encodeURIComponent(usr.id));
                 const perfiles = data.perfiles || [];
                 perfBody.innerHTML = perfilesUsuarioTableBody(perfiles);
                 // Click sobre un perfil -> Consultar perfil, apilado sobre este modal.
@@ -3227,10 +3227,17 @@
                     </div>
                     <div class="form-group">
                         <label for="usr-pass">
-                            ${isEdit ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña'}
+                            Contraseña
+                            ${isEdit ? '<span class="muted" style="font-weight:400">(vaciar para no cambiarla)</span>' : ''}
                         </label>
-                        <input type="password" id="usr-pass" minlength="6" autocomplete="new-password"
-                               placeholder="${isEdit ? 'Sin cambios' : 'Mínimo 6 caracteres'}">
+                        <div class="input-password">
+                            <input type="password" id="usr-pass" minlength="6" maxlength="32" autocomplete="new-password"
+                                   placeholder="${isEdit ? 'Sin cambios' : 'Mínimo 6 caracteres'}">
+                            <button type="button" class="pass-toggle" data-act="toggle-pass"
+                                    aria-label="Mostrar contraseña" title="Mostrar contraseña">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
                         <div class="field-error" id="usr-pass-err" style="display:none"></div>
                     </div>
                 </div>
@@ -3267,6 +3274,32 @@
         activoChk.addEventListener('change', () => {
             activoLbl.textContent = activoChk.checked ? 'Activo' : 'Inactivo';
         });
+
+        // Ojo del campo contraseña: alterna entre puntos y texto plano. El ícono
+        // muestra la acción disponible (ojo = mostrar, ojo tachado = ocultar).
+        const passToggle = backdrop.querySelector('[data-act="toggle-pass"]');
+        passToggle.addEventListener('click', () => {
+            const mostrar = passInput.type === 'password';
+            passInput.type = mostrar ? 'text' : 'password';
+            passToggle.querySelector('i').className = mostrar ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+            const rotulo = mostrar ? 'Ocultar contraseña' : 'Mostrar contraseña';
+            passToggle.setAttribute('aria-label', rotulo);
+            passToggle.title = rotulo;
+            passInput.focus();
+        });
+
+        // Precarga de la contraseña vigente (ver `handleCredencial()` en
+        // api/users.php): el campo abre con la contraseña real en puntos, así el
+        // ojo tiene algo que revelar. Va por separado del listado y en segundo
+        // plano para no demorar la apertura del modal.
+        if (isEdit) {
+            api('users?credencial=1&id=' + encodeURIComponent(usr.id))
+                .then(r => {
+                    // Si el operador ya empezó a escribir, no le pisamos lo tipeado.
+                    if (passInput.value === '') passInput.value = r.password || '';
+                })
+                .catch(() => { /* queda vacío, que equivale a "no cambiarla" */ });
+        }
 
         nombreInput.focus();
 
@@ -3319,10 +3352,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('users.php', { method: 'PUT', body: { id: usr.id, ...payload } });
+                    await api('users', { method: 'PUT', body: { id: usr.id, ...payload } });
                     toast('Usuario actualizado');
                 } else {
-                    await api('users.php', { method: 'POST', body: payload });
+                    await api('users', { method: 'POST', body: payload });
                     toast('Usuario creado');
                 }
                 close();
@@ -3335,14 +3368,14 @@
     }
 
     // Borrar un usuario arrastra dependencias en 13 tablas con tres
-    // comportamientos distintos (ver `api/users.php`): filas que se eliminan,
+    // comportamientos distintos (ver `api/users`): filas que se eliminan,
     // filas que sobreviven sin usuario asociado y filas que bloquean el borrado.
     // El `confirmDialog` genérico (§15 de DESIGN.md) no alcanza para mostrar
     // eso, así que se pide el detalle real al backend y se abre un modal propio.
     async function confirmDeleteUser(usr) {
         let impacto;
         try {
-            impacto = await api('users.php?impacto=1&id=' + encodeURIComponent(usr.id));
+            impacto = await api('users?impacto=1&id=' + encodeURIComponent(usr.id));
         } catch (e) {
             toast(e.message, 'error');
             return;
@@ -3435,7 +3468,7 @@
             const btn = e.currentTarget;
             btn.disabled = true;
             try {
-                const res = await api('users.php?id=' + encodeURIComponent(usr.id), { method: 'DELETE' });
+                const res = await api('users?id=' + encodeURIComponent(usr.id), { method: 'DELETE' });
                 close();
                 // El backend devuelve lo que realmente borró: se informa para
                 // que el número visto en el modal quede confirmado.
@@ -3476,9 +3509,9 @@
     async function renderProfiles(root) {
         try {
             const [data, usrData, domData] = await Promise.all([
-                api('profiles.php'),
-                api('users.php'),
-                api('dominios.php'),
+                api('profiles'),
+                api('users'),
+                api('dominios'),
             ]);
             const r = data.resumen;
             const perfiles  = data.perfiles;
@@ -3832,7 +3865,7 @@
             if (isEdit) {
                 saveBtn.disabled = true;
                 try {
-                    await api('profiles.php', { method: 'PUT', body: { id: prf.id, rol } });
+                    await api('profiles', { method: 'PUT', body: { id: prf.id, rol } });
                     toast('Perfil actualizado');
                     close();
                     navigate();
@@ -3863,7 +3896,7 @@
 
             saveBtn.disabled = true;
             try {
-                await api('profiles.php', { method: 'POST', body: { usuario_id, dominio_id, rol } });
+                await api('profiles', { method: 'POST', body: { usuario_id, dominio_id, rol } });
                 toast('Perfil creado');
                 close();
                 navigate();
@@ -3880,7 +3913,7 @@
             `¿Eliminar el perfil de "${prf.usuario_nombre}" en "${prf.dominio_nombre}"? Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('profiles.php?id=' + prf.id, { method: 'DELETE' });
+                    await api('profiles?id=' + prf.id, { method: 'DELETE' });
                     toast('Perfil eliminado');
                     navigate();
                 } catch (e) {
@@ -3935,9 +3968,9 @@
             if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
 
             const [data, devData, domData] = await Promise.all([
-                api('signals.php?' + qs.toString()),
-                api('dispositivos.php'),
-                api('dominios.php'),
+                api('signals?' + qs.toString()),
+                api('dispositivos'),
+                api('dominios'),
             ]);
 
             const r            = data.resumen;
@@ -4006,7 +4039,7 @@
     /* Modal "Monitor en tiempo real" (Señales).
      *
      * Modal tipo log de consola/terminal que muestra las señales que van
-     * ingresando en vivo, poll-eando `signals_live.php` cada 100 ms (muy
+     * ingresando en vivo, poll-eando `signals_live` cada 100 ms (muy
      * agresivo vs. la card del dashboard, que va a 500 ms — el monitor
      * está pensado para sentirse "en tiempo real"). Cada señal es una
      * línea monoespaciada en un panel oscuro tipo terminal; las nuevas se
@@ -4177,7 +4210,7 @@
                 const qs = new URLSearchParams();
                 qs.set('since_id', String(maxId));
                 qs.set('limit',    String(MAX_ROWS));
-                const data = await api('signals_live.php?' + qs.toString());
+                const data = await api('signals_live?' + qs.toString());
 
                 if (data.last_id > maxId) maxId = data.last_id;
 
@@ -4318,7 +4351,7 @@
 
             tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
             try {
-                const data = await api('signals.php?' + qs.toString());
+                const data = await api('signals?' + qs.toString());
                 senales = data.senales;
                 applyAndRender();
             } catch (e) {
@@ -4619,9 +4652,9 @@
             if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
 
             const [data, devData, domData] = await Promise.all([
-                api('registros.php?' + qs.toString()),
-                api('dispositivos.php'),
-                api('dominios.php'),
+                api('registros?' + qs.toString()),
+                api('dispositivos'),
+                api('dominios'),
             ]);
 
             const r            = data.resumen;
@@ -4798,7 +4831,7 @@
 
             tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
             try {
-                const data = await api('registros.php?' + qs.toString());
+                const data = await api('registros?' + qs.toString());
                 registros = data.registros;
                 applyAndRender();
             } catch (e) {
@@ -5059,10 +5092,10 @@
             qs.set('limit', String(state.limit));
 
             const [data, devData, domData, userData] = await Promise.all([
-                api('adopciones.php?' + qs.toString()),
-                api('dispositivos.php'),
-                api('dominios.php'),
-                api('users.php'),
+                api('adopciones?' + qs.toString()),
+                api('dispositivos'),
+                api('dominios'),
+                api('users'),
             ]);
 
             const r            = data.resumen;
@@ -5202,7 +5235,7 @@
 
             tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
             try {
-                const data = await api('adopciones.php?' + qs.toString());
+                const data = await api('adopciones?' + qs.toString());
                 adopciones = data.adopciones;
                 applyAndRender();
             } catch (e) {
@@ -5609,7 +5642,7 @@
         const tbody = _paramCtx.listado.querySelector('#paramTbody');
         tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>`;
         try {
-            const data = await api('parametros.php');
+            const data = await api('parametros');
             _paramCache = data.parametros || [];
             renderParametros(_paramFiltroAplicado());
             actualizarResumenParametros();
@@ -5807,10 +5840,10 @@
             saveBtn.disabled = true;
             try {
                 if (isEdit) {
-                    await api('parametros.php', { method: 'PUT', body: { id: param.id, ...payload } });
+                    await api('parametros', { method: 'PUT', body: { id: param.id, ...payload } });
                     toast('Parámetro actualizado');
                 } else {
-                    await api('parametros.php', { method: 'POST', body: payload });
+                    await api('parametros', { method: 'POST', body: payload });
                     toast('Parámetro creado');
                 }
                 cerrar();
@@ -5830,7 +5863,7 @@
             `¿Eliminar el parámetro "${p.variable}"? Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api('parametros.php?id=' + p.id, { method: 'DELETE' });
+                    await api('parametros?id=' + p.id, { method: 'DELETE' });
                     toast('Parámetro eliminado');
                     cargarParametros();
                 } catch (e) {
@@ -5974,7 +6007,7 @@
         tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px"><div class="spin"></div></td></tr>`;
 
         try {
-            const data = await api('migraciones.php');
+            const data = await api('migraciones');
             _migradorCache    = data.items    || [];
             _migradorEnv      = (data.env     || 'unknown').toLowerCase();
             _migradorDatabase = data.database || '';
@@ -6132,7 +6165,7 @@
         ta.value = 'Cargando…';
 
         try {
-            const data = await api('migraciones_get.php?nombre=' + encodeURIComponent(nombre));
+            const data = await api('migraciones_get?nombre=' + encodeURIComponent(nombre));
             ta.value = data.contenido || '';
             const registro = _migradorCache.find(m => m.nombre === nombre);
             if (registro && registro.estado === 'pendiente') btnApli.style.display = '';
@@ -6157,7 +6190,7 @@
         if (_migradorAplicando) return;
         _migradorAplicando = true;
         try {
-            const data = await api('migraciones_apply.php', { method: 'POST', body: { nombre } });
+            const data = await api('migraciones_apply', { method: 'POST', body: { nombre } });
             toast(`Aplicada «${nombre}» en ${data.duracion_ms} ms.`);
             await cargarMigraciones();
         } catch (e) {
@@ -6188,7 +6221,7 @@
                 for (const m of pendientes) {
                     btn.textContent = `Aplicando ${m.nombre}…`;
                     try {
-                        await api('migraciones_apply.php', { method: 'POST', body: { nombre: m.nombre } });
+                        await api('migraciones_apply', { method: 'POST', body: { nombre: m.nombre } });
                         aplicadas++;
                     } catch (e) {
                         toast(`Falló «${m.nombre}»: ${e.message}`, { error: true, duration: 10000 });
@@ -6463,7 +6496,7 @@
         params.set('limite', limite);
 
         try {
-            const data = await api('sucesos.php?' + params.toString());
+            const data = await api('sucesos?' + params.toString());
             _sucesosCache = data.items || [];
             const resumen = _sucesosCtx.listado.querySelector('#sucesosResumen');
             if (resumen && data.stats) {
@@ -6741,7 +6774,7 @@
     }
     async function dbExpCargarTablas() {
         try {
-            const data = await api('db_tables.php');
+            const data = await api('db_tables');
             dbExpTablas = data.tablas || [];
             dbExpDbName = data.database || '';
             dbExpEnv    = (data.env || 'unknown').toLowerCase();
@@ -6806,7 +6839,7 @@
     }
     async function apiDbDescribe(nombre) {
         try {
-            const data = await api('db_describe.php?tabla=' + encodeURIComponent(nombre));
+            const data = await api('db_describe?tabla=' + encodeURIComponent(nombre));
             dbExpRenderColumnas(data.columnas || []);
         } catch (e) {
             _dbExpBackdrop.querySelector('#dbExpColsTbody').innerHTML =
@@ -6837,7 +6870,7 @@
     }
     async function dbExpCargarRegistros(nombre) {
         try {
-            const data = await api(`db_records.php?tabla=${encodeURIComponent(nombre)}&limite=${dbExpLimite}`);
+            const data = await api(`db_records?tabla=${encodeURIComponent(nombre)}&limite=${dbExpLimite}`);
             dbExpRegistros    = data.registros || [];
             dbExpPkCols       = data.pk        || [];
             dbExpAutoIncCols  = data.auto_inc  || [];
@@ -6941,7 +6974,7 @@
             td.classList.add('db-exp-cell-saving');
             try {
                 const pk = Object.fromEntries(dbExpPkCols.map(c => [c, reg[c]]));
-                const data = await api('db_update.php', { method: 'POST', body: { tabla: dbExpTablaActual, columna: col, pk, valor: nuevoValor }});
+                const data = await api('db_update', { method: 'POST', body: { tabla: dbExpTablaActual, columna: col, pk, valor: nuevoValor }});
                 reg[col] = data.valor_guardado;
                 cerrar();
                 td.classList.add('db-exp-cell-ok');
@@ -7052,7 +7085,7 @@
             const qs = new URLSearchParams();
             if (s3ExpPrefix) qs.set('prefix', s3ExpPrefix);
             if (s3ExpNextToken) qs.set('token', s3ExpNextToken);
-            const data = await api('s3_list.php?' + qs.toString());
+            const data = await api('s3_list?' + qs.toString());
             s3ExpBucket = data.bucket || '';
             _s3ExpBackdrop.querySelector('#s3ExpBucket').textContent = s3ExpBucket || '—';
 
@@ -7189,9 +7222,9 @@
         fd.append('prefix', s3ExpPrefix);
         fd.append('nombre', file.name);
         try {
-            const res = await fetch('api/s3_upload.php', { method: 'POST', credentials: 'same-origin', body: fd });
+            const res = await fetch('api/s3_upload', { method: 'POST', credentials: 'same-origin', body: fd });
             const body = await res.json();
-            if (res.status === 401) { window.location.href = 'login.php'; return; }
+            if (res.status === 401) { window.location.href = 'login'; return; }
             if (!res.ok || body.ok === false) throw new Error(body.error || ('HTTP ' + res.status));
             toast('Archivo subido');
             _s3ExpBackdrop.querySelector('#s3ExpUploadInput').value = '';
@@ -7204,7 +7237,7 @@
         const nombre = prompt('Nombre de la nueva carpeta:');
         if (!nombre) return;
         try {
-            await api('s3_create_folder.php', { method: 'POST', body: { prefix: s3ExpPrefix, nombre }});
+            await api('s3_create_folder', { method: 'POST', body: { prefix: s3ExpPrefix, nombre }});
             toast('Carpeta creada');
             s3ExpCargar(true);
         } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
@@ -7215,7 +7248,7 @@
             : `¿Eliminar el archivo "${key}"?`;
         confirmDialog(esCarpeta ? 'Eliminar carpeta' : 'Eliminar archivo', mensaje, async () => {
             try {
-                await api('s3_delete.php', { method: 'POST', body: { key, recursivo: esCarpeta }});
+                await api('s3_delete', { method: 'POST', body: { key, recursivo: esCarpeta }});
                 toast('Eliminado');
                 s3ExpCargar(true);
             } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
@@ -7324,7 +7357,7 @@
             const qs = new URLSearchParams();
             if (tareasFiltroQ) qs.set('q', tareasFiltroQ);
             if (tareasFiltroActivo !== '') qs.set('activo', tareasFiltroActivo);
-            const data = await api('tareas.php?' + qs.toString());
+            const data = await api('tareas?' + qs.toString());
             tareasCache = data.tareas || [];
             renderTareas(tareasCache);
         } catch (e) {
@@ -7393,14 +7426,14 @@
     async function toggleActivoTarea(id, activo) {
         const t = tareasCache.find(x => x.id === id); if (!t) return;
         try {
-            await api('tareas.php', { method: 'PUT', body: { ...t, activo: activo ? 1 : 0 } });
+            await api('tareas', { method: 'PUT', body: { ...t, activo: activo ? 1 : 0 } });
             toast(activo ? 'Tarea activada' : 'Tarea desactivada');
             cargarTareas();
         } catch (e) { toast(e.message, { error: true, duration: 10000 }); cargarTareas(); }
     }
     async function ejecutarAhora(id) {
         try {
-            const data = await api('tareas_ejecutar.php', { method: 'POST', body: { tarea_id: id } });
+            const data = await api('tareas_ejecutar', { method: 'POST', body: { tarea_id: id } });
             cargarTareas();
             abrirTerminal(data.ejecucion_id);
         } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
@@ -7409,7 +7442,7 @@
         const t = tareasCache.find(x => x.id === id); if (!t) return;
         confirmDialog('Eliminar tarea', `¿Eliminar "${t.nombre}" y todo su historial? Esta acción no se puede deshacer.`, async () => {
             try {
-                const data = await api('tareas.php?id=' + id, { method: 'DELETE' });
+                const data = await api('tareas?id=' + id, { method: 'DELETE' });
                 toast(`Tarea eliminada (${data.archivos_borrados || 0} archivos borrados)`);
                 cargarTareas();
             } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
@@ -7486,7 +7519,7 @@
     }
     async function cargarScriptsDisponibles(actual) {
         try {
-            const scripts = await api('tareas_scripts_disponibles.php');
+            const scripts = await api('tareas_scripts_disponibles');
             const sel = _tareasFormBackdrop.querySelector('#formTareaScript');
             let opts = `<option value="">— elegí un script —</option>` + scripts.map(s => `<option value="${escape(s)}" ${s === actual ? 'selected' : ''}>${escape(s)}</option>`).join('');
             if (actual && !scripts.includes(actual)) {
@@ -7520,10 +7553,10 @@
         const payload = { nombre, descripcion, script, cron_expr, timeout_seg, retencion_dias, overlap, activo };
         try {
             if (param) {
-                await api('tareas.php', { method: 'PUT', body: { id: param.id, ...payload }});
+                await api('tareas', { method: 'PUT', body: { id: param.id, ...payload }});
                 toast('Tarea actualizada');
             } else {
-                await api('tareas.php', { method: 'POST', body: payload });
+                await api('tareas', { method: 'POST', body: payload });
                 toast('Tarea creada');
             }
             cerrar();
@@ -7602,7 +7635,7 @@
         try {
             const qs = new URLSearchParams({ tarea_id: String(ejecucionesTareaSel.id), limite: '100' });
             if (ejecucionesFiltroEstado) qs.set('estado', ejecucionesFiltroEstado);
-            const data = await api('tareas_ejecuciones.php?' + qs.toString());
+            const data = await api('tareas_ejecuciones?' + qs.toString());
             ejecucionesCache = data.ejecuciones || [];
             renderEjecuciones(ejecucionesCache);
         } catch (e) {
@@ -7659,7 +7692,7 @@
     }
     async function detenerEjecucion(id) {
         try {
-            await api('tareas_ejecuciones.php', { method: 'POST', body: { id, accion: 'detener' } });
+            await api('tareas_ejecuciones', { method: 'POST', body: { id, accion: 'detener' } });
             toast('Ejecución detenida');
             cargarEjecuciones();
         } catch (e) { toast(e.message, { error: true, duration: 10000 }); }
@@ -7701,7 +7734,7 @@
         bd.addEventListener('click', e => { if (e.target === bd) cerrarTerminal(); });
 
         const out = bd.querySelector('#terminalOutput');
-        terminalES = new EventSource('api/tareas_ejecucion_stream.php?id=' + ejecucionId);
+        terminalES = new EventSource('api/tareas_ejecucion_stream?id=' + ejecucionId);
         terminalES.onmessage = ev => {
             out.textContent += ev.data + '\n';
             if (terminalAutoscroll) out.scrollTop = out.scrollHeight;
@@ -7989,7 +8022,7 @@
         setInterval(async () => {
             if (done) return;
             try {
-                const res = await fetch('api/version.php', {
+                const res = await fetch('api/version', {
                     headers: { 'Accept': 'application/json' },
                     credentials: 'same-origin',
                     cache: 'no-store',

@@ -21,6 +21,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/legacy_crypto.php';
+require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 
 const ORDEN_VALIDO = ['id', 'usuario', 'nombre', 'correo', 'registrado', 'ingresado'];
 const MAX_LIMITE   = 1000;
@@ -169,31 +170,25 @@ function handleCreate(): void
     }
     validarContrasena($contrasena);
 
-    $ctx  = sessionContext() ?? [];
-    $stmt = db()->prepare(
-        'INSERT INTO usuarios
-            (uuid, nombre, usuario, contrasena, correo, celular, habilitado,
-             perfil, dominio, roles, registrante, registrado, autenticacion)
-         VALUES
-            (:uuid, :nombre, :usuario, :contrasena, :correo, :celular, :habilitado,
-             :perfil, :dominio, :roles, :registrante, NOW(), :autenticacion)'
-    );
-    $stmt->execute([
-        ':uuid'          => bin2hex(random_bytes(8)),
-        ':nombre'        => $datos['nombre'],
-        ':usuario'       => $datos['usuario'],
-        ':contrasena'    => reactor_legacy_encriptar($contrasena),
-        ':correo'        => $datos['correo'],
-        ':celular'       => $datos['celular'],
-        ':habilitado'    => $datos['habilitado'],
-        ':perfil'        => $datos['perfil'],
-        ':dominio'       => $dominio,
-        ':roles'         => $datos['roles'],
-        ':registrante'   => (int) ($ctx['id'] ?? 0) ?: null,
-        ':autenticacion' => 'L',
+    // El INSERT no se hace aca: `usuarioAlta()` es el canal unico de alta del
+    // panel (lo comparte con invitacion/aceptar.php). Es quien cifra la
+    // contrasena y quien fija las constantes de alta (autenticacion,
+    // habilitado, perfiles, dominios, paneles) -- por eso no se le pasa
+    // `habilitado`: al crear siempre nace '1'. Se cambia despues, editando.
+    $ctx = sessionContext() ?? [];
+    $id  = usuarioAlta(db(), [
+        'nombre'      => $datos['nombre'],
+        'usuario'     => $datos['usuario'],
+        'contrasena'  => $contrasena,
+        'correo'      => $datos['correo'],
+        'celular'     => $datos['celular'],
+        'perfil'      => $datos['perfil'],
+        'dominio'     => $dominio,
+        'roles'       => $datos['roles'],
+        'registrante' => (int) ($ctx['id'] ?? 0),
     ]);
 
-    json_ok(['id' => (int) db()->lastInsertId()], 201);
+    json_ok(['id' => $id], 201);
 }
 
 function handleUpdate(): void

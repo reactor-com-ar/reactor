@@ -7,7 +7,7 @@ require_once __DIR__ . '/lib/sesion.php';
 
 $currentUser = authUser();
 if ($currentUser === null) {
-    header('Location: login.php');
+    header('Location: login');
     exit;
 }
 

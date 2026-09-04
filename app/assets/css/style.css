@@ -7,6 +7,24 @@
  * oscuro con panels "de dispositivo" (display amarillo + botones).
  * ------------------------------------------------------------------ */
 
+/* Fuentes del legacy (reactor-app/css/) —
+   "Play" = fuente general de toda la app; "LCD" = titulo del display. */
+@font-face {
+    font-family: "Play";
+    src: url('../fonts/play-regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "LCD";
+    src: url('../fonts/small-lcd-sign.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     --primary:        #C11313;   /* rojo institucional (topbar) */
     --primary-h:      #8e0e0e;
@@ -15,21 +33,23 @@
     --sidebar-item:   rgba(255,255,255,.75);
     --sidebar-hover:  rgba(0,0,0,.18);
 
-    --content-bg:     #1e1e1e;   /* fondo del area de contenido */
-    --content-tex:    rgba(255,255,255,.03);
+    --content-bg:     #262f38;   /* color base del contenido (debajo del fondo) */
+    --content-img:    url('../img/fondo_005.png');
 
     --panel-bg:       #fdfdfd;   /* card blanco */
     --panel-border:   #e5e5e5;
     --panel-shadow:   0 2px 6px rgba(0,0,0,.35);
 
-    --display-yellow: #E6C200;   /* display "encendido" (online) */
+    /* `colores` id=100 "Predeterminado", el que usan 59 de los 81 controles.
+       Es el hex que el legacy inyecta inline via $xColor->id2codigo(). */
+    --display-yellow: #EBC300;   /* display "encendido" (online) */
     --display-gray:   #918f88;   /* display "apagado" (offline) */
-    --display-text:   rgba(0,0,0,.7);
+    --display-text:   rgba(0,0,0,.55);  /* mismo gris que el legacy */
 
-    --btn-bg:         #f7f7f7;
-    --btn-border:     #e0e0e0;
+    --btn-bg:         #f4f4f4;  /* legacy .btn-app { background-color: #f4f4f4 } */
+    --btn-border:     #ddd;     /* legacy .btn-app { border: 1px solid #ddd } */
     --btn-hover:      #efefef;
-    --btn-text:       #333;
+    --btn-text:       #666;     /* mismo gris que el legacy .btn-app */
 
     --text:           #f0f0f0;
     --muted:          rgba(255,255,255,.65);
@@ -45,14 +65,18 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Los form controls no heredan la fuente del body por defecto */
+button, input, select, textarea { font-family: inherit; }
+
 html, body { height: 100%; }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: "Play", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--content-bg);
     color: var(--text);
     min-height: 100vh;
-    overflow: hidden;   /* el scroll vive en .content */
+    min-height: 100dvh;   /* ver el comentario de `.layout` */
+    overflow: hidden;     /* el scroll vive en .content */
 }
 
 /* -------- Version banner (mismo patron que cloud/panel) -------- */
@@ -79,15 +103,37 @@ body {
     cursor: pointer;
 }
 .version-banner-btn:hover { background: #e5e7eb; }
-body.has-banner .layout { min-height: calc(100vh - 44px); }
+body.has-banner .layout {
+    min-height: calc(100vh - 44px);
+    min-height: calc(100dvh - 44px);
+    /* Con el banner puesto, `.layout` tiene que ACHICARSE los 44px que ocupa,
+       no solo bajar su minimo: sigue siendo un contenedor de altura fija. */
+    height: calc(100vh - 44px);
+    height: calc(100dvh - 44px);
+}
 
 /* -------------------- Layout -------------------- */
 
+/* La altura va en `dvh` (dynamic viewport height), NO en `vh`.
+ *
+ * En Chrome de Android `100vh` es el viewport GRANDE: la altura que tendria la
+ * pagina con la barra de direcciones retraida. Pero la barra esta a la vista
+ * casi siempre, asi que lo que se ve de verdad son unos 56-110px menos. Como
+ * `.layout` quedaba clavado en `100vh` y `body` va en `overflow: hidden`, esa
+ * franja de abajo se dibujaba FUERA de la pantalla y no habia forma de
+ * llegar: el scroll de `.content` terminaba, pero su ultimo tramo —el ultimo
+ * control del panel— quedaba tapado por la barra del navegador.
+ *
+ * `dvh` sigue al viewport visible y se reajusta cuando la barra aparece o se
+ * esconde. El `vh` de la linea de arriba queda de respaldo para los navegadores
+ * que no entienden `dvh` (Chrome < 108), donde el comportamiento es el de antes. */
 .layout {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
     height: 100vh;
+    min-height: 100dvh;
+    height: 100dvh;
 }
 
 .main-row {
@@ -103,15 +149,22 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     height: var(--topbar-h);
     display: flex;
     align-items: center;
-    padding: 0 20px;
-    gap: 16px;
+    padding: 0 16px;
+    gap: 12px;
     box-shadow: var(--shadow);
     flex-shrink: 0;
     position: relative;
     z-index: 20;
+    /* Nada de la cabecera va en negrita. Los iconos son FontAwesome y su
+       grosor lo define el estilo del glifo (`fa-solid`), no font-weight: no
+       tocar el weight aca, que romperia el render del icono. */
+    font-weight: normal;
 }
+/* Arrancó en 16px por paridad con el legacy (`img/header_logo.png`: wordmark
+   de 143x16 reales); a pedido se achico un escalon mas, a 13px de alto —
+   ~122px de ancho con el aspect del PNG (226x24). Sin override por breakpoint. */
 .topbar-logo {
-    height: 30px;
+    height: 13px;
     width: auto;
     display: block;
 }
@@ -119,8 +172,8 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     background: none;
     border: none;
     color: #fff;
-    font-size: 1.5rem;
-    padding: 6px 10px;
+    font-size: 1.2rem;
+    padding: 5px 8px;
     cursor: pointer;
     border-radius: 6px;
     line-height: 1;
@@ -141,9 +194,10 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     background: none;
     border: none;
     color: #fff;
-    font-size: 1.2rem;
-    padding: 8px 12px;
+    font-size: 1rem;
+    padding: 7px 9px;
     cursor: pointer;
+    text-decoration: none;   /* la mesa de ayuda es un <a>, no un <button> */
     border-radius: 6px;
     display: inline-flex;
     align-items: center;
@@ -163,8 +217,13 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     flex-shrink: 0;
     border-right: 1px solid rgba(0,0,0,.25);
     overflow-y: auto;
-    transition: transform .25s ease;
+    transition: transform .25s ease, margin-left .25s ease;
 }
+
+/* Cerrado en desktop: el sidebar esta en el flujo, asi que se corre hacia
+   afuera con margin negativo y el contenido se expande. En mobile es un cajon
+   flotante y manda `.open` (ver el media query), por eso alli se neutraliza. */
+.sidebar.oculto { margin-left: calc(-1 * var(--sidebar-w)); }
 
 .sidebar-nav {
     padding: 12px 0;
@@ -191,12 +250,53 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     background: rgba(0,0,0,.28);
     color: #fff;
     border-left-color: var(--primary);
-    font-weight: 600;
 }
 .nav-item i {
     width: 20px;
     text-align: center;
     font-size: 1rem;
+}
+
+/* ---- Grupo desplegable (Mi Cuenta) ---- */
+
+.nav-caret {
+    margin-left: auto;
+    font-size: .75rem !important;
+    opacity: .7;
+    transition: transform .2s ease;
+}
+.nav-toggle.expanded .nav-caret { transform: rotate(180deg); }
+
+.nav-submenu {
+    display: none;
+    background: rgba(0,0,0,.22);
+}
+.nav-submenu.open { display: block; }
+
+.nav-subitem {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px 10px 40px;
+    color: var(--sidebar-item);
+    font-size: .88rem;
+    text-decoration: none;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background .15s, color .15s;
+}
+.nav-subitem:hover {
+    background: var(--sidebar-hover);
+    color: #fff;
+}
+.nav-subitem.active {
+    color: #fff;
+    border-left-color: var(--primary);
+}
+.nav-subitem i {
+    width: 18px;
+    text-align: center;
+    font-size: .9rem;
 }
 
 /* -------------------- Contenido -------------------- */
@@ -205,18 +305,22 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     flex: 1;
     padding: 24px 20px 40px;
     overflow-y: auto;
-    background:
-        radial-gradient(rgba(255,255,255,.04) 1px, transparent 1px) 0 0/22px 22px,
-        var(--content-bg);
+    /* El fondo queda anclado al viewport del contenido: `scroll` (default en un
+       contenedor scrolleable) hace que NO se desplace con el feed de panels. */
+    background: var(--content-img) center / cover no-repeat, var(--content-bg);
     -webkit-overflow-scrolling: touch;
 }
 
-/* Nombre del dominio + panel */
+/* Nombre del dominio + panel.
+   Franja negra semitransparente a todo el ancho, como el legacy: el margin
+   negativo anula el padding de `.content` para que sangre de borde a borde. */
 .dominio-nombre {
+    margin: -24px -20px 0;
+    background: rgba(0,0,0,.25);
     text-align: center;
     font-size: 1.15rem;
     color: rgba(255,255,255,.85);
-    padding: 14px 10px 8px;
+    padding: 10px;
     letter-spacing: .01em;
 }
 .panel-nombre {
@@ -237,6 +341,27 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     max-width: 720px;
     margin: 18px auto 0;
     padding: 0 4px;
+}
+
+/* Advertencia de situacion del dominio.
+   Legacy: `.alert.alert-danger.advertencia` — padding/borde de Bootstrap,
+   font-weight del h4 de AdminLTE, radio y fondo del <style> inline del panel.
+   El margen inferior de 20px del legacy lo aporta el `gap` de `.panel-feed`. */
+.advertencia {
+    background: var(--primary);   /* legacy: #C11313 !important */
+    color: #fff;
+    border: 1px solid #d73925;
+    border-radius: 10px;
+    padding: 15px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.42857143;
+}
+.advertencia h4 {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.1;
+    margin: 0 0 10px;
 }
 
 /* -------------------- Panel (control card) -------------------- */
@@ -275,7 +400,6 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     width: 100%;
     font-size: .8rem;
     font-weight: 500;
-    opacity: .85;
 }
 .display-status .left,
 .display-status .right {
@@ -285,18 +409,18 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
 }
 
 .display-titulo {
-    /* Doto = pixel / dot-matrix (Google Fonts), fallback monospace */
-    font-family: "Doto", "Courier New", "Consolas", monospace;
+    /* LCD = fuente de display del legacy, fallback monospace */
+    font-family: "LCD", "Courier New", "Consolas", monospace;
     font-weight: 700;
-    font-size: 1.3rem;
-    letter-spacing: .06em;
-    margin-top: 8px;
+    font-size: 15px;   /* mismo tamano fijo que el legacy */
+    margin-top: 10px;
+    margin-bottom: 10px;
     text-align: center;
     text-transform: uppercase;
 }
 
 .canales-fila {
-    margin-top: 6px;
+    margin-top: 10px;
     display: flex;
     gap: 4px;
     justify-content: center;
@@ -322,6 +446,17 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     background: rgba(0,0,0,.10);
 }
 
+/* Canal de un modulo sensor (`modulos.tipo = 'S'`): no tiene encendido ni
+   apagado, muestra su lectura. El legacy la pinta con el mismo tamano grande
+   que el titulo del display (`panel/monitor.php`). */
+.canal-valor {
+    font-family: "LCD", "Courier New", monospace;
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--display-text);
+}
+
 /* Botones del panel (uno por fila, ancho completo) */
 .tec-btns {
     display: flex;
@@ -338,8 +473,10 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
     border: 1px solid var(--btn-border);
     border-radius: 8px;
     padding: 14px 12px;
-    font-size: 1rem;
-    font-weight: 500;
+    font-size: 18px;   /* legacy .btn-text2 { font-size: large } */
+    /* Bootstrap `.btn { font-weight: normal }`, y ni `.btn-app` ni `.btn-text2`
+       lo pisan: el texto del boton va en 400, no en semibold. */
+    font-weight: 400;
     cursor: pointer;
     text-decoration: none;
     box-shadow: inset -1px -1px 1px 0 rgba(0,0,0,.08);
@@ -349,7 +486,12 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
 }
 .tec-btn:hover  { background: var(--btn-hover); }
 .tec-btn:active { transform: scale(.98); }
-.tec-btn i      { font-size: 1.1rem; color: #555; }
+/* Mientras la orden viaja al broker. Es corto (una conexion MQTT), pero sin
+   esto el doble toque manda dos comandos. */
+.tec-btn.enviando { opacity: .55; cursor: default; }
+.tec-btn:disabled { cursor: default; }
+/* legacy: fa-2x (2em) sobre el font-size 12px de .btn-app = 24px */
+.tec-btn i      { font-size: 24px; }
 
 /* -------------------- Toast -------------------- */
 
@@ -400,12 +542,556 @@ body.has-banner .layout { min-height: calc(100vh - 44px); }
         box-shadow: 6px 0 20px rgba(0,0,0,.4);
     }
     .sidebar.open { transform: translateX(0); }
+    /* En mobile el estado lo lleva `.open`; el margin de desktop molestaria. */
+    .sidebar.oculto { margin-left: 0; }
 
-    .topbar { padding: 0 12px; gap: 8px; }
-    .topbar-action { padding: 8px 10px; font-size: 1.1rem; }
-    .topbar-logo { height: 26px; }
+    .topbar { padding: 0 10px; gap: 8px; }
+    .topbar-action { padding: 6px 7px; font-size: .95rem; }
 
     .content { padding: 16px 12px 32px; }
 
-    .dominio-nombre { font-size: 1rem; }
+    /* el margin negativo sigue al padding de `.content` de este breakpoint */
+    .dominio-nombre { font-size: 1rem; margin: -16px -12px 0; }
+}
+
+/* -------------------- Pantallas de sesion --------------------
+ *
+ * Login del legacy (`reactor-app/sesion/*.php`): fondo rojo pleno, logo
+ * hexagonal centrado, y campos/botones tipo pildora (radius 20px, que es lo
+ * que hacia `.frm-cmp` del framework viejo). El boton toma su color del
+ * `.btn-dark` legacy: un negro al 15% sobre el rojo.
+ * ------------------------------------------------------------------------ */
+
+body.sesion-page {
+    background: var(--primary);
+    color: #fff;
+    overflow-y: auto;          /* el body de la app va en overflow:hidden */
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+}
+
+.sesion-caja {
+    width: 100%;
+    max-width: 360px;
+    padding: 0 20px 40px;
+    text-align: center;
+}
+
+.sesion-logo {
+    margin: 80px 0 24px;
+}
+.sesion-logo img {
+    width: 100px;
+    height: auto;
+    display: inline-block;
+}
+
+.sesion-encabezado {
+    font-size: 1.2rem;
+    font-weight: normal;
+    line-height: 1.35;
+    margin-bottom: 22px;
+}
+
+.sesion-error {
+    background: rgba(0,0,0,.28);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 18px;
+    font-size: .9rem;
+}
+
+.sesion-form { text-align: left; }
+
+.sesion-campo { position: relative; }
+
+.sesion-input {
+    width: 100%;
+    height: 44px;
+    border: none;
+    border-radius: 20px;
+    padding: 0 42px 0 20px;
+    text-align: center;
+    font-size: 1rem;
+    color: #333;
+    background: #fff;
+}
+.sesion-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0,0,0,.18);
+}
+.sesion-input-icono {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9a9a9a;
+    pointer-events: none;
+}
+
+.sesion-btn {
+    width: 100%;
+    height: 44px;
+    margin-top: 14px;
+    border: none;
+    border-radius: 20px;
+    background: rgba(0,0,0,.15);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background .15s;
+}
+.sesion-btn:hover { background: rgba(0,0,0,.25); }
+.sesion-btn-secundario { background: rgba(0,0,0,.08); }
+
+.sesion-fila {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+.sesion-fila .sesion-btn { margin-top: 0; }
+
+/* -------------------- Modales --------------------
+ *
+ * Tarjeta blanca como los panels de control, con la cabecera en el rojo del
+ * chrome. Se abre/cierra con la clase `.abierto` (no con el atributo [hidden]:
+ * `display:flex` de la clase le ganaria por especificidad).
+ * ------------------------------------------------------------------------ */
+
+.modal-fondo {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 400;              /* por encima del toast (300) */
+    background: rgba(0,0,0,.6);
+    align-items: center;
+    justify-content: center;
+    /* 16px = el marco exacto del panel de control que queda atras: 12px de
+       padding de `.content` + 4px de `.panel-feed` (ver el media query de
+       720px). Al coincidir, el modal tapa el panel de punta a punta y no se
+       asoman los bordes blancos por los costados. Este padding es el unico
+       numero que define el aire del modal: vale para los cuatro lados. */
+    padding: 16px;
+}
+.modal-fondo.abierto { display: flex; }
+
+/* `max-height: 100%` = 100% del .modal-fondo con su padding ya descontado, asi
+ * el hueco de arriba y abajo es el mismo que el de los costados. Con el `90vh`
+ * que habia antes el vertical era un porcentaje de la pantalla, ajeno al
+ * padding lateral, y los dos nunca coincidian.
+ *
+ * `max-width: 712px` es el ancho maximo del panel de control: `.panel-feed`
+ * mide 720px menos sus 4px de padding a cada lado. Sin esto el modal se topaba
+ * antes que el panel (640px) y el panel volvia a asomar por los costados en
+ * cuanto la pantalla pasaba de ~700px. Va en `.modal-caja` y no en una
+ * variante, porque la regla es para TODOS los modales: si uno queda mas angosto
+ * que el panel, ahi se ven los bordes de nuevo. */
+.modal-caja {
+    width: 100%;
+    max-width: 712px;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg);
+    color: #333;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+.modal-cabecera {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px;
+    background: var(--primary);
+    color: #fff;
+}
+.modal-titulo {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+.modal-cerrar {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 6px 9px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.modal-cerrar:hover { background: rgba(0,0,0,.2); }
+
+/* El scroll del modal vive SOLO aca: cabecera y pie quedan fijos.
+   `min-height: 0` es lo que permite que el item flex se encoja por debajo de
+   su contenido — sin eso el cuerpo crece y desborda la caja en vez de
+   scrollear. */
+.modal-cuerpo {
+    flex: 1;
+    min-height: 0;
+    padding: 18px;
+    overflow-y: auto;
+}
+
+.modal-pie {
+    flex-shrink: 0;
+    padding: 14px 18px;
+    border-top: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+}
+
+/* Datos de solo lectura */
+.dato-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.dato dt {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #8d8d8d;
+    margin-bottom: 3px;
+}
+.dato dd {
+    font-size: .98rem;
+    color: #333;
+    word-break: break-word;
+}
+
+.modal-subtitulo {
+    font-size: .95rem;
+    font-weight: 600;
+    margin-bottom: 14px;
+}
+
+/* ---- Modal "Entorno" (diagnostico de la sesion) ---- */
+
+/* Aca vivia `.modal-caja-ancha { max-width: 640px }`, la variante ancha para
+   Actividad / Notificaciones / Entorno. Se elimino: desde que `.modal-caja`
+   vale 712px (el ancho del panel de control), la "variante ancha" era mas
+   ANGOSTA que la base y volvia a dejar asomar los bordes del panel. */
+
+.entorno-seccion { margin-bottom: 20px; }
+.entorno-seccion:last-child { margin-bottom: 0; }
+.entorno-seccion .modal-subtitulo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--panel-border);
+}
+
+.entorno-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.entorno-fila {
+    display: grid;
+    grid-template-columns: 165px 1fr;
+    gap: 10px;
+    align-items: baseline;
+}
+.entorno-fila dt {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #8d8d8d;
+    word-break: break-word;
+}
+/* Monoespaciada y `break-all`: son valores tecnicos (tokens, UUIDs, JSON) que
+   no tienen espacios donde cortar. */
+.entorno-fila dd {
+    font-family: "Courier New", Consolas, monospace;
+    font-size: .82rem;
+    color: #333;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
+.entorno-vacio,
+.entorno-nota {
+    font-size: .78rem;
+    color: #8d8d8d;
+}
+.entorno-vacio { font-style: italic; }
+.entorno-nota  { margin-top: 8px; }
+
+@media (max-width: 560px) {
+    .entorno-fila { grid-template-columns: 1fr; gap: 2px; }
+}
+
+.form-contrasena {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--panel-border);
+}
+
+.campo { margin-bottom: 12px; }
+.campo label {
+    display: block;
+    font-size: .78rem;
+    color: #777;
+    margin-bottom: 5px;
+}
+.campo input {
+    width: 100%;
+    height: 40px;
+    border: 1px solid var(--btn-border);
+    border-radius: 20px;
+    padding: 0 16px;
+    font-size: .95rem;
+    color: #333;
+    background: #fff;
+}
+.campo input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(193,19,19,.15);
+}
+.campo input:disabled {
+    background: #f2f2f2;
+    color: #9a9a9a;
+}
+
+/* Campo con el ojo de ver/ocultar adentro */
+.campo-input { position: relative; }
+.campo-input input { padding-right: 46px; }
+
+.campo-ojo {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #9a9a9a;
+    font-size: .95rem;
+    line-height: 1;
+    padding: 8px 11px;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.campo-ojo:hover { color: var(--primary); background: rgba(0,0,0,.05); }
+
+.form-aviso {
+    display: none;
+    font-size: .85rem;
+    border-radius: 10px;
+    padding: 9px 12px;
+    margin-bottom: 12px;
+}
+.form-aviso.visible { display: block; }
+.form-aviso.error   { background: #fdecec; color: #a51212; }
+.form-aviso.ok      { background: #e9f7ec; color: #1c7a33; }
+
+.modal-btn {
+    width: 100%;
+    height: 42px;
+    border: none;
+    border-radius: 20px;
+    background: var(--primary);
+    color: #fff;
+    font-size: .95rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background .15s;
+}
+.modal-btn:hover    { background: var(--primary-h); }
+.modal-btn:disabled { opacity: .6; cursor: default; }
+
+/* Dato de solo lectura en el formato del legacy: etiqueta a la izquierda
+   (alineada a la derecha contra el campo) y valor en pildora gris. Lo usa
+   "Detalles de Dominio". */
+.dato-fila {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.dato-fila:last-child { margin-bottom: 0; }
+
+.dato-fila-label {
+    width: 104px;
+    flex-shrink: 0;
+    text-align: right;
+    font-size: .82rem;
+    color: #777;
+}
+.dato-fila-valor {
+    flex: 1;
+    min-width: 0;
+    background: #eeeeee;
+    border-radius: 20px;
+    padding: 10px 16px;
+    font-size: .95rem;
+    color: #555;
+    word-break: break-word;
+}
+
+/* -------- Historiales en modal (Actividad / Notificaciones) --------
+ *
+ * Filas a todo el ancho, con cebra como las `table-striped` del legacy. El
+ * padding lo pone cada fila (no el cuerpo) para que las bandas lleguen a los
+ * bordes del modal.
+ */
+.modal-cuerpo-lista { padding: 0; }
+
+.lista-aviso {
+    padding: 24px 18px;
+    text-align: center;
+    color: #8d8d8d;
+    font-size: .9rem;
+}
+.lista-aviso.error { color: #a51212; }
+
+/* Aviso de funcionalidad todavia no implementada (Invitar un Usuario). */
+.proximamente {
+    text-align: center;
+    padding: 14px 6px 6px;
+}
+.proximamente-ico {
+    font-size: 2rem;
+    color: var(--primary);
+    opacity: .85;
+}
+.proximamente-titulo {
+    margin-top: 14px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #333;
+}
+.proximamente-texto {
+    margin-top: 8px;
+    font-size: .92rem;
+    line-height: 1.5;
+    color: #777;
+}
+
+/* --- Actividad --- */
+.evento {
+    padding: 12px 18px;
+    border-bottom: 1px solid #ececec;
+    font-size: .92rem;
+    color: #444;
+}
+.evento:nth-child(even) { background: #f4f4f4; }
+.evento:last-child      { border-bottom: none; }
+
+.evento-fecha {
+    color: #999;
+    font-size: .78rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.evento-dato { line-height: 1.5; }
+.evento-dato b { font-weight: 600; color: #222; }
+
+.evento-estado {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 9px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: .85rem;
+    color: #fff;
+}
+/* Mismos colores que los `bg-red` / `bg-green` / `bg-yellow` del legacy. */
+.evento-estado.off  { background: #c9302c; }
+.evento-estado.on   { background: #00a65a; }
+.evento-estado.otro { background: #e0a800; color: #3d3000; }
+
+/* --- Notificaciones --- */
+.noti {
+    padding: 12px 18px;
+    border-bottom: 1px solid #ececec;
+    font-size: .92rem;
+    color: #444;
+}
+.noti:nth-child(even) { background: #f4f4f4; }
+.noti:last-child      { border-bottom: none; }
+
+.noti-fecha {
+    color: #999;
+    font-size: .72rem;
+    margin-bottom: 4px;
+}
+.noti-texto { line-height: 1.45; }
+.noti-texto i { color: var(--primary); margin-right: 4px; }
+
+/* Sin leer: se destaca. */
+.noti.nueva .noti-texto { font-weight: 600; color: #1c1c1c; }
+
+/* Lista de opciones apilada (Cambiar de Panel). Replica los `btn-block` del
+   legacy: ancho completo, icono a la izquierda y texto alineado. La cantidad
+   es variable y puede ser larga — scrollea el `.modal-cuerpo`, no la lista,
+   asi la cabecera del modal queda fija. */
+.opcion-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.opcion-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 13px 14px;
+    background: var(--btn-bg);
+    color: var(--btn-text);
+    border: 1px solid var(--btn-border);
+    border-radius: 8px;
+    font-size: 1rem;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: inset -1px -1px 1px 0 rgba(0,0,0,.08);
+    transition: background .12s, transform .06s;
+}
+.opcion-btn:hover  { background: var(--btn-hover); }
+.opcion-btn:active { transform: scale(.99); }
+
+/* Mientras viaja el POST del cambio de panel la lista entera queda inerte, y
+   el boton elegido se distingue del resto: los demas se apagan, ese no. */
+.opcion-btn:disabled          { cursor: default; opacity: .5; }
+.opcion-btn:disabled:hover    { background: var(--btn-bg); }
+.opcion-btn:disabled:active   { transform: none; }
+.opcion-btn.cargando          { opacity: 1; }
+/* La flecha del boton en curso pasa a ser un spinner. */
+.opcion-btn.cargando .opcion-btn-ico {
+    border: 2px solid rgba(0,0,0,.15);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    animation: opcion-giro .7s linear infinite;
+}
+.opcion-btn.cargando .opcion-btn-ico::before { content: ''; }
+@keyframes opcion-giro { to { transform: rotate(360deg); } }
+
+.opcion-btn-ico   { font-size: 1.05rem; color: var(--primary); }
+.opcion-btn-txt   { flex: 1; }
+.opcion-btn-check { color: var(--primary); font-size: .9rem; }
+
+/* El panel abierto ahora mismo */
+.opcion-btn.actual {
+    border-color: var(--primary);
+    background: #fff;
 }

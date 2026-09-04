@@ -29,7 +29,7 @@
             body: opts.body || undefined,
         });
         if (res.status === 401) {
-            window.location.href = 'login.php';
+            window.location.href = 'login';
             throw new Error('Sesion expirada');
         }
         let body = null;
@@ -177,7 +177,7 @@
             e.preventDefault();
             if (userMenu) userMenu.classList.remove('open');
             try {
-                const d = await api('api/dominios.php');
+                const d = await api('api/dominios');
                 const m = openModal('<i class="fa-solid fa-recycle"></i> Cambiar dominio', listaDominios(d));
                 m.backdrop.querySelectorAll('[data-perfil]').forEach((btn) => {
                     btn.addEventListener('click', () => cambiarDominio(Number(btn.dataset.perfil), m.backdrop));
@@ -230,7 +230,7 @@
         const lista = backdrop.querySelector('.dominio-list');
         if (lista) lista.classList.add('is-busy');
         try {
-            await api('api/dominios.php', {
+            await api('api/dominios', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body:    JSON.stringify({ perfil: perfilId }),
@@ -253,7 +253,7 @@
             e.preventDefault();
             if (userMenu) userMenu.classList.remove('open');
             try {
-                const u = await api('api/perfil.php');
+                const u = await api('api/perfil');
                 const m = openModal('Mi cuenta', viewGridPerfil(u), {
                     footerHtml: '<button class="btn btn-secondary" data-act="entorno">Entorno</button>',
                 });
@@ -368,7 +368,7 @@
         let server = {};
         let aviso   = '';
         try {
-            const data = await api('api/entorno.php');
+            const data = await api('api/entorno');
             (data.secciones || []).forEach((s) => { server[s.id] = s; });
         } catch (err) {
             aviso = `<div class="alert alert-warn">No se pudo leer el entorno del servidor: ${escapeHtml(err.message)}</div>`;
@@ -401,9 +401,9 @@
         btnLogout.addEventListener('click', async (e) => {
             e.preventDefault();
             try {
-                await fetch('api/logout.php', { method: 'POST', credentials: 'same-origin' });
+                await fetch('api/logout', { method: 'POST', credentials: 'same-origin' });
             } catch (_) { /* noop */ }
-            window.location.href = 'login.php';
+            window.location.href = 'login';
         });
     }
 
@@ -661,7 +661,7 @@
         });
 
         try {
-            const data = await api(`api/usuarios.php?${qs}`);
+            const data = await api(`api/usuarios?${qs}`);
             usuarios.filas    = data.usuarios || [];
             usuarios.perfiles = data.perfiles || [];
             usuarios.resumen  = data.resumen  || null;
@@ -765,7 +765,7 @@
     async function verUsuario(id) {
         let u;
         try {
-            u = (await api(`api/usuarios.php?id=${id}`)).usuario;
+            u = (await api(`api/usuarios?id=${id}`)).usuario;
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -812,7 +812,7 @@
 
         if (esEdicion) {
             try {
-                u = (await api(`api/usuarios.php?id=${id}`)).usuario;
+                u = (await api(`api/usuarios?id=${id}`)).usuario;
             } catch (err) {
                 toast(err.message, { error: true });
                 return;
@@ -891,7 +891,7 @@
 
             btn.disabled = true;
             try {
-                await api('api/usuarios.php', {
+                await api('api/usuarios', {
                     method:  esEdicion ? 'PUT' : 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify(payload),
@@ -909,8 +909,8 @@
 
     async function toggleUsuario(u) {
         try {
-            const full = (await api(`api/usuarios.php?id=${u.id}`)).usuario;
-            await api('api/usuarios.php', {
+            const full = (await api(`api/usuarios?id=${u.id}`)).usuario;
+            await api('api/usuarios', {
                 method:  'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -936,7 +936,7 @@
             `¿Eliminar al usuario <strong>${escapeHtml(u.usuario)}</strong> (${escapeHtml(u.nombre)})? Esta acción no se puede deshacer.`,
             async () => {
                 try {
-                    await api(`api/usuarios.php?id=${u.id}`, { method: 'DELETE' });
+                    await api(`api/usuarios?id=${u.id}`, { method: 'DELETE' });
                     toast('Usuario eliminado');
                     cargarUsuarios();
                 } catch (err) {
@@ -1198,7 +1198,7 @@
         });
 
         try {
-            const data = await api(`api/dispositivos.php?${qs}`);
+            const data = await api(`api/dispositivos?${qs}`);
             dispositivos.filas     = data.dispositivos || [];
             dispositivos.catalogos = data.catalogos || dispositivos.catalogos;
             dispositivos.resumen   = data.resumen   || null;
@@ -1301,7 +1301,7 @@
     async function verDispositivo(id) {
         let d;
         try {
-            d = (await api(`api/dispositivos.php?id=${id}`)).dispositivo;
+            d = (await api(`api/dispositivos?id=${id}`)).dispositivo;
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -1426,7 +1426,7 @@
         const qs = horas ? `&horas=${horas}` : '';
         let data;
         try {
-            data = await api(`api/dispositivo_conexion.php?id=${id}${qs}`);
+            data = await api(`api/dispositivo_conexion?id=${id}${qs}`);
         } catch (err) {
             contenedor.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
             throw err;
@@ -1734,7 +1734,7 @@
             input.classList.remove('input-invalid');
             btn.disabled = true;
             try {
-                const adoptado = await api('api/dispositivos.php?accion=adoptar', {
+                const adoptado = await api('api/dispositivos?accion=adoptar', {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify({ serial }),
@@ -1782,7 +1782,7 @@
     async function formDispositivo(id) {
         let d;
         try {
-            d = (await api(`api/dispositivos.php?id=${id}`)).dispositivo;
+            d = (await api(`api/dispositivos?id=${id}`)).dispositivo;
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -1817,7 +1817,7 @@
 
             btn.disabled = true;
             try {
-                await api('api/dispositivos.php', {
+                await api('api/dispositivos', {
                     method:  'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify(payload),
@@ -1863,8 +1863,8 @@
 
     async function toggleDispositivo(d) {
         try {
-            const full = (await api(`api/dispositivos.php?id=${d.id}`)).dispositivo;
-            await api('api/dispositivos.php', {
+            const full = (await api(`api/dispositivos?id=${d.id}`)).dispositivo;
+            await api('api/dispositivos', {
                 method:  'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1891,7 +1891,7 @@
             + ' Debes adoptarlo nuevamente para volverlo a ver en tu lista de dispositivos.',
             async () => {
                 try {
-                    await api(`api/dispositivos.php?accion=liberar&id=${d.id}`, { method: 'POST' });
+                    await api(`api/dispositivos?accion=liberar&id=${d.id}`, { method: 'POST' });
                     toast('Dispositivo liberado');
                     cargarDispositivos();
                 } catch (err) {
@@ -2192,7 +2192,7 @@
         });
 
         try {
-            const data = await api(`api/actividad.php?${qs}`);
+            const data = await api(`api/actividad?${qs}`);
             actividad.filas     = data.actividad || [];
             actividad.catalogos = data.catalogos || { usuarios: [], dispositivos: [] };
             actividad.resumen   = data.resumen   || null;
@@ -2323,7 +2323,7 @@
     async function verActividad(id) {
         let r;
         try {
-            r = (await api(`api/actividad.php?id=${id}`)).registro;
+            r = (await api(`api/actividad?id=${id}`)).registro;
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -2697,7 +2697,7 @@
         });
 
         try {
-            const data = await api(`api/chips.php?${qs}`);
+            const data = await api(`api/chips?${qs}`);
             chips.filas     = data.chips     || [];
             chips.combos    = data.combos    || chips.combos;
             chips.resumen   = data.resumen   || null;
@@ -2789,7 +2789,7 @@
     async function verChip(id) {
         let c;
         try {
-            c = (await api(`api/chips.php?id=${id}`)).chip;
+            c = (await api(`api/chips?id=${id}`)).chip;
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -3083,7 +3083,7 @@
         });
 
         try {
-            const data = await api(`api/invitaciones.php?${qs}`);
+            const data = await api(`api/invitaciones?${qs}`);
             invitaciones.filas     = data.invitaciones || [];
             invitaciones.estados   = data.estados      || [];
             invitaciones.catalogos = data.catalogos    || { emisores: [] };
@@ -3254,7 +3254,7 @@
             btn.disabled = true;
             btn.textContent = 'Enviando…';
             try {
-                await api('api/invitaciones.php', {
+                await api('api/invitaciones', {
                     method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body:    JSON.stringify({ correo }),
@@ -3276,7 +3276,7 @@
     async function verInvitacion(id) {
         let r;
         try {
-            r = (await api(`api/invitaciones.php?id=${id}`)).invitacion;
+            r = (await api(`api/invitaciones?id=${id}`)).invitacion;
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -3608,7 +3608,7 @@
         });
 
         try {
-            const data = await api(`api/comprobantes.php?${qs}`);
+            const data = await api(`api/comprobantes?${qs}`);
             s.filas   = data.comprobantes || [];
             s.estados = data.estados      || [];
             s.resumen = data.resumen      || null;
@@ -3742,7 +3742,7 @@
         const tipo = comprobantes.activo;
         let data;
         try {
-            data = await api(`api/comprobantes.php?tipo=${tipo}&id=${id}`);
+            data = await api(`api/comprobantes?tipo=${tipo}&id=${id}`);
         } catch (err) {
             toast(err.message, { error: true });
             return;
@@ -4027,7 +4027,7 @@
         error.innerHTML = '';
 
         try {
-            const data = await api('api/dashboard.php');
+            const data = await api('api/dashboard');
             const t    = data.totales || {};
             stats.innerHTML = dashboardStat('Usuarios', t.usuarios ?? 0, 'fa-users', 'usuarios')
                             + dashboardStat('Dispositivos', t.dispositivos ?? 0, 'fa-microchip', 'dispositivos')
@@ -4088,7 +4088,7 @@
         }
 
         try {
-            usoDatos = await api(`api/dashboard_senales.php?ventana=${encodeURIComponent(usoVentana)}`);
+            usoDatos = await api(`api/dashboard_senales?ventana=${encodeURIComponent(usoVentana)}`);
         } catch (err) {
             cont.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
             return;
@@ -4444,7 +4444,7 @@
         aviso.innerHTML = '';
 
         try {
-            const data = await api('api/facturacion.php');
+            const data = await api('api/facturacion');
             facturacion.cliente     = data.cliente     || null;
             facturacion.condiciones = data.condiciones || [];
             facturacion.modo        = 'ver';
@@ -4588,7 +4588,7 @@
 
         btn.disabled = true;
         try {
-            const data = await api('api/facturacion.php', {
+            const data = await api('api/facturacion', {
                 method:  'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body:    JSON.stringify(payload),
@@ -4666,7 +4666,7 @@
         aviso.innerHTML = '';
 
         try {
-            const data = await api('api/dominio.php');
+            const data = await api('api/dominio');
             dominioFicha.dominio = data.dominio || null;
             dominioFicha.totales = data.totales || null;
         } catch (err) {
@@ -4800,7 +4800,7 @@
         setInterval(async () => {
             if (done) return;
             try {
-                const res = await fetch('api/version.php', {
+                const res = await fetch('api/version', {
                     headers: { 'Accept': 'application/json' },
                     credentials: 'same-origin',
                     cache: 'no-store',

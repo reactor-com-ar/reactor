@@ -1,0 +1,2 @@
+# lib/ son includes, no endpoints: nunca se piden por HTTP.
+Require all denied

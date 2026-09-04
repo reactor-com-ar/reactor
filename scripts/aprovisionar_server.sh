@@ -12,6 +12,8 @@
 #
 # Variables que recibe (opcionales, con default):
 #   DOMAIN          - default cloud.reactor.com.ar
+#   PANEL_DOMAIN    - default panel.reactor.com.ar
+#   PWA_DOMAIN      - default pwa.reactor.com.ar
 #   CERTBOT_EMAIL   - default javieralvarez@databox.net.ar
 # ============================================================
 
@@ -20,8 +22,14 @@ set -eo pipefail
 APP_DIR="/opt/app/reactor"
 APP_PORT_HOST=8086        # cloud
 PANEL_PORT_HOST=8087      # panel
+PWA_PORT_HOST=8115        # app end-user
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
 PANEL_DOMAIN="${PANEL_DOMAIN:-panel.reactor.com.ar}"
+# TEMPORAL: la app end-user se publica en pwa.reactor.com.ar mientras se
+# termina. app.reactor.com.ar todavia apunta al server legacy (otra IP);
+# cuando se repunte ese DNS aca, cambiar este default por app.reactor.com.ar
+# (o pasar PWA_DOMAIN) y re-correr para que certbot emita el cert nuevo.
+PWA_DOMAIN="${PWA_DOMAIN:-pwa.reactor.com.ar}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-javieralvarez@databox.net.ar}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
@@ -38,11 +46,16 @@ echo "[ 1/9 ] Actualizando sistema..."
 sudo dnf update -y -q
 echo "        OK"
 
-# ---- 2. Instalar Docker, Git, Nginx, bind-utils, python3 ----
-echo "[ 2/9 ] Instalando Docker, Nginx, bind-utils, python3..."
-sudo dnf install -y -q docker git nginx bind-utils python3 python3-pip augeas-libs
-sudo systemctl enable docker nginx
-sudo systemctl start docker
+# ---- 2. Instalar Docker, Git, Nginx, bind-utils, python3, cronie ----
+# cronie: Amazon Linux 2023 viene SIN cron. Sin el no existe /etc/cron.d y el
+# paso 9 falla al escribir /etc/cron.d/certbot -- con `set -e` eso aborta el
+# script entero justo al final y, peor, el certificado queda sin renovacion
+# automatica (se cae solo a los 90 dias). Tambien lo necesita el Programador
+# de tareas de cloud/ (/etc/cron.d/reactor-cloud).
+echo "[ 2/9 ] Instalando Docker, Nginx, bind-utils, python3, cronie..."
+sudo dnf install -y -q docker git nginx bind-utils python3 python3-pip augeas-libs cronie
+sudo systemctl enable docker nginx crond
+sudo systemctl start docker crond
 sudo usermod -aG docker ec2-user
 echo "        OK -- $(sudo docker --version)"
 
@@ -66,7 +79,7 @@ echo "        OK -- Compose $(sudo docker compose version --short) / buildx $(su
 
 # ---- 4. Verificar artefactos transferidos ----
 echo "[ 4/9 ] Verificando archivos del proyecto..."
-for f in cloud panel motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
+for f in cloud panel app motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
     if [ ! -e "$APP_DIR/$f" ]; then
         echo "        ERROR: falta $APP_DIR/$f"
         echo "        Re-correr scripts/aprovisionar.sh desde la maquina local."
@@ -82,7 +95,7 @@ echo "        OK"
 #   - No incluye el servicio reactor-db (en prod la BD es AWS RDS).
 #   - Apache bindea solo a 127.0.0.1:8086 (Nginx hace el frente publico).
 # Puertos en prod (interno = externo, mismos que dev cuando aplica):
-#   - Apache  8086:8086  (igual a dev)
+#   - Apache  8086:8086 (cloud), 8087:8087 (panel), 8115:8115 (app) -- igual a dev
 #   - EMQX MQTT 16273:16273 (dev usa 1884 por choque con vigicom-emqx)
 #   - EMQX Dashboard 18083:18083 (dev usa 18084 por choque con vigicom-emqx)
 # Tambien hay que bindear env.php y los .env.* al container para que las
@@ -100,9 +113,11 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT_HOST}:${APP_PORT_HOST}"      # cloud
       - "127.0.0.1:${PANEL_PORT_HOST}:${PANEL_PORT_HOST}"  # panel
+      - "127.0.0.1:${PWA_PORT_HOST}:${PWA_PORT_HOST}"      # app end-user
     volumes:
       - ./cloud:/var/www/html
       - ./panel:/var/www/panel
+      - ./app:/var/www/app
       - ./env.php:/var/www/env.php:ro
       - ./.env.production:/var/www/.env.production:ro
     env_file:
@@ -184,6 +199,23 @@ server {
         proxy_read_timeout 120s;
     }
 }
+
+# pwa.reactor.com.ar -> Apache 8115 (app end-user)
+# TEMPORAL: dominio de preview mientras se termina la app. Cuando salga a
+# produccion pasa a app.reactor.com.ar (repuntar el DNS y cambiar PWA_DOMAIN).
+server {
+    listen 80;
+    server_name ${PWA_DOMAIN};
+    location / {
+        proxy_pass         http://127.0.0.1:${PWA_PORT_HOST};
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        client_max_body_size 50M;
+        proxy_read_timeout 120s;
+    }
+}
 NGX
 
 sudo rm -f /etc/nginx/conf.d/default.conf
@@ -231,6 +263,7 @@ else
 
     RESOLVED_CLOUD=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PANEL=$(dig +short A "$PANEL_DOMAIN" @8.8.8.8 | tail -n1)
+    RESOLVED_PWA=$(dig +short A "$PWA_DOMAIN" @8.8.8.8 | tail -n1)
 
     # Armar lista de dominios cuyo DNS YA apunta al server (-d por cada uno).
     CERT_DOMAINS=()
@@ -243,6 +276,11 @@ else
         CERT_DOMAINS+=("-d" "$PANEL_DOMAIN")
     else
         echo "        DNS de $PANEL_DOMAIN -> ${RESOLVED_PANEL:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+    fi
+    if [ "$RESOLVED_PWA" = "$PUBLIC_IP" ]; then
+        CERT_DOMAINS+=("-d" "$PWA_DOMAIN")
+    else
+        echo "        DNS de $PWA_DOMAIN -> ${RESOLVED_PWA:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
     fi
 
     if [ ${#CERT_DOMAINS[@]} -eq 0 ]; then
@@ -267,6 +305,7 @@ else
                 --email "$CERTBOT_EMAIL" \
                 --redirect \
                 --keep-until-expiring \
+                --expand \
                 "${CERT_DOMAINS[@]}"; then
             echo "        OK -- SSL configurado."
         else
@@ -274,6 +313,10 @@ else
         fi
 
         if [ ! -f /etc/cron.d/certbot ]; then
+            # mkdir -p: red de seguridad por si cronie no quedo instalado.
+            # Sin esto el tee falla y `set -e` mata el script en la ultima
+            # linea, dejando el certificado sin renovacion automatica.
+            sudo mkdir -p /etc/cron.d
             echo "0 0,12 * * * root /opt/certbot/bin/python -c 'import random; import time; time.sleep(random.random() * 3600)' && /usr/bin/certbot renew -q" \
                 | sudo tee /etc/cron.d/certbot > /dev/null
             echo "        Cron de renovacion creado en /etc/cron.d/certbot"
@@ -287,6 +330,7 @@ echo "  Setup remoto completo."
 echo ""
 echo "  Cloud:      https://${DOMAIN}/         (proxy a 127.0.0.1:${APP_PORT_HOST})"
 echo "  Panel:      https://${PANEL_DOMAIN}/   (proxy a 127.0.0.1:${PANEL_PORT_HOST})"
+echo "  App (PWA):  https://${PWA_DOMAIN}/     (proxy a 127.0.0.1:${PWA_PORT_HOST})"
 echo "  Repo:       $APP_DIR"
 echo "  Compose:    docker compose -f $APP_DIR/$COMPOSE_FILE <cmd>"
 echo "  Logs:       sudo docker logs -f reactor-apache"

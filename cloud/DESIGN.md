@@ -876,12 +876,13 @@ Estructura:
 ```css
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45);
                   display: flex; align-items: center; justify-content: center;
+                  padding: 24px;
                   z-index: 100; opacity: 0; pointer-events: none; transition: opacity .2s; }
 .modal-backdrop.open { opacity: 1; pointer-events: all; }
 .modal          { background: var(--surface); border-radius: 14px;
-                  width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
+                  width: 100%; max-width: 520px; max-height: 100%; overflow-y: auto;
                   box-shadow: var(--shadow-lg);
-                  transform: scale(.96) translateY(12px); transition: transform .2s; margin: 16px; }
+                  transform: scale(.96) translateY(12px); transition: transform .2s; }
 .modal-backdrop.open .modal { transform: scale(1) translateY(0); }
 .modal-header   { padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
                   display: flex; align-items: center; justify-content: space-between; }
@@ -895,6 +896,19 @@ Estructura:
 /* Variante ancha para editores monoespaciados (JSON, logs, etc.). */
 .modal.modal-wide { max-width: 760px; }
 ```
+
+**El hueco contra el borde de la pantalla es 24px en los cuatro lados, y lo
+pone el `padding` del backdrop — no un `margin` del modal.** Es un solo número
+del que salen los cuatro lados, así que no pueden desalinearse. El modal se
+acota con `max-height: 100%`, que es 100% del backdrop **con su padding ya
+descontado**; por eso el hueco de arriba y abajo da exactamente el mismo valor
+que el de los costados.
+
+No usar `max-height: 90vh` (era la regla anterior): ata el hueco vertical a un
+porcentaje de la pantalla, que no tiene relación con el padding lateral. Medido
+en un viewport de 904px de alto, dejaba **45px arriba y abajo contra 16px a los
+costados** — y el desajuste cambia con cada tamaño de pantalla, así que no hay
+valor de `vh` que los empareje. Mismo criterio en `panel/` y en `app/`.
 
 **Variantes:**
 - `.modal-wide`: aumenta el `max-width` a 760px. Usar **solo** cuando el contenido sea un editor monoespaciado (JSON, logs, payloads) que necesita ancho real para no envolver — ver §23. Los formularios normales se quedan en el ancho base de 520px.

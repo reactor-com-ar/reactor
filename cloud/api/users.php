@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
+require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 
 const ROLES_VALIDOS = ['admin', 'operador', 'lectura'];
 
@@ -54,8 +55,10 @@ try {
         case 'GET':
             // ?impacto=1&id=N devuelve el detalle de lo que arrastra el borrado,
             // para que el front lo muestre antes de confirmar.
-            if (isset($_GET['impacto'])) handleImpacto();
-            else                          handleList();
+            // ?credencial=1&id=N devuelve la contrasena en claro de un usuario.
+            if (isset($_GET['impacto']))         handleImpacto();
+            elseif (isset($_GET['credencial']))  handleCredencial();
+            else                                 handleList();
             break;
         case 'POST':   handleCreate(); break;
         case 'PUT':    handleUpdate(); break;
@@ -109,6 +112,36 @@ function handleList(): void
     json_ok(['usuarios' => $usuarios, 'resumen' => $resumen]);
 }
 
+/**
+ * Devuelve la contrasena EN CLARO de un usuario.
+ *
+ * El modal de edicion la precarga para que el campo abra con la contrasena real
+ * en puntos y el ojo pueda revelarla. Es posible porque el cifrado legacy de
+ * Reactor es reversible (XOR sumativa + base64 con clave global), no un hash:
+ * ver cloud/api/legacy_crypto.php.
+ *
+ * Se sirve de a un id, y NO dentro de handleList(), a proposito: asi el listado
+ * no viaja con las credenciales de todos los usuarios en cada refresco y la
+ * contrasena solo sale cuando alguien abre ese usuario puntual.
+ *
+ * Alcance: lo puede llamar cualquier usuario autenticado, igual que el resto de
+ * users.php -- que ya permite crear, editar y borrar usuarios sin mirar el rol.
+ * Si mas adelante se agrega control por rol, este endpoint es el primero que lo
+ * necesita.
+ */
+function handleCredencial(): void
+{
+    $id = (int) ($_GET['id'] ?? 0);
+    if ($id <= 0) json_error('Id invalido', 422);
+
+    $stmt = db()->prepare('SELECT contrasena FROM usuarios WHERE id = :id');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    if (!$row) json_error('Usuario no encontrado', 404);
+
+    json_ok(['password' => reactor_legacy_desencriptar((string) ($row['contrasena'] ?? ''))]);
+}
+
 function handleCreate(): void
 {
     $in       = readJson();
@@ -116,36 +149,43 @@ function handleCreate(): void
     $nombre   = trim((string) ($in['nombre']   ?? ''));
     $celular  = trim((string) ($in['celular']  ?? ''));
     $rol      = trim((string) ($in['rol']      ?? 'operador'));
-    $activo   = isset($in['activo']) ? (bool) $in['activo'] : true;
     $password = (string) ($in['password'] ?? '');
+    // `activo` llega del toggle del formulario pero no se usa en el alta:
+    // `habilitado` es una constante ('1'). Se respeta al editar.
 
     validarComunes($email, $nombre, $celular, $rol);
-    if ($password === '')               json_error('La contrasena es obligatoria', 422);
-    if (mb_strlen($password) < 6)       json_error('La contrasena debe tener al menos 6 caracteres', 422);
+    if ($password === '')          json_error('La contrasena es obligatoria', 422);
+    if (mb_strlen($password) < 6)  json_error('La contrasena debe tener al menos 6 caracteres', 422);
+    // `usuarios.contrasena` es varchar(50) y el cifrado legacy es base64:
+    // 36 chars de texto plano ya ocupan 48. Se corta antes para no truncar.
+    if (mb_strlen($password) > 32) json_error('La contrasena no puede superar 32 caracteres', 422);
 
-    $hash = password_hash($password, PASSWORD_BCRYPT);
-
-    try {
-        $stmt = db()->prepare(
-            'INSERT INTO usuarios (email, nombre, celular, password_hash, rol, activo)
-             VALUES (:e, :n, :c, :p, :r, :a)'
-        );
-        $stmt->execute([
-            ':e' => $email,
-            ':n' => $nombre,
-            ':c' => $celular === '' ? null : $celular,
-            ':p' => $hash,
-            ':r' => $rol,
-            ':a' => $activo ? 1 : 0,
-        ]);
-    } catch (PDOException $e) {
-        if ((int) $e->errorInfo[1] === 1062) {
-            json_error('Ya existe un usuario con ese email', 409);
-        }
-        throw $e;
+    // La tabla no tiene UNIQUE sobre `usuario` ni sobre `correo`, asi que el
+    // duplicado se valida aca en vez de esperar el 1062 del motor.
+    $dup = db()->prepare('SELECT id FROM usuarios WHERE usuario = :u OR LOWER(correo) = :c LIMIT 1');
+    $dup->execute([':u' => $email, ':c' => $email]);
+    if ($dup->fetchColumn()) {
+        json_error('Ya existe un usuario con ese email', 409);
     }
 
-    json_ok(['id' => (int) db()->lastInsertId()], 201);
+    // El INSERT no se hace aca: `usuarioAlta()` es el canal unico de alta de
+    // cloud. Es quien cifra la contrasena y quien fija las constantes de alta
+    // (autenticacion, habilitado, perfiles, dominios, paneles) -- por eso no se
+    // le pasa `habilitado`: al crear siempre nace '1'. El toggle Activo del
+    // formulario recien tiene efecto al editar.
+    $actual = authUser();
+    $id     = usuarioAlta(db(), [
+        'nombre'      => $nombre,
+        // Cloud no pide un nombre de usuario aparte: la credencial es el correo.
+        'usuario'     => $email,
+        'contrasena'  => $password,
+        'correo'      => $email,
+        'celular'     => $celular === '' ? null : $celular,
+        'roles'       => $rol,
+        'registrante' => (int) ($actual['id'] ?? 0),
+    ]);
+
+    json_ok(['id' => $id], 201);
 }
 
 function handleUpdate(): void
@@ -162,42 +202,72 @@ function handleUpdate(): void
     if ($id <= 0) json_error('Id invalido', 422);
     validarComunes($email, $nombre, $celular, $rol);
 
-    if ($password !== '' && mb_strlen($password) < 6) {
-        json_error('La contrasena debe tener al menos 6 caracteres', 422);
+    if ($password !== '') {
+        if (mb_strlen($password) < 6)  json_error('La contrasena debe tener al menos 6 caracteres', 422);
+        // Mismo tope que el alta: `contrasena` es varchar(50) y el cifrado
+        // legacy es base64, asi que el texto plano no puede pasar de 32 chars.
+        if (mb_strlen($password) > 32) json_error('La contrasena no puede superar 32 caracteres', 422);
     }
 
-    $sql    = 'UPDATE usuarios SET email = :e, nombre = :n, celular = :c, rol = :r, activo = :a';
+    $prev = db()->prepare('SELECT usuario, correo FROM usuarios WHERE id = :id');
+    $prev->execute([':id' => $id]);
+    $actual = $prev->fetch();
+    if (!$actual) json_error('Usuario no encontrado', 404);
+
+    // La tabla no tiene UNIQUE sobre `usuario` ni sobre `correo` (igual que en el
+    // alta), asi que el duplicado se valida aca: el motor nunca tira 1062.
+    $dup = db()->prepare(
+        'SELECT id FROM usuarios
+         WHERE id <> :id AND (LOWER(correo) = :c OR LOWER(usuario) = :u)
+         LIMIT 1'
+    );
+    $dup->execute([':id' => $id, ':c' => $email, ':u' => $email]);
+    if ($dup->fetchColumn()) {
+        json_error('Ya existe un usuario con ese email', 409);
+    }
+
+    // Nombres reales de db/schema.sql: correo, roles, habilitado, contrasena.
+    // El front manda email/rol/activo/password (ver el alias de handleList()).
+    $sql    = 'UPDATE usuarios SET correo = :e, nombre = :n, celular = :c, roles = :r, habilitado = :a';
     $params = [
         ':e'  => $email,
         ':n'  => $nombre,
         ':c'  => $celular === '' ? null : $celular,
         ':r'  => $rol,
-        ':a'  => $activo ? 1 : 0,
+        // `habilitado` es varchar(1) y login.php acepta ['S','1','Y']: se escribe
+        // '1', que es la convencion de la tabla.
+        ':a'  => $activo ? '1' : '0',
         ':id' => $id,
     ];
 
+    // `usuario` es la credencial de login (api/login.php hace WHERE usuario = :u)
+    // y el alta de cloud la crea igual al correo. Se la arrastra en dos casos,
+    // medidos sobre los 2083 usuarios de la tabla:
+    //
+    //   - Coincide con el correo anterior (1926 filas): es la convencion del
+    //     alta. Sin arrastrarla, cambiar el email dejaria al usuario sin acceso.
+    //   - Esta vacia (140 filas): hoy esos usuarios no pueden loguearse con
+    //     ninguna credencial, asi que completarla los recupera.
+    //
+    // Las 17 restantes tienen un nombre de usuario propio, distinto del correo:
+    // esas NO se tocan, o se les romperia el login que ya usan.
+    $usuarioPrevio = strtolower(trim((string) $actual['usuario']));
+    if ($usuarioPrevio === '' || $usuarioPrevio === strtolower(trim((string) $actual['correo']))) {
+        $sql          .= ', usuario = :us';
+        $params[':us'] = $email;
+    }
+
     if ($password !== '') {
-        $sql           .= ', password_hash = :p';
-        $params[':p']   = password_hash($password, PASSWORD_BCRYPT);
+        // Cifrado legacy de Reactor, el mismo que valida el login. NO bcrypt:
+        // ver cloud/api/legacy_crypto.php.
+        $sql          .= ', contrasena = :p';
+        $params[':p']  = reactor_legacy_encriptar($password);
     }
 
     $sql .= ' WHERE id = :id';
 
-    try {
-        $stmt = db()->prepare($sql);
-        $stmt->execute($params);
-    } catch (PDOException $e) {
-        if ((int) $e->errorInfo[1] === 1062) {
-            json_error('Ya existe un usuario con ese email', 409);
-        }
-        throw $e;
-    }
-
-    if ($stmt->rowCount() === 0) {
-        $exists = db()->prepare('SELECT 1 FROM usuarios WHERE id = :id');
-        $exists->execute([':id' => $id]);
-        if (!$exists->fetchColumn()) json_error('Usuario no encontrado', 404);
-    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
 
     json_ok(['id' => $id]);
 }

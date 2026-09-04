@@ -309,6 +309,25 @@ textarea { resize: vertical; min-height: 60px; }
 .form-group select,
 .form-group textarea { width: 100%; }
 
+/* Campo de contraseña con botón de ojo para mostrar/ocultar. El wrapper es el
+ * que posiciona el botón; el input reserva a la derecha el ancho que ocupa,
+ * para que el texto nunca quede por debajo del ícono. */
+.input-password { position: relative; display: block; }
+.input-password input { width: 100%; padding-right: 38px; }
+.input-password .pass-toggle {
+    position: absolute; top: 0; right: 0; height: 100%; width: 36px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0; border: 0; background: none;
+    color: var(--muted); cursor: pointer;
+    transition: color .15s;
+}
+.input-password .pass-toggle:hover  { color: var(--text); }
+.input-password .pass-toggle:focus-visible {
+    outline: none; color: var(--text);
+    box-shadow: 0 0 0 2px rgba(193,19,19,.35); border-radius: var(--radius);
+}
+.input-password .pass-toggle i { font-size: .85rem; }
+
 /* Secciones dentro de un formulario largo (ej.: Dispositivos, que edita las
  * 35 columnas de la tabla). Agrupan campos afines bajo un rótulo con ícono.
  * El separador es el título, no un recuadro: la sección no lleva fondo ni
@@ -652,18 +671,24 @@ tbody tr.row-clickable { cursor: pointer; }
 }
 
 /* ---------- 14. Modales ---------- */
+/* El aire alrededor del modal lo pone el backdrop con su padding, NO un margin
+ * del modal: asi el hueco es el mismo en los cuatro lados y sale de un solo
+ * numero. El modal se acota con `max-height: 100%` (100% del backdrop, que ya
+ * viene descontado el padding); el `90vh` que habia antes ataba el hueco
+ * vertical a un porcentaje de la pantalla (45px en un viewport de 904px, contra
+ * 16px de los costados), asi que no habia forma de que coincidieran. */
 .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,.45);
     display: flex; align-items: center; justify-content: center;
+    padding: 24px;
     z-index: 100; opacity: 0; pointer-events: none; transition: opacity .2s;
 }
 .modal-backdrop.open { opacity: 1; pointer-events: all; }
 .modal {
     background: var(--surface); border-radius: 14px;
-    width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
+    width: 100%; max-width: 520px; max-height: 100%; overflow-y: auto;
     box-shadow: var(--shadow-lg);
     transform: scale(.96) translateY(12px); transition: transform .2s;
-    margin: 16px;
 }
 .modal-backdrop.open .modal { transform: scale(1) translateY(0); }
 .modal-header   {

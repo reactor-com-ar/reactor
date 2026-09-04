@@ -190,6 +190,10 @@ Los assets (`style.css`, `app.js`, favicons) se sirven con
 - **Métodos HTTP:** GET para listar/leer, POST para crear, PUT para actualizar, DELETE para borrar.
 - **Tiempo:** zona horaria fijada en `America/Argentina/Buenos_Aires` (en `db.php`) y `SET time_zone = '-03:00'` en la conexión.
 - **Imágenes:** lo grueso (subida, recorte, búsqueda EAN) está en `lib/imagen.php` y endpoints `api/upload*.php`, `api/buscar_imagenes.php`, `api/recortar_imagen.php`.
+- **Alta de usuarios — canal único:** todo `INSERT` sobre `usuarios` pasa por `usuarioAlta()` en `lib/usuarios_alta.php`. Ningún endpoint arma el INSERT por su cuenta. La función recibe la contraseña **en claro** y la cifra adentro con el cifrado legacy de Reactor (`api/legacy_crypto.php`), que es el único que valida `api/login.php`. Panel tiene su propio canal equivalente en `panel/lib/usuarios_alta.php` — son separados porque cloud y panel no comparten docroot, pero escriben las mismas columnas con las mismas reglas.
+- **Forma fija del alta:** todo usuario nace con estos valores, sin importar lo que mande el llamador — `autenticacion = 'F'`, `habilitado = '1'`, `perfiles = 0`, `dominios = ''`, `paneles = ''`, `panel = NULL`. Están declarados como `USUARIO_*_INICIAL` en `lib/usuarios_alta.php`. Las columnas plurales **no** son el par de las singulares: `perfil` y `dominio` sí reciben el id real. `roles` arranca en `''` salvo que el llamador mande otro valor.
+- **Consecuencia en el formulario de alta:** el toggle *Activo/Inactivo* de cloud no tiene efecto al crear (siempre nace `'1'`); recién se respeta al editar.
+- **`usuarios.usuario` es la credencial de login** (`api/login.php` hace `WHERE usuario = :u`). El alta de cloud no pide un nombre de usuario aparte, así que usa el correo — igual que el alta por invitación del panel. Sin eso el usuario creado nunca podría entrar.
 
 ## 11. Criterios de aceptación (qué tiene que ser cierto siempre)
 

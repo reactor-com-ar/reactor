@@ -60,7 +60,7 @@ function requireAuth(): array
         echo json_encode(['ok' => false, 'error' => 'No autenticado.']);
         exit;
     }
-    header('Location: /login.php');
+    header('Location: /login');
     exit;
 }
 

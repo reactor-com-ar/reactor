@@ -6,7 +6,7 @@ require_once __DIR__ . '/lib/auth_check.php';
 
 // Si ya esta logueado, ir directo a la SPA.
 if (authUser() !== null) {
-    header('Location: index.php');
+    header('Location: index');
     exit;
 }
 
@@ -124,7 +124,7 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
         submitLbl.textContent = 'Ingresando…';
 
         try {
-            const res = await fetch('api/login.php', {
+            const res = await fetch('api/login', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
                 body: JSON.stringify({ usuario: u, contrasena: p }),
@@ -143,7 +143,7 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
                 return;
             }
 
-            window.location.href = 'index.php';
+            window.location.href = 'index';
         } catch (err) {
             showError('No se pudo conectar con el servidor. Intentá nuevamente.');
             submit.disabled = false;

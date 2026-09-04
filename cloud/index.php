@@ -6,7 +6,7 @@ require_once __DIR__ . '/lib/auth_check.php';
 
 $currentUser = authUser();
 if ($currentUser === null) {
-    header('Location: login.php');
+    header('Location: login');
     exit;
 }
 

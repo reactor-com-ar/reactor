@@ -102,6 +102,45 @@ alcance y se guardan como claims del JWT: `dominio` (columna
 - `dominio = null` significa "cuenta sin dominio asignado", **no** "ver
   todo": `requireDominioId()` corta con 409.
 
+## Alta de usuarios (canal único — obligatorio)
+
+Todo `INSERT` sobre `usuarios` del panel pasa por **`usuarioAlta()`** en
+[lib/usuarios_alta.php](lib/usuarios_alta.php). Ningún archivo arma el INSERT por
+su cuenta. Hoy lo usan los dos caminos de alta que existen:
+
+- `api/usuarios.php` → `handleCreate()` (alta manual del BackOffice)
+- `invitacion/aceptar.php` (alta al aceptar una invitación)
+
+Reglas que la función garantiza, y que por eso no hay que repetir en los llamadores:
+
+- Recibe la contraseña **en claro** y la cifra adentro con el cifrado legacy
+  (`api/legacy_crypto.php`). Ningún camino elige su propio cifrado.
+- **Forma fija del alta.** Todo usuario nace con estos valores, sin importar lo
+  que mande el llamador:
+
+  | columna | valor |
+  |---|---|
+  | `autenticacion` | `'F'` |
+  | `habilitado` | `'1'` |
+  | `perfiles` | `0` |
+  | `dominios` | `''` |
+  | `paneles` | `''` |
+  | `panel` | `NULL` |
+
+  Están declarados como `USUARIO_*_INICIAL` en el mismo archivo. Las plurales
+  **no** son el par de las singulares: `perfil` y `dominio` sí reciben el id real
+  que se les pase. `roles` arranca en `''` salvo que el llamador mande otro valor.
+- Resto de los defaults: `uuid` aleatorio y `registrado = NOW()`.
+- **Consecuencia:** el campo *habilitado* del formulario no tiene efecto al crear
+  (siempre nace `'1'`); recién se respeta al editar.
+- Cuando el perfil se asigna **después** del alta (caso invitación: `perfiles.usuario`
+  exige que el usuario ya exista), se usa `usuarioPerfilActivo()`. Toca sólo
+  `perfil`; `perfiles` se queda en 0. No hacer el `UPDATE` a mano.
+
+Si el alta necesita una columna nueva, se agrega en la función y la reciben los dos
+caminos. Cloud tiene su propio canal equivalente en `cloud/lib/usuarios_alta.php`
+(son separados porque no comparten docroot).
+
 ## Módulos
 
 El shell está pensado para poblarse por módulos. Cada nuevo módulo se agrega

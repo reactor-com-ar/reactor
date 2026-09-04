@@ -724,6 +724,42 @@ tbody tr.row-clickable { cursor: pointer; }
 .confirm-msg     { font-size: .88rem; color: var(--muted); margin-bottom: 20px; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
+/* Confirmación de borrado con desglose de impacto.
+ * Para bajas que arrastran dependencias en varias tablas, el `.confirm-box` de
+ * arriba no alcanza: sólo acepta un string. Estos bloques viven dentro de un
+ * `.modal` normal y listan qué se elimina, qué queda huérfano y qué bloquea la
+ * baja. Hoy lo usa Usuarios. */
+.del-lead        { font-size: .88rem; line-height: 1.5; }
+.del-lead code   { font-size: .8rem; }
+.del-section     { display: flex; flex-direction: column; gap: 8px; }
+.del-section-title {
+    font-size: .75rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; display: flex; align-items: center; gap: 7px;
+}
+.del-section-title.del-danger { color: #f5a8a8; }
+.del-section-title.del-warn   { color: #fcd34d; }
+.del-list        { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.del-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 7px 12px; border-radius: 8px; font-size: .85rem;
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+}
+.del-item-label  { color: var(--text); min-width: 0; }
+.del-empty       { font-size: .85rem; color: var(--muted); }
+.del-blocker {
+    display: flex; gap: 10px; font-size: .85rem; line-height: 1.5;
+    padding: 12px 14px; border-radius: var(--radius);
+    background: rgba(230,42,42,.12); border: 1px solid rgba(230,42,42,.35);
+}
+.del-blocker > i             { color: var(--danger); margin-top: 2px; }
+.del-blocker .del-list       { margin: 8px 0; }
+.del-blocker .del-item       { background: rgba(0,0,0,.25); }
+.del-warning {
+    display: flex; align-items: center; gap: 8px;
+    font-size: .82rem; color: var(--muted);
+}
+.del-warning i   { color: var(--warn); }
+
 /* ---------- 16. Toasts ---------- */
 .toast {
     position: fixed; bottom: 24px; left: 50%;

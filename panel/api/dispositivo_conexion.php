@@ -17,10 +17,12 @@ declare(strict_types=1);
  * telemetria de un equipo de otro cliente.
  *
  * LA SERIE TIENE UN PUNTO POR HORA, REPORTE O NO EL EQUIPO. Las horas sin
- * mediciones viajan con `dbm = null`: son parte del dato -- que un equipo
- * deje de informar tres horas es exactamente lo que hay que poder ver --
- * y el front las dibuja como un corte en la linea, no como una
- * interpolacion entre los dos extremos.
+ * mediciones viajan con `dbm = null`. El front dibuja una linea continua que
+ * las saltea (no las corta) y les marca la ausencia en el tooltip: ver la
+ * seccion "pestana Conexion" de panel/CLAUDE.md.
+ *
+ * LA VENTANA SE MIDE CON EL RELOJ DE LA BASE (`SELECT NOW()`), no con el de
+ * PHP: los dos no estan alineados y `senales.fecha` la escribe la base.
  *
  * DE DONDE SALE EL NIVEL: `senales` no tiene columna de senal -- el valor
  * viaja adentro de `mensaje`, en el protocolo de etiquetas `CLAVE=valor`
@@ -62,6 +64,21 @@ const SENAL_MINIMO = -90;   //   0%
 const HORAS_OPCIONES = [24, 48, 168];
 const HORAS_DEFECTO  = 24;
 
+/**
+ * Cuantas horas hacia atras de la ventana se busca el ultimo nivel conocido
+ * con el que sembrar el arrastre (ver ultimaAntes()). Sin esto, un equipo
+ * estable que informo por ultima vez antes del periodo empieza el grafico en
+ * el aire; mas de una semana no se busca porque un nivel de hace 10 dias no
+ * dice nada del actual.
+ *
+ * TODAS las constantes del endpoint van ACA ARRIBA, antes del bloque que
+ * llama a handleGet(). `const` no se hoistea como las funciones: se define
+ * cuando la ejecucion llega a la linea, asi que una declarada mas abajo (por
+ * ejemplo al lado de la funcion que la usa) revienta con
+ * "Undefined constant" en la primera request.
+ */
+const SEMILLA_HORAS = 168;   // 7 dias
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
@@ -97,13 +114,23 @@ function handleGet(int $id, int $horas): void
     // La ventana arranca al principio de una hora y termina al final de la
     // hora en curso: asi el ultimo punto es "lo que va de esta hora" y no
     // un tramo cortado en un minuto arbitrario.
-    $ahora   = new DateTimeImmutable('now');
+    //
+    // EL "AHORA" SALE DE LA BASE, NO DE PHP. Los dos relojes no estan
+    // alineados -- PHP corre en UTC y la sesion de MySQL en -03:00 (medido
+    // 03/09/2026) -- y `senales.fecha` esta escrita con el reloj de la base.
+    // Con el reloj de PHP la ventana se corria 3 horas hacia adelante: las
+    // ultimas 3 horas caian en el futuro y salian siempre vacias, asi que la
+    // linea terminaba antes del borde derecho del grafico y se leia como si
+    // el equipo hubiera dejado de reportar. Comparar contra el mismo reloj
+    // que escribe la columna es lo unico que garantiza que no vuelva a
+    // pasar, aunque despues se corrija la zona horaria del contenedor.
+    $ahora   = new DateTimeImmutable((string) db()->query('SELECT NOW()')->fetchColumn());
     $hasta   = $ahora->setTime((int) $ahora->format('H'), 0, 0);
     $desde   = $hasta->modify('-' . ($horas - 1) . ' hours');
     $desdeDb = $desde->format('Y-m-d H:i:s');
 
     $muestras = muestras($id, $desdeDb, senalesPisoPorFecha($desdeDb));
-    $serie    = serie($muestras, $desde, $horas);
+    $serie    = serie($muestras, $desde, $horas, ultimaAntes($id, $desde));
 
     json_ok([
         'dispositivo' => [
@@ -156,13 +183,73 @@ function muestras(int $dispositivo, string $desde, int $piso): array
 }
 
 /**
+ * Ultima medicion ANTERIOR a la ventana, para sembrar el arrastre. Devuelve
+ * null si el equipo no informo su nivel en las SEMILLA_HORAS previas: en ese
+ * caso la linea arranca recien en la primera lectura de la ventana, que es lo
+ * correcto -- un nivel de hace mas de una semana no dice nada del actual.
+ */
+function ultimaAntes(int $dispositivo, DateTimeImmutable $desde): ?array
+{
+    $piso = $desde->modify('-' . SEMILLA_HORAS . ' hours')->format('Y-m-d H:i:s');
+
+    $stmt = db()->prepare(
+        'SELECT fecha, mensaje
+           FROM senales
+          WHERE dispositivo = :dis
+            AND id >= :piso
+            AND fecha >= :pisoFecha
+            AND fecha <  :desde
+            AND sentido = \'E\'
+            AND (mensaje LIKE \'%WSN=%\' OR mensaje LIKE \'RET=WSN|%\')
+          ORDER BY id DESC
+          LIMIT 20'
+    );
+    $stmt->execute([
+        ':dis'       => $dispositivo,
+        ':piso'      => senalesPisoPorFecha($piso),
+        ':pisoFecha' => $piso,
+        ':desde'     => $desde->format('Y-m-d H:i:s'),
+    ]);
+
+    // Se piden 20 y no 1 porque el LIKE puede pescar un mensaje raro del que
+    // no salga ningun numero: se toma el primero que si parsee.
+    foreach ($stmt->fetchAll() as $fila) {
+        $dbm = nivelDelMensaje((string) ($fila['mensaje'] ?? ''));
+        if ($dbm !== null) {
+            return ['fecha' => (string) $fila['fecha'], 'dbm' => $dbm];
+        }
+    }
+
+    return null;
+}
+
+/**
  * Serie horaria completa: un punto por cada hora de la ventana, tenga
  * mediciones o no. El valor de la hora es el PROMEDIO de lo que reporto el
  * equipo en esa hora (un equipo activo informa decenas de veces por hora);
  * `minimo` y `maximo` viajan aparte para poder mostrar la dispersion sin
  * ensuciar la linea.
+ *
+ * EL NIVEL SE ARRASTRA. Un equipo NO informa su senal todo el tiempo: `WSN`
+ * viaja solo en `REP=CNX` (reconexion), `REP=INI` (arranque) y `RET=WSN`
+ * (respuesta a un pedido). Los latidos (`REP=LAT`) y los reportes de sensores
+ * (`REP=SNS`) no la llevan, asi que un equipo con enlace estable puede pasar
+ * el dia entero mandando mensajes sin informar el nivel ni una vez. Con una
+ * lectura por hora estricta eso daba dos o tres puntos sueltos en 24 horas y
+ * se leia como si faltaran datos.
+ *
+ * Por eso la hora sin lectura propia hereda LA ULTIMA CONOCIDA y viaja con
+ * `estimado = true` + `origen` (la hora de la que salio el valor). No es un
+ * relleno cosmetico: el nivel de senal no cambia porque nadie lo mida, asi
+ * que la ultima lectura es la mejor estimacion disponible. Pero es una
+ * estimacion, y el front tiene que mostrarla como tal -- punto solo en las
+ * horas medidas, tramo punteado en las arrastradas y el tooltip diciendo de
+ * cuando es el valor.
+ *
+ * Las horas ANTERIORES a la primera lectura (y sin semilla) siguen en
+ * `dbm = null`: ahi no hay nada que arrastrar y la linea no empieza.
  */
-function serie(array $muestras, DateTimeImmutable $desde, int $horas): array
+function serie(array $muestras, DateTimeImmutable $desde, int $horas, ?array $semilla = null): array
 {
     // Las mediciones se agrupan por su hora ('Y-m-d H:00:00').
     $porHora = [];
@@ -171,21 +258,29 @@ function serie(array $muestras, DateTimeImmutable $desde, int $horas): array
         $porHora[$clave][] = $m['dbm'];
     }
 
+    $ultimo = $semilla === null ? null : (int) $semilla['dbm'];
+    $origen = $semilla === null ? null : substr((string) $semilla['fecha'], 0, 13) . ':00:00';
+
     $serie = [];
     for ($i = 0; $i < $horas; $i++) {
         $hora   = $desde->modify('+' . $i . ' hours');
         $clave  = $hora->format('Y-m-d H:00:00');
         $lote   = $porHora[$clave] ?? [];
-        $vacia  = $lote === [];
-        $prom   = $vacia ? null : (int) round(array_sum($lote) / count($lote));
+
+        if ($lote !== []) {
+            $ultimo = (int) round(array_sum($lote) / count($lote));
+            $origen = $clave;
+        }
 
         $serie[] = [
             'hora'       => $clave,
-            'dbm'        => $prom,
-            'porcentaje' => $prom === null ? null : porcentaje($prom),
-            'minimo'     => $vacia ? null : min($lote),
-            'maximo'     => $vacia ? null : max($lote),
+            'dbm'        => $ultimo,
+            'porcentaje' => $ultimo === null ? null : porcentaje($ultimo),
+            'minimo'     => $lote === [] ? null : min($lote),
+            'maximo'     => $lote === [] ? null : max($lote),
             'muestras'   => count($lote),
+            'estimado'   => $lote === [] && $ultimo !== null,
+            'origen'     => $lote === [] ? $origen : null,
         ];
     }
 
@@ -248,7 +343,11 @@ function nivelActual(mixed $valor): ?int
  */
 function resumen(array $muestras, array $serie): array
 {
-    $conDato = count(array_filter($serie, static fn(array $p): bool => $p['dbm'] !== null));
+    // Horas MEDIDAS, no horas dibujadas: desde que el nivel se arrastra,
+    // `dbm !== null` es casi toda la ventana y contarlo asi mentiria sobre
+    // cuanto informo el equipo. La cobertura es lo unico que pone en numeros
+    // que la linea esta mayormente estimada.
+    $conDato = count(array_filter($serie, static fn(array $p): bool => ($p['muestras'] ?? 0) > 0));
 
     if ($muestras === []) {
         return [

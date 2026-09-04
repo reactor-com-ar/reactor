@@ -3,33 +3,51 @@
 declare(strict_types=1);
 
 /**
- * Uso por dispositivo: cuantas respuestas registro cada equipo del dominio,
- * dia por dia, en la ventana movil de los ultimos 30 dias.
+ * Uso por dispositivo: cuantos comandos recibio cada equipo del dominio,
+ * punto por punto, en una ventana movil que elige el usuario.
  *
- *   GET api/dashboard_senales.php -> {dias, series, resumen, ...}
+ *   GET api/dashboard_senales.php[?ventana=24h|7d|15d|30d]
+ *       -> {puntos, granularidad, series, resumen, ...}
+ *
+ * LA GRANULARIDAD LA DECIDE LA VENTANA, no un parametro aparte: 24 h se
+ * agrupa por HORA (24 puntos) y las ventanas en dias por DIA (7 / 15 / 30
+ * puntos). Agrupar 24 h por dia daria un grafico de un solo punto, y agrupar
+ * 30 dias por hora daria 720 puntos ilegibles. Por eso `VENTANAS` lleva la
+ * unidad adentro y el front no puede combinarlas mal.
+ *
+ * LA VENTANA SE MIDE CON EL RELOJ DE LA BASE (`SELECT NOW()`), no con el de
+ * PHP: los dos no estan alineados -- PHP corre en UTC y la sesion de MySQL
+ * en -03:00 (medido 03/09/2026) -- y `senales.fecha` la escribe la base. Con
+ * el reloj de PHP la ventana se corre 3 horas hacia adelante, los ultimos
+ * puntos caen en el futuro y salen siempre en cero, asi que el grafico se lee
+ * como si los equipos hubieran dejado de responder. Es el mismo problema (y
+ * la misma solucion) que en api/dispositivo_conexion.php.
  *
  * Alimenta el grafico de lineas del Dashboard. MODULO DE SOLO LECTURA:
  * `senales` es el historial inmutable que escribe el motor MQTT, nunca el
  * panel. Cualquier metodo distinto de GET corta con 405.
  *
- * QUE CUENTA COMO USO: SOLO los mensajes que empiezan con `RET=`. `senales`
+ * QUE CUENTA COMO USO: SOLO los mensajes que empiezan con `CMD=`. `senales`
  * mezcla varias familias de mensajes en la misma tabla y la mayoria no es
  * uso del equipo sino ruido de fondo del protocolo -- en la ventana medida,
- * de 70.290 filas de un dominio solo 17.516 son `RET=`:
+ * de 71.789 filas de un dominio solo 18.064 son `CMD=`:
  *
  *   REP=LAT / REP=CNX / REP=INI   latido, conexion y arranque: los manda el
  *                                 equipo solo, este o no en uso.
  *   REP=SNS / REP=CAP / REP=CEN   reportes periodicos de sensores.
- *   CMD=...  (sentido 'S')        la orden que SALE hacia el equipo.
+ *   CMD=...  (sentido 'S')        la ORDEN que sale hacia el equipo.
  *   RET=...  (sentido 'E')        la respuesta del equipo a esa orden.
  *
- * `RET=` es la unica familia que prueba que alguien opero el equipo y que el
- * equipo contesto, asi que es la que mide uso. Se cuenta la respuesta y no
- * el `CMD=` que la provoca para no contar dos veces la misma interaccion, y
- * porque el `CMD=` sin respuesta es una orden que no llego a destino.
+ * Se cuenta la ORDEN (`CMD=`) y no la respuesta (`RET=`): lo que el grafico
+ * mide es cuanto se OPERO el equipo, y eso es una accion de la plataforma
+ * sobre el equipo, no del equipo sobre la plataforma. Contar `RET=` haria
+ * que un equipo que dejo de contestar apareciera como "sin uso" cuando en
+ * realidad se lo siguio comandando -- que es justo lo que hay que ver. En la
+ * ventana medida la diferencia es de 195 mensajes (18.064 `CMD=` contra
+ * 17.869 `RET=`): ordenes que no obtuvieron respuesta.
  *
- * Al ser todas entrantes no hace falta filtrar por `sentido`: el prefijo ya
- * lo determina.
+ * Al ser todas salientes no hace falta filtrar por `sentido`: el prefijo ya
+ * lo determina (medido: las 18.064 son `sentido = 'S'`).
  *
  * ALCANCE: `senales` NO tiene columna `dominio` -- el unico camino al
  * inquilino es `senales.dispositivo -> dispositivos.dominio`. Por eso el
@@ -37,7 +55,7 @@ declare(strict_types=1);
  * (requireDominioId()) y despues agrega solo por esos ids: sin ese paso el
  * grafico mostraria el trafico de otros clientes.
  *
- * CADA DIA ES UN CONTEO, NO UNA MEDICION. Un dia sin respuestas vale 0, no
+ * CADA DIA ES UN CONTEO, NO UNA MEDICION. Un dia sin comandos vale 0, no
  * "sin dato": el equipo estuvo y nadie lo uso, que es exactamente lo que el
  * grafico tiene que mostrar. Por eso -- a diferencia de la pestaña Conexion
  * de Dispositivos, donde las horas sin reporte son un corte en la linea --
@@ -68,8 +86,23 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 require_once dirname(__DIR__) . '/lib/senales.php';
 
-/** Ancho de la ventana, en dias. El ultimo dia es el de hoy, incompleto. */
-const DIAS_VENTANA = 30;
+/**
+ * Ventanas ofrecidas al front. `unidad` fija la granularidad del agrupamiento
+ * y `cantidad` cuantos puntos tiene la serie. El ultimo punto siempre es el
+ * que esta en curso (la hora o el dia de hoy), asi que va incompleto.
+ */
+// `etiqueta` va suelta en el encabezado ("últimos 7 días · 2.872 comandos")
+// y `periodo` va dentro de una oracion ("...no registró uso en los últimos 7
+// dias"). Son dos strings y no uno con el articulo pegado en el front porque
+// el genero cambia con la unidad -- "LAS ultimas 24 horas" contra "LOS
+// ultimos 7 dias" -- y esa concordancia no es logica de presentacion.
+const VENTANAS = [
+    '24h' => ['corta' => '24 h',    'etiqueta' => 'últimas 24 horas', 'periodo' => 'las últimas 24 horas', 'unidad' => 'hora', 'cantidad' => 24],
+    '7d'  => ['corta' => '7 días',  'etiqueta' => 'últimos 7 días',   'periodo' => 'los últimos 7 días',   'unidad' => 'dia',  'cantidad' => 7],
+    '15d' => ['corta' => '15 días', 'etiqueta' => 'últimos 15 días',  'periodo' => 'los últimos 15 días',  'unidad' => 'dia',  'cantidad' => 15],
+    '30d' => ['corta' => '30 días', 'etiqueta' => 'últimos 30 días',  'periodo' => 'los últimos 30 días',  'unidad' => 'dia',  'cantidad' => 30],
+];
+const VENTANA_DEFECTO = '30d';
 
 /**
  * Cuantos equipos se dibujan con linea de color propio. Es el tamaño exacto
@@ -85,36 +118,63 @@ try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
         json_error('Metodo no permitido: el uso por dispositivo es de solo lectura', 405);
     }
-    handleGet();
+    handleGet((string) ($_GET['ventana'] ?? VENTANA_DEFECTO));
 } catch (Throwable $e) {
     json_error('Error al obtener el uso por dispositivo: ' . $e->getMessage(), 500);
 }
 
-function handleGet(): void
+function handleGet(string $clave): void
 {
     $dominio = requireDominioId();
 
-    // La ventana arranca al principio de un dia y termina al final de hoy:
-    // asi el ultimo punto es "lo que va del dia" y no un tramo cortado en
-    // una hora arbitraria.
-    $hoy   = (new DateTimeImmutable('now'))->setTime(0, 0, 0);
-    $desde = $hoy->modify('-' . (DIAS_VENTANA - 1) . ' days');
-    $hasta = $hoy->modify('+1 day');
+    // Una ventana desconocida no es un error: cae en la de defecto. El front
+    // manda solo claves de `opciones`, asi que llegar aca con otra cosa es
+    // una URL escrita a mano y no vale cortarle la pantalla al usuario.
+    $clave   = isset(VENTANAS[$clave]) ? $clave : VENTANA_DEFECTO;
+    $ventana = VENTANAS[$clave];
 
-    $dias      = dias($desde);
-    $equipos   = equiposDelDominio($dominio);
-    $conteos   = $equipos === []
+    // El "ahora" sale de la BASE, no de PHP -- ver la cabecera del archivo.
+    $ahora = new DateTimeImmutable((string) db()->query('SELECT NOW()')->fetchColumn());
+
+    // La ventana cierra al final del punto en curso, no en un instante
+    // arbitrario: asi el ultimo punto es "lo que va de esta hora / de hoy".
+    if ($ventana['unidad'] === 'hora') {
+        $hasta = $ahora->setTime((int) $ahora->format('H'), 0, 0)->modify('+1 hour');
+        $desde = $hasta->modify('-' . $ventana['cantidad'] . ' hours');
+    } else {
+        $hasta = $ahora->setTime(0, 0, 0)->modify('+1 day');
+        $desde = $hasta->modify('-' . $ventana['cantidad'] . ' days');
+    }
+
+    $puntos  = puntos($desde, $ventana);
+    $equipos = equiposDelDominio($dominio);
+    $conteos = $equipos === []
         ? []
-        : conteosPorDiaYEquipo(array_keys($equipos), $desde->format('Y-m-d H:i:s'), $hasta->format('Y-m-d H:i:s'));
+        : conteosPorPuntoYEquipo(
+            array_keys($equipos),
+            $desde->format('Y-m-d H:i:s'),
+            $hasta->format('Y-m-d H:i:s'),
+            $ventana['unidad']
+        );
 
-    $series = series($conteos, $equipos, $dias);
+    $series = series($conteos, $equipos, $puntos);
 
     json_ok([
-        'dias'    => $dias,
-        'series'  => $series['series'],
-        'otros'   => $series['otros'],
+        'puntos'       => $puntos,
+        'granularidad' => $ventana['unidad'],
+        'series'       => $series['series'],
+        'otros'        => $series['otros'],
+        // El front arma los chips con esto en vez de tener su propia lista:
+        // una sola definicion de las ventanas, y no dos que se desincronizan.
+        'opciones'     => array_map(
+            static fn(string $k): array => ['clave' => $k, 'corta' => VENTANAS[$k]['corta']],
+            array_keys(VENTANAS)
+        ),
         'resumen' => [
-            'dias'             => DIAS_VENTANA,
+            'ventana'          => $clave,
+            'etiqueta'         => $ventana['etiqueta'],
+            'periodo'          => $ventana['periodo'],
+            'puntos'           => $ventana['cantidad'],
             'total'            => $series['total'],
             'maximo'           => $series['maximo'],
             'equipos_dominio'  => count($equipos),
@@ -132,14 +192,22 @@ function handleGet(): void
     ]);
 }
 
-/** Las DIAS_VENTANA fechas de la ventana, de la mas vieja a la mas nueva. */
-function dias(DateTimeImmutable $desde): array
+/**
+ * Las claves de los puntos de la ventana, de la mas vieja a la mas nueva.
+ * Tienen que salir del MISMO formato que agrupa el SQL o el emparejamiento
+ * `clave -> conteo` falla en silencio y la serie queda toda en cero.
+ */
+function puntos(DateTimeImmutable $desde, array $ventana): array
 {
-    $dias = [];
-    for ($i = 0; $i < DIAS_VENTANA; $i++) {
-        $dias[] = $desde->modify('+' . $i . ' days')->format('Y-m-d');
+    $hora   = $ventana['unidad'] === 'hora';
+    $paso   = $hora ? 'hours' : 'days';
+    $patron = $hora ? 'Y-m-d H:00:00' : 'Y-m-d';
+
+    $puntos = [];
+    for ($i = 0; $i < $ventana['cantidad']; $i++) {
+        $puntos[] = $desde->modify("+$i $paso")->format($patron);
     }
-    return $dias;
+    return $puntos;
 }
 
 /**
@@ -172,7 +240,7 @@ function equiposDelDominio(int $dominio): array
 }
 
 /**
- * Respuestas (`RET=`) por (dispositivo, dia) dentro de la ventana.
+ * Comandos (`CMD=`) por (dispositivo, punto) dentro de la ventana.
  *
  * El `IN` explicito de los equipos del dominio es lo que hace barata la
  * consulta: ataca `fk_senales_dispositivo`, que en InnoDB es (dispositivo,
@@ -181,31 +249,36 @@ function equiposDelDominio(int $dominio): array
  * habilita a elegir el otro plan -- barrer la PK entera desde el piso -- que
  * para un dominio chico es leer cientos de miles de filas ajenas.
  *
- * El `LIKE 'RET=%'` va anclado al principio a proposito: no es un comodin
+ * El `LIKE 'CMD=%'` va anclado al principio a proposito: no es un comodin
  * por los dos lados. Filtra sobre filas que el indice ya trajo, asi que
  * cuesta CPU y no lecturas -- y ademas descarta ~3 de cada 4, que es trabajo
  * de agregacion que no se hace.
  */
-function conteosPorDiaYEquipo(array $ids, string $desde, string $hasta): array
+function conteosPorPuntoYEquipo(array $ids, string $desde, string $hasta, string $unidad): array
 {
     $piso   = senalesPisoPorFecha($desde);
     $marcas = implode(',', array_fill(0, count($ids), '?'));
 
+    // La expresion de agrupamiento sale de una lista cerrada, NO del pedido:
+    // va interpolada en el SQL y un valor de afuera seria inyeccion. Tiene
+    // que producir exactamente las mismas claves que puntos().
+    $expr = $unidad === 'hora' ? "DATE_FORMAT(fecha, '%Y-%m-%d %H:00:00')" : 'DATE(fecha)';
+
     $stmt = db()->prepare(
-        "SELECT dispositivo, DATE(fecha) AS dia, COUNT(*) AS cantidad
+        "SELECT dispositivo, $expr AS punto, COUNT(*) AS cantidad
            FROM senales
           WHERE dispositivo IN ($marcas)
             AND id >= ?
             AND fecha >= ?
             AND fecha <  ?
-            AND mensaje LIKE 'RET=%'
-          GROUP BY dispositivo, DATE(fecha)"
+            AND mensaje LIKE 'CMD=%'
+          GROUP BY dispositivo, punto"
     );
     $stmt->execute([...array_values($ids), $piso, $desde, $hasta]);
 
     $conteos = [];
     foreach ($stmt->fetchAll() as $fila) {
-        $conteos[(int) $fila['dispositivo']][(string) $fila['dia']] = (int) $fila['cantidad'];
+        $conteos[(int) $fila['dispositivo']][(string) $fila['punto']] = (int) $fila['cantidad'];
     }
 
     return $conteos;
@@ -222,11 +295,11 @@ function conteosPorDiaYEquipo(array $ids, string $desde, string $hasta): array
  * rojo" leeria mal el grafico. `otros` va sin slot -- es gris, no una
  * ranura mas.
  */
-function series(array $conteos, array $equipos, array $dias): array
+function series(array $conteos, array $equipos, array $puntos): array
 {
     $armadas = [];
-    foreach ($conteos as $id => $porDia) {
-        $valores = array_map(static fn(string $d): int => $porDia[$d] ?? 0, $dias);
+    foreach ($conteos as $id => $porPunto) {
+        $valores = array_map(static fn(string $p): int => $porPunto[$p] ?? 0, $puntos);
         $total   = array_sum($valores);
         if ($total <= 0) {
             continue;
@@ -255,14 +328,14 @@ function series(array $conteos, array $equipos, array $dias): array
     $resto = array_slice($armadas, SERIES_MAXIMO);
     $otros = null;
     if ($resto !== []) {
-        $sumadas = array_fill(0, count($dias), 0);
+        $sumadas = array_fill(0, count($puntos), 0);
         foreach ($resto as $s) {
             foreach ($s['valores'] as $i => $v) {
                 $sumadas[$i] += $v;
             }
         }
         $otros = [
-            'nombre'  => count($resto) . ' equipos mas',
+            'nombre'  => count($resto) === 1 ? '1 equipo más' : count($resto) . ' equipos más',
             'equipos' => count($resto),
             'total'   => array_sum($sumadas),
             'valores' => $sumadas,

@@ -919,6 +919,53 @@ Para "¿Seguro que querés borrar?" y similares.
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 ```
 
+### 15.1 Confirmación de borrado con desglose de impacto
+
+`confirmDialog` sólo acepta un string, así que **no sirve para bajas que arrastran
+dependencias en varias tablas**. Cuando eliminar un registro borra, huerfaniza o
+choca contra filas de otras tablas, la confirmación va en un `.modal` normal (§14)
+que muestra el detalle real, pedido al backend antes de abrirlo. Hoy lo usa
+**Usuarios** (`openUserDeleteModal` + `GET api/users.php?impacto=1&id=N`).
+
+Estructura del cuerpo, en este orden:
+
+1. `.del-lead` — a quién se está por borrar (nombre, `<code>#id</code>`, email).
+2. `.del-blocker` — recuadro rojo, sólo si el borrado **no puede** hacerse. Lista
+   la causa y qué tiene que hacer el operador. Mientras haya un bloqueo, el botón
+   de confirmar **no se renderiza**: queda sólo `Cancelar`.
+3. `.del-section` con título `.del-danger` — **"Se eliminarán junto con el
+   usuario"**: filas que desaparecen (borrado explícito o `ON DELETE CASCADE`).
+4. `.del-section` con título `.del-warn` — **"Se conservarán, sin usuario
+   asociado"**: filas que sobreviven con la FK en NULL (`ON DELETE SET NULL`).
+5. `.del-warning` — "Esta acción no se puede deshacer", sólo si no hay bloqueo.
+
+Cada ítem es un `.del-item` con la etiqueta a la izquierda y un `.badge` con la
+cantidad a la derecha (`badge-danger` para lo que se borra, `badge-warn` para lo
+que queda huérfano). **Las secciones con cantidad 0 no se muestran** — el backend
+ya filtra los ceros. Si no hay ninguna dependencia se muestra `.del-empty`.
+
+En qué grupo cae cada tabla es una **decisión de producto, no la regla de la FK**:
+una FK `ON DELETE SET NULL` puede igual ir en "se eliminarán" si el backend la
+borra a mano. Es el caso de `invitaciones` al borrar un usuario — una invitación
+sin emisor no se puede responder ni auditar, así que se elimina explícitamente.
+Lo que el modal muestra es siempre **lo que va a pasar de verdad**.
+
+```css
+.del-lead        { font-size: .88rem; line-height: 1.5; }
+.del-section-title { font-size: .75rem; font-weight: 700; text-transform: uppercase;
+                     letter-spacing: .04em; display: flex; align-items: center; gap: 7px; }
+.del-section-title.del-danger { color: #f5a8a8; }
+.del-section-title.del-warn   { color: #fcd34d; }
+.del-item        { display: flex; align-items: center; justify-content: space-between;
+                   gap: 12px; padding: 7px 12px; border-radius: 8px; font-size: .85rem;
+                   background: color-mix(in srgb, var(--surface) 90%, #000); }
+.del-blocker     { display: flex; gap: 10px; font-size: .85rem; line-height: 1.5;
+                   padding: 12px 14px; border-radius: var(--radius);
+                   background: rgba(230,42,42,.12); border: 1px solid rgba(230,42,42,.35); }
+.del-warning     { display: flex; align-items: center; gap: 8px;
+                   font-size: .82rem; color: var(--muted); }
+```
+
 ## 16. Toasts (notificaciones efímeras)
 
 ```css

@@ -6,7 +6,9 @@ declare(strict_types=1);
  * Actividad: listado de `registros` (esquema real en db/schema.sql).
  *
  *   GET api/actividad.php        -> listado + resumen + catalogos
- *   GET api/actividad.php?id=N   -> un registro (todos los campos)
+ *   GET api/actividad.php?id=N   -> un registro (todos los campos) mas
+ *                                   `usuario_ficha` y `dispositivo_ficha`,
+ *                                   las pestañas del modal de Consulta
  *
  * MODULO DE SOLO LECTURA. `registros` es la bitacora del sistema: la
  * escriben el motor y las apps, nunca el panel. Por eso este endpoint no
@@ -190,12 +192,27 @@ function handleGet(int $id): void
                 c.nombre   AS canal_nombre,
                 c.canal    AS canal_numero,
                 c.uuid     AS canal_uuid,
-                dom.nombre AS dominio_nombre
+                dom.nombre AS dominio_nombre,
+                u.id         AS uf_id,
+                u.uuid       AS uf_uuid,
+                u.celular    AS uf_celular,
+                u.habilitado AS uf_habilitado,
+                u.ingresado  AS uf_ingresado,
+                u.registrado AS uf_registrado,
+                d.id         AS df_id,
+                d.serial     AS df_serial,
+                d.senal      AS df_senal,
+                d.habilitado AS df_habilitado,
+                d.enlace     AS df_enlace,
+                d.latido     AS df_latido,
+                d.modelo     AS df_modelo,
+                mo.nombre    AS df_modelo_nombre
          FROM registros r
          LEFT JOIN usuarios     u   ON u.id   = r.usuario
          LEFT JOIN dispositivos d   ON d.id   = r.dispositivo
          LEFT JOIN canales      c   ON c.id   = r.canal
          LEFT JOIN dominios     dom ON dom.id = r.dominio
+         LEFT JOIN modelos      mo  ON mo.id  = d.modelo
          WHERE r.id = :id AND r.dominio = :dom
          LIMIT 1'
     );
@@ -205,7 +222,68 @@ function handleGet(int $id): void
         json_error('Registro de actividad no encontrado en este dominio', 404);
     }
 
-    json_ok(['registro' => mapRegistro($row)]);
+    $registro = mapRegistro($row);
+
+    // Fichas de las pestañas Usuario / Dispositivo del modal de Consulta.
+    // Salen de los mismos LEFT JOIN del registro y NO de api/usuarios.php
+    // ni api/dispositivos.php: esos dos filtran por `dominio`, que en las
+    // dos tablas es el dominio ACTUAL (el activo de la cuenta, el dueño de
+    // turno del equipo). Un registro viejo puede apuntar a un usuario que
+    // desde entonces cambió de dominio o a un equipo que se liberó, y esas
+    // consultas devolverian 404 sobre actividad perfectamente valida. El
+    // control de acceso ya lo dio `r.dominio = :dom`.
+    $registro['usuario_ficha']     = fichaUsuario($row);
+    $registro['dispositivo_ficha'] = fichaDispositivo($row);
+
+    json_ok(['registro' => $registro]);
+}
+
+/**
+ * Datos principales del usuario que originó el registro. `null` cuando el
+ * registro no tiene usuario: `registros.usuario` arrastra el centinela 0
+ * del sistema historico ademas de NULL, y con los dos el LEFT JOIN no
+ * resuelve -- por eso el corte mira `u.id`, no `r.usuario`.
+ */
+function fichaUsuario(array $r): ?array
+{
+    if (($r['uf_id'] ?? null) === null) {
+        return null;
+    }
+    $hab = strtoupper(trim((string) ($r['uf_habilitado'] ?? '')));
+
+    return [
+        'id'         => (int)    $r['uf_id'],
+        'uuid'       => (string) ($r['uf_uuid']        ?? ''),
+        'usuario'    => (string) ($r['usuario_login']  ?? ''),
+        'nombre'     => (string) ($r['usuario_nombre'] ?? ''),
+        'correo'     => (string) ($r['usuario_correo'] ?? ''),
+        'celular'    => (string) ($r['uf_celular']     ?? ''),
+        'ingresado'  => (string) ($r['uf_ingresado']   ?? ''),
+        'registrado' => (string) ($r['uf_registrado']  ?? ''),
+        // 'S' / 'N' en `usuarios`, no el smallint de `dispositivos`.
+        'habilitado' => in_array($hab, ['S', '1', 'Y'], true),
+    ];
+}
+
+/** Datos principales del equipo del registro. `null`, igual que arriba. */
+function fichaDispositivo(array $r): ?array
+{
+    if (($r['df_id'] ?? null) === null) {
+        return null;
+    }
+
+    return [
+        'id'            => (int)    $r['df_id'],
+        'uuid'          => (string) ($r['dispositivo_uuid']   ?? ''),
+        'nombre'        => (string) ($r['dispositivo_nombre'] ?? ''),
+        'serial'        => (string) ($r['df_serial']          ?? ''),
+        'senal'         => (string) ($r['df_senal']           ?? ''),
+        'latido'        => (string) ($r['df_latido']          ?? ''),
+        'modelo'        => $r['df_modelo'] !== null ? (int) $r['df_modelo'] : null,
+        'modelo_nombre' => (string) ($r['df_modelo_nombre']   ?? ''),
+        'habilitado'    => (int) ($r['df_habilitado'] ?? 0) === 1,
+        'enlace'        => (int) ($r['df_enlace']     ?? 0) === 1,
+    ];
 }
 
 /* ------------------------------------------------------------------ */

@@ -106,9 +106,19 @@
         </div>`;
     }
 
+    /* Valor de una referencia a otra tabla: el nombre si el JOIN lo trajo y
+       el id entre `code` si no (usuario borrado, equipo que cambio de dueño,
+       catalogo incompleto). Vacio si la fila no apunta a nada -- ahi
+       `viewCard` pone el guion. */
+    function ref(nombre, id) {
+        if (nombre) return escapeHtml(nombre);
+        return id ? `<code>#${id}</code>` : '';
+    }
+
     /* Modal generico: recibe titulo + HTML del body y lo monta sobre un
        backdrop efimero que se destruye al cerrar.
-       opts.wide        -> modal ancho (dumps, tablas)
+       opts.wide        -> modal ancho: true = 880px (dumps, tablas), 'xl' =
+                           1040px, el doble del ancho base (fichas largas)
        opts.footerHtml  -> botones extra, a la IZQUIERDA del boton Cerrar
        opts.primaryHtml -> botones a la DERECHA del Cerrar (accion primaria)
        opts.closeLabel  -> etiqueta del boton Cerrar (default "Cerrar")
@@ -117,7 +127,7 @@
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal ${opts.wide ? 'modal-wide' : ''}" role="dialog" aria-modal="true">
+            <div class="modal ${opts.wide === true ? 'modal-wide' : opts.wide ? `modal-${opts.wide}` : ''}" role="dialog" aria-modal="true">
                 <div class="modal-header">
                     <div class="modal-title">${title}</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
@@ -626,7 +636,11 @@
 
         container.querySelector('#us-filtros').addEventListener('click', abrirFiltrosUsuarios);
         container.querySelector('#us-refrescar').addEventListener('click', () => cargarUsuarios());
-        container.querySelector('#us-nuevo').addEventListener('click', () => formUsuario(null));
+        // El alta no crea la cuenta: invita. Reusa el modal del modulo
+        // Invitaciones (`formInvitacion()`), que pide solo el correo y encola
+        // el envio. Si la persona ya tiene cuenta, al aceptar se le agrega el
+        // perfil de este dominio en vez de crear un usuario nuevo.
+        container.querySelector('#us-nuevo').addEventListener('click', () => formInvitacion());
 
         cargarUsuarios();
     }
@@ -730,8 +744,10 @@
         `;
     }
 
-    // Menu contextual de fila (skill abm_design): Consultar -> acciones del
-    // recurso -> separador -> Editar -> Eliminar (destructiva, al final).
+    // Menu contextual de fila: Consultar -> Habilitar/Deshabilitar ->
+    // separador -> Eliminar (destructiva, al final). Sin `Editar` —a
+    // diferencia del orden del skill abm_design—: se edita desde el boton
+    // primario del modal de Consultar.
     function menuUsuario(u) {
         return [
             { label: 'Consultar', icon: 'fa-eye',    onSelect: () => verUsuario(u.id) },
@@ -741,7 +757,6 @@
                 onSelect: () => toggleUsuario(u),
             },
             { sep: true },
-            { label: 'Editar',   icon: 'fa-pen',   onSelect: () => formUsuario(u.id) },
             { label: 'Eliminar', icon: 'fa-trash', danger: true, onSelect: () => eliminarUsuario(u) },
         ];
     }
@@ -760,46 +775,28 @@
             ? '<span class="badge badge-success">Habilitado</span>'
             : '<span class="badge badge-danger">Deshabilitado</span>';
 
+        /* 10 tarjetas: `Identificador` (el uuid) arranca la ficha en el lugar
+           que ocupaba `Codigo` —el id ya encabeza el modal— y `Estado` cierra
+           al final. Todas van a media tarjeta, asi que los cinco renglones
+           cierran de a dos; agregar o quitar un campo deja la cuenta impar y
+           estira la ultima a todo el ancho. */
         const body = `<div class="view-grid">${[
-            viewCard('Código',            `<code>#${u.id}</code>`),
+            viewCard('Identificador',     u.uuid ? `<code>${escapeHtml(u.uuid)}</code>` : ''),
             viewCard('Usuario',           escapeHtml(u.usuario)),
-            viewCard('Nombre',            escapeHtml(u.nombre), true),
+            viewCard('Nombre',            escapeHtml(u.nombre)),
             viewCard('Correo',            u.correo  ? escapeHtml(u.correo)  : ''),
             viewCard('Celular',           u.celular ? escapeHtml(u.celular) : ''),
             viewCard('Perfil',            u.perfil_nombre ? escapeHtml(u.perfil_nombre) : (u.perfil ? `<code>#${u.perfil}</code>` : '')),
-            viewCard('Dominio',           u.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(u.dominio_nombre)}</span>` : ''),
-            viewCard('Estado',            estado),
-            viewCard('Autenticación',     u.autenticacion ? escapeHtml(u.autenticacion) : ''),
-            viewCard('Roles',             u.roles ? escapeHtml(u.roles) : '', true),
-            viewCard('Registrado por',    u.registrante_nombre ? escapeHtml(u.registrante_nombre) : ''),
-            viewCard('Registrado',        escapeHtml(formatDate(u.registrado) || '')),
             viewCard('Último ingreso',    escapeHtml(formatDate(u.ingresado) || '')),
-            viewCard('Panel',             u.panel ? `<code>#${u.panel}</code>` : ''),
-            viewCard('UUID',              u.uuid ? `<code>${escapeHtml(u.uuid)}</code>` : ''),
+            viewCard('Registrado',        escapeHtml(formatDate(u.registrado) || '')),
+            viewCard('Registrado por',    u.registrante_nombre ? escapeHtml(u.registrante_nombre) : ''),
+            viewCard('Estado',            estado),
         ].join('')}</div>`;
 
-        const m = openModal(`Consultar usuario <span class="muted">#${u.id}</span>`, body, {
-            footerHtml:  '<button class="btn btn-ghost btn-icon" data-act="menu" title="Más acciones"><i class="fa-solid fa-bars"></i></button>',
-            primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
-        });
-
-        m.backdrop.querySelector('[data-act="editar"]').addEventListener('click', () => {
-            m.close();
-            formUsuario(u.id);
-        });
-        m.backdrop.querySelector('[data-act="menu"]').addEventListener('click', (e) => {
-            e.stopPropagation();
-            openRowMenu([
-                { label: 'Copiar usuario', icon: 'fa-copy', onSelect: () => copiar(u.usuario) },
-                u.correo ? { label: 'Copiar correo', icon: 'fa-envelope', onSelect: () => copiar(u.correo) } : null,
-                { sep: true },
-                {
-                    label: u.habilitado ? 'Deshabilitar' : 'Habilitar',
-                    icon:  u.habilitado ? 'fa-user-slash' : 'fa-user-check',
-                    onSelect: () => { m.close(); toggleUsuario(u); },
-                },
-            ], e.currentTarget);
-        });
+        // Pie con `Cerrar` solo: sin boton ☰ de "Mas acciones" y sin accion
+        // primaria `Editar`. Las acciones del usuario viven en el menu
+        // contextual de la fila del listado.
+        openModal(`Consultar usuario <span class="muted">#${u.id}</span>`, body, { wide: 'xl' });
     }
 
     function copiar(texto) {
@@ -826,8 +823,6 @@
             usuarios.perfiles.map((p) =>
                 `<option value="${p.id}"${p.id === u.perfil ? ' selected' : ''}>${escapeHtml(p.nombre)}</option>`)
         ).join('');
-
-        const dominio = sesion.dominio_nombre || (sesion.dominio ? `#${sesion.dominio}` : '—');
 
         const body = `
             <div class="form-row">
@@ -856,26 +851,10 @@
                     <select id="uf-perfil">${opciones}</select>
                 </div>
                 <div class="form-group">
-                    <label for="uf-roles">Roles</label>
-                    <input type="text" id="uf-roles" maxlength="255" value="${escapeHtml(u.roles)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
                     <label for="uf-contrasena">Contraseña ${esEdicion ? '' : '*'}</label>
                     <input type="password" id="uf-contrasena" maxlength="32" autocomplete="new-password"
                            placeholder="${esEdicion ? 'Dejar vacío para no cambiarla' : 'Mínimo 4 caracteres'}">
                 </div>
-                <div class="form-group">
-                    <label>Dominio</label>
-                    <input type="text" value="${escapeHtml(dominio)}" readonly title="Se asigna desde tu sesión">
-                </div>
-            </div>
-            <div class="form-group">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                    <input type="checkbox" id="uf-habilitado" ${u.habilitado ? 'checked' : ''}>
-                    Usuario habilitado para ingresar
-                </label>
             </div>
             <div class="field-error" id="uf-error" style="display:none"></div>
         `;
@@ -885,7 +864,7 @@
             body,
             {
                 closeLabel:  'Cancelar',
-                primaryHtml: `<button class="btn btn-primary" data-act="guardar">${esEdicion ? 'Guardar cambios' : 'Crear usuario'}</button>`,
+                primaryHtml: `<button class="btn btn-primary" data-act="guardar">${esEdicion ? 'Guardar' : 'Crear usuario'}</button>`,
             }
         );
 
@@ -893,15 +872,20 @@
         const btn = m.backdrop.querySelector('[data-act="guardar"]');
 
         btn.addEventListener('click', async () => {
+            // El PUT reescribe la fila entera, asi que `roles` y `habilitado`
+            // —que ya no estan en el formulario— viajan desde el registro
+            // cargado; si no, el guardado los borraria. En el alta salen de
+            // los defaults de `u` (sin roles, habilitado). El estado se
+            // cambia desde Habilitar / Deshabilitar del menu de la fila.
             const payload = {
                 usuario:    m.backdrop.querySelector('#uf-usuario').value.trim(),
                 nombre:     m.backdrop.querySelector('#uf-nombre').value.trim(),
                 correo:     m.backdrop.querySelector('#uf-correo').value.trim(),
                 celular:    m.backdrop.querySelector('#uf-celular').value.trim(),
-                roles:      m.backdrop.querySelector('#uf-roles').value.trim(),
+                roles:      u.roles || '',
                 perfil:     +(m.backdrop.querySelector('#uf-perfil').value || 0),
                 contrasena: m.backdrop.querySelector('#uf-contrasena').value,
-                habilitado: m.backdrop.querySelector('#uf-habilitado').checked,
+                habilitado: !!u.habilitado,
             };
             if (esEdicion) payload.id = u.id;
 
@@ -1303,7 +1287,6 @@
                 icon:  d.habilitado ? 'fa-plug-circle-xmark' : 'fa-plug-circle-check',
                 onSelect: () => toggleDispositivo(d),
             },
-            d.uuid ? { label: 'Copiar identificador', icon: 'fa-copy', onSelect: () => copiar(d.uuid) } : null,
             { sep: true },
             { label: 'Editar',  icon: 'fa-pen',        onSelect: () => formDispositivo(d.id) },
             { label: 'Liberar', icon: 'fa-link-slash', danger: true, onSelect: () => liberarDispositivo(d) },
@@ -1324,48 +1307,30 @@
             return;
         }
 
-        const ref = (nombre, valor) => nombre
-            ? escapeHtml(nombre)
-            : (valor ? `<code>#${valor}</code>` : '');
         const num = (v) => (v === null || v === undefined ? '' : String(v));
 
+        /* La grilla es flex con `flex-grow: 1` (CSS §11): una tarjeta sola en
+           su renglon se estira al 100%. Los campos son 16 -- par -- asi que
+           todas van al 50% y ninguna queda estirada. Agregar o quitar UNO
+           deja el ultimo renglon con una tarjeta ancha: si pasa, hay que
+           marcar una `full` en ranura impar para recuperar la paridad. */
         const general = `<div class="view-grid">${[
-            viewCard('Código',                `<code>#${d.id}</code>`),
             viewCard('Identificador',         d.uuid ? `<code>${escapeHtml(d.uuid)}</code>` : ''),
-            viewCard('Nombre',                escapeHtml(d.nombre), true),
+            viewCard('Nombre',                escapeHtml(d.nombre)),
             viewCard('Estado',                badgeHabilitado(d.habilitado)),
             viewCard('Enlace',                badgeEnlace(d.enlace)),
-            viewCard('Dominio',               d.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(d.dominio_nombre)}</span>` : ''),
-            viewCard('Agente',                ref(d.agente_nombre, d.agente)),
             viewCard('Modelo',                ref(d.modelo_nombre, d.modelo)),
             viewCard('Producto',              ref(d.producto_nombre, d.producto)),
-            viewCard('Transceptor',           ref(d.transceptor_nombre, d.transceptor)),
-            viewCard('Chip',                  ref(d.chip_nombre, d.chip)),
-            viewCard('Firmware',              escapeHtml(d.firmware)),
+            viewCard('Serie',                 escapeHtml(d.serial)),
             viewCard('MAC',                   d.mac ? `<code>${escapeHtml(d.mac)}</code>` : ''),
             viewCard('IP',                    d.ip ? `<code>${escapeHtml(d.ip)}</code>` : ''),
             viewCard('Señal',                 escapeHtml(d.senal)),
-            viewCard('Serie',                 escapeHtml(d.serial)),
-            viewCard('Identidad',             escapeHtml(d.identidad)),
-            viewCard('Llave',                 d.llave ? `<code>${escapeHtml(d.llave)}</code>` : ''),
-            viewCard('Límite de señales',     escapeHtml(num(d.senalesLimite))),
-            viewCard('Fabricación',           escapeHtml(formatDate(d.fabricacion) || '')),
-            viewCard('Instalación',           escapeHtml(formatDate(d.instalacion) || '')),
-            viewCard('Adoptado',              d.adoptado ? '<span class="badge badge-info">Sí</span>' : '<span class="badge badge-warn">No</span>'),
-            viewCard('Adopción',              d.adopcion ? `<code>#${d.adopcion}</code>` : ''),
             viewCard('Último inicio',         escapeHtml(formatDate(d.inicio) || '')),
-            viewCard('Última conexión',       escapeHtml(formatDate(d.conexion) || '')),
             viewCard('Último latido',         escapeHtml(formatDate(d.latido) || '')),
             viewCard('Inicios',               escapeHtml(num(d.inicios))),
             viewCard('Conexiones',            escapeHtml(num(d.conexiones))),
             viewCard('Latidos',               escapeHtml(num(d.latidos))),
-            viewCard('Monitoreo',             d.monitoreo ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'),
-            viewCard('Intervalo de monitoreo', escapeHtml(num(d.monitoreoIntervalo))),
-            viewCard('Último monitoreo',      escapeHtml(formatDate(d.monitoreoUltimo) || '')),
-            viewCard('Próximo monitoreo',     escapeHtml(formatDate(d.monitoreoSiguiente) || '')),
-            viewCard('Correos de monitoreo',  escapeHtml(d.monitoreoCorreos), true),
-            viewCard('Coordenadas',           escapeHtml(d.coordenadas), true),
-            viewCard('Indicadores',           escapeHtml(d.indicadores), true),
+            viewCard('Firmware',              escapeHtml(d.firmware)),
         ].join('')}</div>`;
 
         const body = `
@@ -1387,7 +1352,6 @@
 
         const m = openModal(`Consultar dispositivo <span class="muted">#${d.id}</span>`, body, {
             wide:        true,
-            footerHtml:  '<button class="btn btn-ghost btn-icon" data-act="menu" title="Más acciones"><i class="fa-solid fa-bars"></i></button>',
             primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
         });
 
@@ -1397,27 +1361,27 @@
             m.close();
             formDispositivo(d.id);
         });
-        m.backdrop.querySelector('[data-act="menu"]').addEventListener('click', (e) => {
-            e.stopPropagation();
-            openRowMenu([
-                d.uuid ? { label: 'Copiar identificador', icon: 'fa-copy', onSelect: () => copiar(d.uuid) } : null,
-                d.mac  ? { label: 'Copiar MAC',           icon: 'fa-copy', onSelect: () => copiar(d.mac) }  : null,
-                d.coordenadas ? { label: 'Copiar coordenadas', icon: 'fa-location-dot', onSelect: () => copiar(d.coordenadas) } : null,
-                { sep: true },
-                {
-                    label: d.habilitado ? 'Deshabilitar' : 'Habilitar',
-                    icon:  d.habilitado ? 'fa-plug-circle-xmark' : 'fa-plug-circle-check',
-                    onSelect: () => { m.close(); toggleDispositivo(d); },
-                },
-            ], e.currentTarget);
-        });
     }
 
     /* ---------- Consultar: pestañas ---------- */
     function montarPestanasDispositivo(backdrop, id) {
+        let conexionPedida = false;
+
+        montarPestanas(backdrop, (destino) => {
+            if (destino !== 'conexion' || conexionPedida) return;
+            conexionPedida = true;
+            cargarConexionDispositivo(id, backdrop.querySelector('[data-role="conexion-body"]'), null)
+                .catch(() => { conexionPedida = false; });       // permite reintentar
+        });
+    }
+
+    /* Solapas de un modal: alterna `.modal-tab` / `.modal-tabpanel` por
+       `data-tab` / `data-panel`. `onMostrar(destino)` es opcional y lo usan
+       los paneles que se cargan recien al abrirse (Dispositivo -> Conexion);
+       los que ya vienen renderizados en el HTML no lo necesitan. */
+    function montarPestanas(backdrop, onMostrar) {
         const tabs   = backdrop.querySelectorAll('.modal-tab');
         const panels = backdrop.querySelectorAll('.modal-tabpanel');
-        let conexionPedida = false;
 
         tabs.forEach((tab) => tab.addEventListener('click', () => {
             const destino = tab.dataset.tab;
@@ -1428,11 +1392,7 @@
             });
             panels.forEach((p) => { p.hidden = p.dataset.panel !== destino; });
 
-            if (destino === 'conexion' && !conexionPedida) {
-                conexionPedida = true;
-                cargarConexionDispositivo(id, backdrop.querySelector('[data-role="conexion-body"]'), null)
-                    .catch(() => { conexionPedida = false; });   // permite reintentar
-            }
+            if (typeof onMostrar === 'function') onMostrar(destino);
         }));
     }
 
@@ -1488,7 +1448,7 @@
         const sinDatos = (r.muestras || 0) === 0
             ? `<div class="alert alert-info" style="margin:0">
                    El equipo no informó su nivel de señal en las últimas
-                   ${etiquetaHoras(data.horas)}: la línea queda cortada en todo el período.
+                   ${etiquetaHoras(data.horas)}: el gráfico queda vacío.
                </div>`
             : '';
 
@@ -1505,9 +1465,10 @@
 
         return `
             <p class="modal-note">
-                Nivel de señal a lo largo del tiempo: un punto por hora con el promedio
-                de lo que informó el equipo en esa hora. Las horas sin reporte quedan
-                como un corte en la línea.
+                Nivel de señal a lo largo del tiempo. El equipo sólo informa su nivel
+                al conectarse o al arrancar, no en cada mensaje: los puntos son las
+                horas que midió y el tramo punteado arrastra el último nivel conocido.
+                Pasá el mouse por el gráfico para ver el detalle de cada hora.
             </p>
             <div class="senal-toolbar">
                 <span class="senal-toolbar-label">Período</span>
@@ -1569,33 +1530,48 @@
         const ejeX  = serie.map((p, i) => (i % paso !== 0 ? '' : `
             <text class="senal-tick" x="${x(i)}" y="${h - padB + 16}" text-anchor="middle">${etiquetaHora(p.hora, horas)}</text>`)).join('');
 
-        // Una polilínea por tramo continuo: los cortes NO se interpolan, que
-        // es justamente lo que hay que poder ver.
-        const tramos = [];
-        let tramo = [];
+        // El backend arrastra el último nivel conocido a las horas sin lectura
+        // (`estimado`), así que la línea es continua. Pero el tramo ESTIMADO se
+        // dibuja punteado y el MEDIDO sólido: si los dos fueran iguales, un
+        // equipo que informó dos veces en el día se vería igual que uno que
+        // informó cada hora, que es justo lo que no puede pasar.
+        const pts = [];
         serie.forEach((p, i) => {
-            if (p.dbm === null) { if (tramo.length) tramos.push(tramo); tramo = []; return; }
-            tramo.push(`${x(i).toFixed(1)},${y(p.dbm).toFixed(1)}`);
+            if (p.dbm === null) return;
+            pts.push({ i, cx: x(i).toFixed(1), cy: y(p.dbm).toFixed(1), medido: (p.muestras || 0) > 0 });
         });
-        if (tramo.length) tramos.push(tramo);
 
-        const linea = tramos.filter((t) => t.length > 1)
-            .map((t) => `<polyline class="senal-linea" points="${t.join(' ')}"/>`).join('');
+        // Se agrupan los segmentos consecutivos del mismo tipo en una sola
+        // polilínea: dibujar 168 <line> sueltas pierde los empalmes redondeados
+        // y llena el DOM al pedo. Un tramo es sólido sólo si sus DOS extremos
+        // son lecturas reales.
+        const tramos = [];
+        for (let k = 1; k < pts.length; k++) {
+            const solido = pts[k - 1].medido && pts[k].medido;
+            const ultimo = tramos[tramos.length - 1];
+            if (ultimo && ultimo.solido === solido) ultimo.pts.push(pts[k]);
+            else tramos.push({ solido, pts: [pts[k - 1], pts[k]] });
+        }
 
-        // Puntos: con pocas horas van todos; con muchas, sólo los que quedarían
-        // invisibles por no tener vecino con dato (una hora suelta entre cortes).
-        const puntos = serie.map((p, i) => {
-            if (p.dbm === null) return '';
-            const solo = (serie[i - 1]?.dbm ?? null) === null && (serie[i + 1]?.dbm ?? null) === null;
-            if (n > 48 && !solo) return '';
-            return `<circle class="senal-punto" cx="${x(i).toFixed(1)}" cy="${y(p.dbm).toFixed(1)}" r="${solo ? 3 : 2.5}"/>`;
-        }).join('');
+        const linea = tramos.map((t) => `<polyline class="senal-linea${t.solido ? '' : ' senal-linea-est'}"
+                  points="${t.pts.map((p) => `${p.cx},${p.cy}`).join(' ')}"/>`).join('');
 
-        // Columnas invisibles: una por hora, son el área sensible del hover.
+        // Un punto por cada hora MEDIDA -- las arrastradas no llevan, que es lo
+        // que deja ver de dónde salió cada dato. En 7 días son hasta ~168 y se
+        // achican para que no se empasten.
+        const radio  = n > 48 ? 3 : 3.5;
+        const puntos = pts.filter((p) => p.medido)
+            .map((p) => `<circle class="senal-punto" cx="${p.cx}" cy="${p.cy}" r="${radio}"/>`).join('');
+
+        // Columnas invisibles: una por hora, son el área sensible del hover. La
+        // hora con lectura lleva ademas su `cy`, para que al pasar el mouse el
+        // punto de esa hora se agrande y quede claro qué lectura se está
+        // leyendo en el tooltip.
         const hit = serie.map((p, i) => `
             <rect class="senal-hit" x="${(padL + (plotW * i) / n).toFixed(1)}" y="${padT}"
                   width="${(plotW / n).toFixed(2)}" height="${plotH}"
-                  data-x="${x(i).toFixed(1)}" data-tip="${escapeHtml(tipHora(p, horas))}"
+                  data-x="${x(i).toFixed(1)}"${(p.muestras || 0) > 0 ? ` data-cy="${y(p.dbm).toFixed(1)}"` : ''}
+                  data-tip="${escapeHtml(tipHora(p, horas))}"
                   role="img" aria-label="${escapeHtml(tipHora(p, horas))}"/>`).join('');
 
         return `
@@ -1604,7 +1580,9 @@
                      role="img" aria-label="Nivel de señal por hora, en dBm">
                     ${zonas}${ejeY}${ejeX}
                     <line class="senal-cross" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" hidden/>
-                    ${linea}${puntos}${hit}
+                    ${linea}${puntos}
+                    <circle class="senal-punto-activo" cx="0" cy="0" r="5.5" hidden/>
+                    ${hit}
                     <text class="senal-tick senal-unidad" x="${padL - 8}" y="${padT - 3}" text-anchor="end">dBm</text>
                 </svg>
                 <div class="senal-tip" hidden></div>
@@ -1619,10 +1597,19 @@
     }
 
     // Texto del tooltip / etiqueta accesible de una hora de la serie.
+    // La hora estimada NO se muestra como si fuera una medición: dice que el
+    // equipo no informó y de cuándo es el nivel que se está arrastrando.
     function tipHora(p, horas) {
         const cuando = formatDate(p.hora) || p.hora;
         if (p.dbm === null) return `${cuando} · sin reporte`;
+
         const banda = bandaSenal(p.porcentaje);
+        if (p.estimado) {
+            const desde = p.origen ? formatDate(p.origen) || p.origen : null;
+            return `${cuando} · sin reporte · último nivel conocido: ${p.dbm} dBm`
+                 + ` · ${p.porcentaje}% · ${banda.etiqueta}${desde ? ` (de ${desde})` : ''}`;
+        }
+
         const rango = p.minimo !== p.maximo ? ` (entre ${p.minimo} y ${p.maximo})` : '';
         return `${cuando} · ${p.dbm} dBm${rango} · ${p.porcentaje}% · ${banda.etiqueta}`
              + ` · ${p.muestras} ${p.muestras === 1 ? 'medición' : 'mediciones'}`;
@@ -1640,6 +1627,7 @@
         const plot  = contenedor.querySelector('.senal-plot');
         const tip   = contenedor.querySelector('.senal-tip');
         const cruz  = contenedor.querySelector('.senal-cross');
+        const marca = contenedor.querySelector('.senal-punto-activo');
         if (!plot || !tip || !cruz) return;
 
         plot.querySelectorAll('.senal-hit').forEach((celda) => {
@@ -1648,20 +1636,51 @@
                 cruz.setAttribute('x2', celda.dataset.x);
                 cruz.removeAttribute('hidden');
 
+                // Sólo las horas con lectura tienen `cy`: en las vacías la
+                // marca se esconde, así el tooltip que dice "sin reporte" no
+                // queda acompañado de un punto que no existe.
+                if (marca) {
+                    if (celda.dataset.cy) {
+                        marca.setAttribute('cx', celda.dataset.x);
+                        marca.setAttribute('cy', celda.dataset.cy);
+                        marca.removeAttribute('hidden');
+                    } else {
+                        marca.setAttribute('hidden', '');
+                    }
+                }
+
                 // La posición se mide sobre el DOM, no sobre el viewBox: el SVG
                 // escala con el modal y las unidades no son píxeles.
                 const c = celda.getBoundingClientRect();
                 const p = plot.getBoundingClientRect();
+
+                // Se muestra en `visibility: hidden` para poder medirlo: con el
+                // atributo `hidden` puesto es `display: none` y `offsetWidth`
+                // da 0. Es un solo reflow y no llega a verse.
                 tip.textContent   = celda.dataset.tip;
-                tip.style.left    = `${c.left - p.left + c.width / 2}px`;
-                tip.style.top     = `${c.top - p.top}px`;
+                tip.style.visibility = 'hidden';
                 tip.removeAttribute('hidden');
+
+                // El tooltip va centrado sobre la columna (`translate(-50%)`),
+                // así que en las horas de los extremos la mitad se salía del
+                // plot: el `.modal-body` tiene `overflow-y: auto` y eso vuelve
+                // `auto` también al eje X, así que aparecía una barra de scroll
+                // horizontal y el texto quedaba cortado. Acá se acota el centro
+                // para que ningún borde pase de la caja del gráfico.
+                const media  = tip.offsetWidth / 2;
+                const centro = c.left - p.left + c.width / 2;
+                const tope   = Math.max(media + 4, p.width - media - 4);
+
+                tip.style.left = `${Math.min(Math.max(centro, media + 4), tope)}px`;
+                tip.style.top  = `${c.top - p.top}px`;
+                tip.style.visibility = '';
             });
         });
 
         plot.addEventListener('mouseleave', () => {
             cruz.setAttribute('hidden', '');
             tip.setAttribute('hidden', '');
+            if (marca) marca.setAttribute('hidden', '');
         });
     }
 
@@ -2018,14 +2037,11 @@
 
     /* `ventana` = cuantos ids hacia atras mira la consulta. `registros`
        tiene ~3M filas y ningun indice (dominio, id): sin ventana, una
-       busqueda sin resultados barre la tabla entera (14 s medidos). Los
-       valores validos los replica api/actividad.php (VENTANAS). */
-    const ACTIVIDAD_VENTANAS = [
-        { valor: 200000,  label: 'Últimos 200.000 registros' },
-        { valor: 1000000, label: 'Último 1.000.000 de registros' },
-        { valor: 0,       label: 'Todo el historial (lento)' },
-    ];
-
+       busqueda sin resultados barre la tabla entera (14 s medidos).
+       NO es un filtro de la UI: es fija en 200.000 y viaja siempre igual
+       en el GET (api/actividad.php la valida contra su lista VENTANAS).
+       Para llegar al historial viejo esta la busqueda por codigo, que el
+       backend resuelve sin ventana. */
     const ACTIVIDAD_DEFAULTS = {
         codigo: '', usuario: 0, dispositivo: 0, sentido: 'S',
         desde: '', hasta: '', ventana: 200000, limite: 100, orden: 'id', dir: 'desc',
@@ -2233,7 +2249,7 @@
             el.textContent = 'Búsqueda por código: alcanza a todo el historial.';
         } else if (actividad.ventana > 0) {
             el.textContent = `Se busca dentro de los ${actividad.ventana.toLocaleString('es-AR')} registros más `
-                           + 'recientes del sistema. Para llegar al historial viejo, ampliá la ventana desde Filtros.';
+                           + 'recientes del sistema. Para llegar al historial viejo, buscá por código.';
         } else {
             el.textContent = 'Se busca en todo el historial: la consulta puede tardar varios segundos.';
         }
@@ -2313,53 +2329,97 @@
             return;
         }
 
-        const body = `<div class="view-grid">${[
-            viewCard('Código',              `<code>#${r.id}</code>`),
-            viewCard('Fecha',               escapeHtml(actividadFechaLarga(r.fecha))),
-            viewCard('Usuario',             r.usuario_nombre ? escapeHtml(r.usuario_nombre) : (r.usuario ? `<code>#${r.usuario}</code>` : '')),
-            viewCard('Cuenta',              r.usuario_login ? escapeHtml(r.usuario_login) : ''),
-            viewCard('Correo',              r.usuario_correo ? escapeHtml(r.usuario_correo) : '', true),
-            viewCard('Dispositivo',         r.dispositivo_nombre ? escapeHtml(r.dispositivo_nombre) : (r.dispositivo ? `<code>#${r.dispositivo}</code>` : '')),
-            viewCard('UUID del dispositivo', r.dispositivo_uuid ? `<code>${escapeHtml(r.dispositivo_uuid)}</code>` : ''),
-            viewCard('Canal',               r.canal_nombre ? escapeHtml(r.canal_nombre) : (r.canal ? `<code>#${r.canal}</code>` : '')),
-            viewCard('Número de canal',     r.canal_numero != null ? `<code>${r.canal_numero}</code>` : ''),
-            viewCard('Sentido',             actividadSentido(r.sentido)),
-            viewCard('Estado',              actividadEstado(r.estado)),
-            viewCard('Dominio',             r.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(r.dominio_nombre)}</span>` : ''),
+        /* Las tres fichas son `view-grid` de tarjetas al 50% y las tres
+           tienen una cantidad PAR de campos (8 / 8 / 8). La grilla es flex
+           con `flex-grow: 1` (CSS §11): con la cuenta impar la ultima
+           tarjeta se estira a todo el ancho y se lee como un campo
+           destacado a proposito. Al tocar cualquiera de las tres, mantener
+           la paridad -- o marcar una `full` en ranura impar. */
+        const general = `<div class="view-grid">${[
+            viewCard('Código',      `<code>#${r.id}</code>`),
+            viewCard('Fecha',       escapeHtml(actividadFechaLarga(r.fecha))),
+            viewCard('Usuario',     ref(r.usuario_nombre, r.usuario)),
+            viewCard('Cuenta',      escapeHtml(r.usuario_login || '')),
+            viewCard('Dispositivo', ref(r.dispositivo_nombre, r.dispositivo)),
+            viewCard('Canal',       ref(r.canal_nombre, r.canal)),
+            viewCard('Sentido',     actividadSentido(r.sentido)),
+            viewCard('Estado',      actividadEstado(r.estado)),
         ].join('')}</div>`;
 
-        // Footer sin "Editar": no hay modal de edicion para este recurso.
-        const m = openModal(`Consultar actividad <span class="muted">#${r.id}</span>`, body, {
-            footerHtml: '<button class="btn btn-ghost btn-icon" data-act="menu" title="Más acciones"><i class="fa-solid fa-bars"></i></button>',
-        });
+        const body = `
+            <div class="modal-tabs" role="tablist">
+                <button type="button" class="modal-tab active" data-tab="general" role="tab" aria-selected="true">
+                    <i class="fa-solid fa-circle-info"></i> General
+                </button>
+                <button type="button" class="modal-tab" data-tab="usuario" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-user"></i> Usuario
+                </button>
+                <button type="button" class="modal-tab" data-tab="dispositivo" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-microchip"></i> Dispositivo
+                </button>
+            </div>
+            <div class="modal-tabpanel" data-panel="general" role="tabpanel">${general}</div>
+            <div class="modal-tabpanel" data-panel="usuario" role="tabpanel" hidden>
+                ${fichaUsuarioActividad(r.usuario_ficha)}
+            </div>
+            <div class="modal-tabpanel" data-panel="dispositivo" role="tabpanel" hidden>
+                ${fichaDispositivoActividad(r.dispositivo_ficha)}
+            </div>
+        `;
 
-        m.backdrop.querySelector('[data-act="menu"]').addEventListener('click', (e) => {
-            e.stopPropagation();
-            const atajos = [
-                r.usuario ? {
-                    label: 'Filtrar por este usuario',
-                    icon:  'fa-user',
-                    onSelect: () => { m.close(); actividad.usuario = r.usuario; pintarBadgeFiltrosActividad(); cargarActividad(); },
-                } : null,
-                r.dispositivo ? {
-                    label: 'Filtrar por este dispositivo',
-                    icon:  'fa-microchip',
-                    onSelect: () => { m.close(); actividad.dispositivo = r.dispositivo; pintarBadgeFiltrosActividad(); cargarActividad(); },
-                } : null,
-            ].filter(Boolean);
+        /* `wide` por las pestañas: es el mismo criterio del modal de
+           Consultar dispositivo, que tambien las tiene. A 520px las tres
+           solapas y las tarjetas al 50% quedan apretadas.
+           Pie solo con "Cerrar": no hay modal de edicion para este recurso,
+           y los atajos (filtrar por usuario / dispositivo, copiar detalle)
+           viven en el menu contextual de la fila. */
+        const m = openModal(`Consultar actividad <span class="muted">#${r.id}</span>`, body, { wide: true });
+        montarPestanas(m.backdrop);
+    }
 
-            const detalle = `#${r.id} ${actividadFechaLarga(r.fecha)}`
-                + ` · ${r.usuario_nombre || r.usuario_login || '—'}`
-                + ` · ${r.dispositivo_nombre || r.dispositivo_uuid || '—'}`
-                + ` · ${r.canal_nombre || (r.canal ? '#' + r.canal : '—')}`
-                + ` · ${r.estado || '—'}`;
+    /* Las dos fichas las arma el GET por id de api/actividad.php con los
+       mismos JOIN del registro -- no se piden a api/usuarios.php ni a
+       api/dispositivos.php, que filtran por el dominio ACTUAL del usuario o
+       del equipo y darian 404 sobre actividad vieja perfectamente valida. */
+    function fichaUsuarioActividad(u) {
+        if (!u) return vacioPestana('fa-user', 'Este registro no tiene un usuario asociado.');
 
-            openRowMenu([
-                ...atajos,
-                ...(atajos.length ? [{ sep: true }] : []),
-                { label: 'Copiar detalle', icon: 'fa-copy', onSelect: () => copiar(detalle) },
-            ], e.currentTarget);
-        });
+        return `<div class="view-grid">${[
+            viewCard('Identificador',  u.uuid ? `<code>${escapeHtml(u.uuid)}</code>` : ''),
+            viewCard('Cuenta',         escapeHtml(u.usuario || '')),
+            viewCard('Nombre',         escapeHtml(u.nombre || '')),
+            viewCard('Correo',         escapeHtml(u.correo || '')),
+            viewCard('Celular',        escapeHtml(u.celular || '')),
+            viewCard('Último ingreso', escapeHtml(formatDate(u.ingresado) || '')),
+            viewCard('Registrado',     escapeHtml(formatDate(u.registrado) || '')),
+            viewCard('Estado',         badgeHabilitado(u.habilitado)),
+        ].join('')}</div>`;
+    }
+
+    function fichaDispositivoActividad(d) {
+        if (!d) return vacioPestana('fa-microchip', 'Este registro no tiene un dispositivo asociado.');
+
+        return `<div class="view-grid">${[
+            viewCard('Identificador', d.uuid ? `<code>${escapeHtml(d.uuid)}</code>` : ''),
+            viewCard('Nombre',        escapeHtml(d.nombre || '')),
+            viewCard('Modelo',        ref(d.modelo_nombre, d.modelo)),
+            viewCard('Serie',         escapeHtml(d.serial || '')),
+            viewCard('Señal',         escapeHtml(d.senal || '')),
+            viewCard('Último latido', escapeHtml(formatDate(d.latido) || '')),
+            viewCard('Estado',        badgeHabilitado(d.habilitado)),
+            viewCard('Enlace',        badgeEnlace(d.enlace)),
+        ].join('')}</div>`;
+    }
+
+    /* Estado vacio de una pestaña. Las tres solapas estan SIEMPRE, aunque
+       el registro no tenga usuario o dispositivo: que aparezcan y
+       desaparezcan segun la fila haria saltar el modal y dejaria al usuario
+       sin saber si la pestaña falta o si no hay dato. */
+    function vacioPestana(icono, texto) {
+        return `<div class="table-empty" style="padding:32px 12px;text-align:center">
+            <i class="fa-solid ${icono}" style="font-size:1.6rem;opacity:.35;display:block;margin-bottom:10px"></i>
+            ${escapeHtml(texto)}
+        </div>`;
     }
 
     /* ---------- Modal de filtros (skill abm_design §Modal de filtros) ---- */
@@ -2375,10 +2435,6 @@
         const chip = (val, label) =>
             `<button type="button" class="filter-chip${actividad.sentido === val ? ' active' : ''}" data-valor="${val}">${label}</button>`;
 
-        const ventanaOpts = ACTIVIDAD_VENTANAS.map((v) =>
-            `<option value="${v.valor}"${v.valor === actividad.ventana ? ' selected' : ''}>${escapeHtml(v.label)}</option>`
-        ).join('');
-
         const body = `
             <div class="filters-grid">
                 <div class="form-group">
@@ -2390,15 +2446,11 @@
                     <select id="af-f-usuario">${opciones(actividad.catalogos.usuarios, actividad.usuario)}</select>
                 </div>
             </div>
-            <div class="filters-grid">
-                <div class="form-group">
-                    <label for="af-f-dispositivo">Dispositivo</label>
-                    <select id="af-f-dispositivo">${opciones(actividad.catalogos.dispositivos, actividad.dispositivo)}</select>
-                </div>
-                <div class="form-group">
-                    <label for="af-f-ventana">Ventana de búsqueda</label>
-                    <select id="af-f-ventana">${ventanaOpts}</select>
-                </div>
+            <!-- Dispositivo va solo y a lo ancho: al sacarse "Ventana de
+                 busqueda" quedaba media columna vacia a su derecha. -->
+            <div class="form-group">
+                <label for="af-f-dispositivo">Dispositivo</label>
+                <select id="af-f-dispositivo">${opciones(actividad.catalogos.dispositivos, actividad.dispositivo)}</select>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -2464,7 +2516,6 @@
         $('#af-f-dispositivo').addEventListener('change', (e) => { actividad.dispositivo = +e.target.value || 0;  aplicarEnVivo(); });
         $('#af-f-desde').addEventListener('change',       (e) => { actividad.desde       = e.target.value;        aplicarEnVivo(); });
         $('#af-f-hasta').addEventListener('change',       (e) => { actividad.hasta       = e.target.value;        aplicarEnVivo(); });
-        $('#af-f-ventana').addEventListener('change',     (e) => { actividad.ventana     = +e.target.value;      aplicarEnVivo(); });
         $('#af-f-limite').addEventListener('change',      (e) => { actividad.limite      = +e.target.value || 100; aplicarEnVivo(); });
         $('#af-f-orden').addEventListener('change',       (e) => { actividad.orden       = e.target.value;        aplicarEnVivo(); });
         $('#af-f-dir').addEventListener('change',         (e) => { actividad.dir         = e.target.value;        aplicarEnVivo(); });
@@ -2485,7 +2536,6 @@
             $('#af-f-dispositivo').value = '0';
             $('#af-f-desde').value       = '';
             $('#af-f-hasta').value       = '';
-            $('#af-f-ventana').value     = ACTIVIDAD_DEFAULTS.ventana;
             $('#af-f-limite').value      = ACTIVIDAD_DEFAULTS.limite;
             $('#af-f-orden').value       = ACTIVIDAD_DEFAULTS.orden;
             $('#af-f-dir').value         = ACTIVIDAD_DEFAULTS.dir;
@@ -2746,16 +2796,11 @@
         }
 
         const body = `<div class="view-grid">${[
-            viewCard('Teléfono',    c.telefono ? `<code>${escapeHtml(c.telefono)}</code>` : ''),
-            viewCard('Serie',       c.serie ? `<code>${escapeHtml(c.serie)}</code>` : ''),
-            viewCard('Compañía',    textoCombo(c.compania_texto, c.compania)),
-            viewCard('Estado',      badgeHabilitado(c.habilitado)),
-            viewCard('País',        textoCombo(c.pais_texto, c.pais)),
-            viewCard('Artículo',    c.articulo_nombre ? escapeHtml(c.articulo_nombre) : (c.articulo ? `<code>#${c.articulo}</code>` : ''), true),
-            viewCard('Registrado',  escapeHtml(formatDate(c.registrado) || '')),
-            viewCard('Recargado',   escapeHtml(formatDate(c.recargado) || '')),
-            viewCard('Vencimiento', escapeHtml(formatDate(c.vencimiento) || '')),
-            viewCard('Dominio',     c.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(c.dominio_nombre)}</span>` : ''),
+            viewCard('Teléfono', c.telefono ? `<code>${escapeHtml(c.telefono)}</code>` : ''),
+            viewCard('Serie',    c.serie ? `<code>${escapeHtml(c.serie)}</code>` : ''),
+            viewCard('Compañía', textoCombo(c.compania_texto, c.compania)),
+            viewCard('País',     textoCombo(c.pais_texto, c.pais)),
+            viewCard('Estado',   badgeHabilitado(c.habilitado), true),
         ].join('')}</div>`;
 
         // Solo lectura: el chip se administra desde cloud, asi que el modal no
@@ -2983,7 +3028,6 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Código</th>
                                 <th>Identificador</th>
                                 <th>Emitida</th>
                                 <th>Emisor</th>
@@ -2993,7 +3037,7 @@
                             </tr>
                         </thead>
                         <tbody id="in-tbody">
-                            <tr><td colspan="7" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="6" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3023,7 +3067,7 @@
     async function cargarInvitaciones() {
         const tbody = document.getElementById('in-tbody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Cargando…</td></tr>';
 
         const qs = new URLSearchParams({
             q:      invitaciones.q,
@@ -3045,7 +3089,7 @@
             invitaciones.catalogos = data.catalogos    || { emisores: [] };
             invitaciones.resumen   = data.resumen      || null;
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="7" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
         }
 
@@ -3053,7 +3097,7 @@
         pintarBadgeFiltrosInvitaciones();
 
         if (invitaciones.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No hay invitaciones que coincidan con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No hay invitaciones que coincidan con la búsqueda.</td></tr>';
             return;
         }
 
@@ -3100,26 +3144,25 @@
         btn.classList.toggle('active', n > 0);
     }
 
-    function filaInvitacion(r) {
-        const emisor = r.emisor_nombre || r.emisor_login
-            ? `<div class="td-nombre">${escapeHtml(r.emisor_nombre || r.emisor_login)}</div>
-               ${r.emisor_nombre && r.emisor_login ? `<div class="td-id">${escapeHtml(r.emisor_login)}</div>` : ''}`
-            : DASH;
-
-        // El legacy apilaba nombre / celular / correo en una sola celda.
-        const contacto = [r.celular, r.correo].filter(Boolean)
+    /* Celda de persona: el nombre arriba en blanco y sus dos datos de contacto
+       debajo, en el tono tenue de `.td-id`. La comparten las dos columnas
+       -- Emisor (datos de `usuarios`) y Destinatario (datos de la propia
+       invitacion) -- para que las dos se lean igual. El legacy ya apilaba
+       nombre / celular / correo en una sola celda. */
+    function celdaPersona(nombre, correo, celular) {
+        const contacto = [correo, celular].filter(Boolean)
             .map((x) => `<div class="td-id">${escapeHtml(x)}</div>`).join('');
-        const destinatario = (r.nombre || contacto)
-            ? `${r.nombre ? `<div class="td-nombre">${escapeHtml(r.nombre)}</div>` : ''}${contacto}`
-            : DASH;
+        if (!nombre && !contacto) return DASH;
+        return `${nombre ? `<div class="td-nombre">${escapeHtml(nombre)}</div>` : ''}${contacto}`;
+    }
 
+    function filaInvitacion(r) {
         return `
             <tr data-id="${r.id}" class="row-clickable">
-                <td class="td-id">#${r.id}</td>
                 <td>${r.uuid ? `<code>${escapeHtml(r.uuid)}</code>` : DASH}</td>
                 <td>${escapeHtml(formatDate(r.emitida) || '') || DASH}</td>
-                <td>${emisor}</td>
-                <td>${destinatario}</td>
+                <td>${celdaPersona(r.emisor_nombre || r.emisor_login, r.emisor_correo, r.emisor_celular)}</td>
+                <td>${celdaPersona(r.nombre, r.correo, r.celular)}</td>
                 <td>${invitacionEstado(r.estado, r.estado_texto)}</td>
                 <td class="action-col">
                     <div class="actions">
@@ -3239,54 +3282,30 @@
             return;
         }
 
+        /* Dos bloques separados por una divisoria: arriba la invitacion (de
+           quien salio, a que dominio y con que identificador) y abajo el
+           destinatario con las fechas. Sin tarjeta `Codigo`. Arriba son
+           cuatro tarjetas media, asi que los dos renglones cierran solos;
+           abajo son cinco y por eso `Nombre` va `full` en la ranura impar
+           -- ver la nota de paridad de `.view-grid` en CLAUDE.md. */
         const body = `<div class="view-grid">${[
-            viewCard('Código',           `<code>#${r.id}</code>`),
-            viewCard('Identificador',    r.uuid ? `<code>${escapeHtml(r.uuid)}</code>` : ''),
-            viewCard('Estado',           invitacionEstado(r.estado, r.estado_texto)),
-            viewCard('Dominio',          r.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(r.dominio_nombre)}</span>` : (r.dominio ? `<code>#${r.dominio}</code>` : '')),
-            viewCard('Emisor',           r.emisor_nombre ? escapeHtml(r.emisor_nombre) : (r.emisor ? `<code>#${r.emisor}</code>` : '')),
-            viewCard('Cuenta del emisor', r.emisor_login ? escapeHtml(r.emisor_login) : ''),
-            viewCard('Correo del emisor', r.emisor_correo ? escapeHtml(r.emisor_correo) : '', true),
-            viewCard('Destinatario',     r.nombre ? escapeHtml(r.nombre) : '', true),
-            viewCard('Celular',          r.celular ? escapeHtml(r.celular) : ''),
-            viewCard('Correo',           r.correo ? escapeHtml(r.correo) : ''),
-            viewCard('Emitida',          escapeHtml(formatDate(r.emitida) || '')),
-            viewCard('Abierta',          escapeHtml(formatDate(r.abierta) || '')),
+            viewCard('Estado',        invitacionEstado(r.estado, r.estado_texto)),
+            viewCard('Dominio',       r.dominio_nombre ? `<span class="badge badge-info">${escapeHtml(r.dominio_nombre)}</span>` : (r.dominio ? `<code>#${r.dominio}</code>` : '')),
+            viewCard('Emisor',        r.emisor_nombre ? escapeHtml(r.emisor_nombre) : (r.emisor ? `<code>#${r.emisor}</code>` : '')),
+            viewCard('Identificador', r.uuid ? `<code>${escapeHtml(r.uuid)}</code>` : ''),
+            '<div class="view-sep"></div>',
+            viewCard('Nombre',        r.nombre ? escapeHtml(r.nombre) : '', true),
+            viewCard('Correo',        r.correo ? escapeHtml(r.correo) : ''),
+            viewCard('Celular',       r.celular ? escapeHtml(r.celular) : ''),
+            viewCard('Emitida',       escapeHtml(formatDate(r.emitida) || '')),
+            viewCard('Abierta',       escapeHtml(formatDate(r.abierta) || '')),
         ].join('')}</div>`;
 
-        // Footer sin "Editar": no hay modal de edicion para este recurso.
-        const m = openModal(`Consultar invitación <span class="muted">#${r.id}</span>`, body, {
-            footerHtml: '<button class="btn btn-ghost btn-icon" data-act="menu" title="Más acciones"><i class="fa-solid fa-bars"></i></button>',
-        });
-
-        m.backdrop.querySelector('[data-act="menu"]').addEventListener('click', (e) => {
-            e.stopPropagation();
-            const atajos = [
-                r.emisor ? {
-                    label: 'Filtrar por este emisor',
-                    icon:  'fa-user',
-                    onSelect: () => { m.close(); invitaciones.emisor = r.emisor; pintarBadgeFiltrosInvitaciones(); cargarInvitaciones(); },
-                } : null,
-                r.estado ? {
-                    label: `Filtrar por estado "${r.estado_texto || r.estado}"`,
-                    icon:  'fa-filter',
-                    onSelect: () => { m.close(); invitaciones.estado = r.estado; pintarBadgeFiltrosInvitaciones(); cargarInvitaciones(); },
-                } : null,
-            ].filter(Boolean);
-
-            const detalle = `#${r.id} ${r.uuid || ''}`
-                + ` · ${formatDate(r.emitida) || '—'}`
-                + ` · ${r.emisor_nombre || r.emisor_login || '—'}`
-                + ` · ${r.nombre || r.correo || r.celular || '—'}`
-                + ` · ${r.estado_texto || r.estado || '—'}`;
-
-            openRowMenu([
-                ...atajos,
-                ...(atajos.length ? [{ sep: true }] : []),
-                r.uuid ? { label: 'Copiar identificador', icon: 'fa-link', onSelect: () => copiar(r.uuid) } : null,
-                { label: 'Copiar detalle', icon: 'fa-copy', onSelect: () => copiar(detalle) },
-            ].filter(Boolean), e.currentTarget);
-        });
+        // Titulo sin el `#id` que llevan los otros modales de consulta: la
+        // invitacion se identifica por su `uuid`, que es una tarjeta mas.
+        // Pie sin "Editar" (no hay modal de edicion para este recurso) y sin
+        // el boton ☰: los atajos ya viven en el menu contextual de la fila.
+        openModal('Consultar invitación', body);
     }
 
     /* ---------- Modal de filtros (skill abm_design §Modal de filtros) ---- */
@@ -3437,7 +3456,7 @@
 
     const COMPROBANTES_DEFAULTS = {
         codigo: '', numero: '', estado: '', desde: '', hasta: '',
-        limite: 100, orden: 'id', dir: 'desc',
+        limite: 10, orden: 'id', dir: 'desc',
     };
 
     const CP_META = {
@@ -3664,10 +3683,13 @@
 
     /* Pendiente = todavia se debe; Cancelado = saldado. Son los dos unicos
        estados que el backend deja ver. */
+    const CP_ESTADO_PENDIENTE = '2';
+    const CP_ESTADO_CANCELADO = '3';
+
     function comprobanteEstado(r) {
         const texto = escapeHtml(r.estado_texto || r.estado || '');
         if (!texto) return DASH;
-        const clase = r.estado === '2' ? 'badge-warn' : 'badge-success';
+        const clase = r.estado === CP_ESTADO_PENDIENTE ? 'badge-warn' : 'badge-success';
         return `<span class="badge ${clase}">${texto}</span>`;
     }
 
@@ -3695,16 +3717,19 @@
 
     /* Menu contextual de fila. Sin Editar ni Eliminar: el modulo es de solo
        lectura. Las acciones propias son las del comprobante en si (abrirlo,
-       bajarlo, compartirlo) y el atajo para acotar el listado por estado. */
+       bajarlo, compartirlo) y el atajo para acotar el listado por estado.
+       Ese atajo NO se ofrece sobre un comprobante Cancelado (misma regla en
+       Facturas y en Recibos, que comparten este menu). */
     function menuComprobante(r) {
-        const e = r.enlaces;
+        const e       = r.enlaces;
+        const filtrar = r.estado && r.estado !== CP_ESTADO_CANCELADO;
         return [
             { label: 'Consultar', icon: 'fa-eye', onSelect: () => verComprobante(r.id) },
             e ? { label: 'Abrir comprobante', icon: 'fa-up-right-from-square', onSelect: () => window.open(e.abrir, '_blank', 'noopener') } : null,
             e ? { label: 'Descargar',         icon: 'fa-download',            onSelect: () => window.open(e.descargar, '_blank', 'noopener') } : null,
             e ? { label: 'Copiar enlace',     icon: 'fa-link',                onSelect: () => copiar(e.compartir) } : null,
-            r.estado ? { sep: true } : null,
-            r.estado ? {
+            filtrar ? { sep: true } : null,
+            filtrar ? {
                 label: `Filtrar por estado "${r.estado_texto || r.estado}"`,
                 icon:  'fa-filter',
                 onSelect: () => { cp().estado = r.estado; pintarBadgeFiltrosComprobantes(); cargarComprobantes(); },
@@ -3903,7 +3928,7 @@
         });
         $('#cf-f-desde').addEventListener('change',  (e) => { s.desde  = e.target.value;        aplicarEnVivo(); });
         $('#cf-f-hasta').addEventListener('change',  (e) => { s.hasta  = e.target.value;        aplicarEnVivo(); });
-        $('#cf-f-limite').addEventListener('change', (e) => { s.limite = +e.target.value || 100; aplicarEnVivo(); });
+        $('#cf-f-limite').addEventListener('change', (e) => { s.limite = +e.target.value || 10; aplicarEnVivo(); });
         $('#cf-f-orden').addEventListener('change',  (e) => { s.orden  = e.target.value;        aplicarEnVivo(); });
         $('#cf-f-dir').addEventListener('change',    (e) => { s.dir    = e.target.value;        aplicarEnVivo(); });
 
@@ -4033,27 +4058,45 @@
      * el ancho del rotulo a padR -- no dibujarlos sobre el area del plot. */
     const USO_VB = { w: 1200, h: 280, padL: 56, padR: 16, padT: 16, padB: 34 };
 
-    // Ultimo payload + vista elegida. Se guardan para poder alternar entre
-    // grafico y tabla sin volver a pedir: es la misma informacion mirada de
-    // dos formas, y la consulta no es barata.
-    let usoDatos = null;
-    let usoVista = 'grafico';
+    /* Ultimo payload y ventana elegida. Cambiar de ventana vuelve a pedir:
+     * son datos distintos, no otra vista de los mismos.
+     *
+     * La ventana por defecto vive aca y ademas en el backend
+     * (VENTANA_DEFECTO). Las dos tienen que decir lo mismo: el front la manda
+     * siempre explicita, asi que la del backend solo entra en juego si se
+     * pega la URL del endpoint a mano, pero si se cambia una hay que cambiar
+     * la otra o el chip marcado no coincide con lo que se sirve. */
+    let usoDatos   = null;
+    let usoVentana = '30d';
 
     async function cargarUso() {
         const cont = document.getElementById('db-uso');
         if (!cont) return;
 
-        cont.innerHTML = `<div class="uso-card"><div class="uso-head"><div class="uso-title">
-                <i class="fa-solid fa-chart-line"></i><span>Señales por dispositivo</span>
-                <span class="uso-hint">cargando…</span>
-            </div></div></div>`;
+        // Al cambiar de ventana ya hay un grafico en pantalla: en vez de
+        // reemplazarlo por un cartel de "cargando" (que hace saltar el alto
+        // de la pagina), se atenua el que esta y se cambia recien cuando
+        // llegan los datos nuevos.
+        const card = cont.querySelector('.uso-card');
+        if (card) {
+            card.classList.add('uso-cargando');
+        } else {
+            cont.innerHTML = `<div class="uso-card"><div class="uso-head"><div class="uso-title">
+                    <i class="fa-solid fa-chart-line"></i><span>Uso por dispositivo</span>
+                    <span class="uso-hint">cargando…</span>
+                </div></div></div>`;
+        }
 
         try {
-            usoDatos = await api('api/dashboard_senales.php');
+            usoDatos = await api(`api/dashboard_senales.php?ventana=${encodeURIComponent(usoVentana)}`);
         } catch (err) {
             cont.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
             return;
         }
+        // El backend puede haber caido en su ventana de defecto si la clave
+        // no le cerro; se toma la que efectivamente sirvio, para que el chip
+        // marcado sea el que corresponde a lo que se esta viendo.
+        usoVentana = usoDatos.resumen?.ventana || usoVentana;
         pintarUso();
     }
 
@@ -4076,18 +4119,25 @@
     const claseSlot = (s) => `uso-s${s.slot || 0}`;
 
     function vistaUso(data) {
-        const r     = data.resumen || {};
-        const tabla = usoVista === 'tabla';
+        const r = data.resumen || {};
 
-        // "Respuestas" y no "señales": el grafico cuenta solo los mensajes
-        // `RET=` -- lo que el equipo contesta cuando lo operan -- y no los
-        // latidos ni los reportes periodicos, que llegan igual sin que nadie
-        // toque el equipo. Ver la cabecera de api/dashboard_senales.php.
+        // "Comandos" y no "señales": el grafico cuenta solo los mensajes
+        // `CMD=` -- las ordenes que se le mandan al equipo -- y no los latidos
+        // ni los reportes periodicos, que llegan igual sin que nadie lo toque.
+        // Ver la cabecera de api/dashboard_senales.php.
         const hint = [
-            `últimos ${r.dias || 30} días`,
-            `${formatNumero(r.total || 0)} ${r.total === 1 ? 'respuesta' : 'respuestas'}`,
+            r.etiqueta || 'últimos 30 días',
+            `${formatNumero(r.total || 0)} ${r.total === 1 ? 'comando' : 'comandos'}`,
             `${r.equipos_activos || 0} de ${r.equipos_dominio || 0} dispositivos`,
         ].join(' · ');
+
+        // Los chips salen de `opciones` (los define el backend), no de una
+        // lista propia: dos listas se desincronizan y el front terminaria
+        // ofreciendo una ventana que el endpoint no sabe servir.
+        const chips = (data.opciones || []).map((o) => `
+            <button type="button" class="filter-chip${o.clave === usoVentana ? ' active' : ''}"
+                    data-ventana="${escapeHtml(o.clave)}"
+                    aria-pressed="${o.clave === usoVentana}">${escapeHtml(o.corta)}</button>`).join('');
 
         return `
             <div class="uso-card">
@@ -4098,10 +4148,11 @@
                         <span class="uso-hint">${escapeHtml(hint)}</span>
                     </div>
                     <div class="uso-actions">
-                        <button type="button" class="btn-icon-sm${tabla ? ' active' : ''}" data-act="vista"
-                                title="${tabla ? 'Ver gráfico' : 'Ver tabla'}" aria-pressed="${tabla}">
-                            <i class="fa-solid ${tabla ? 'fa-chart-line' : 'fa-list'}" aria-hidden="true"></i>
-                        </button>
+                        <div class="uso-chips" role="group" aria-label="Período">${chips}</div>
+                        <a href="#/actividad" class="btn-icon-sm"
+                           title="Ver actividad" aria-label="Ver actividad">
+                            <i class="fa-solid fa-list" aria-hidden="true"></i>
+                        </a>
                         <button type="button" class="btn-icon-sm" data-act="refrescar"
                                 title="Refrescar" aria-label="Refrescar">
                             <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
@@ -4118,9 +4169,6 @@
         if (!(data.series || []).length) {
             return `<div class="alert alert-info" style="margin:0">${sinUso(r)}</div>`;
         }
-        if (usoVista === 'tabla') {
-            return tablaUso(data);
-        }
 
         const dibujadas = usoDibujadas(data);
         const leyenda = dibujadas.map((s) => `
@@ -4133,7 +4181,7 @@
     }
 
     // Mensaje de la ventana vacia. Que el dominio no haya registrado nada en
-    // 30 dias es un dato en si mismo, asi que se dice cuando fue la ultima
+    // el periodo es un dato en si mismo, asi que se dice cuando fue la ultima
     // senal de vida conocida en lugar de dejar el grafico en blanco.
     function sinUso(r) {
         if (!r.equipos_dominio) {
@@ -4141,7 +4189,7 @@
         }
         const cuando = formatDate(r.ultima_actividad);
         return `Ninguno de los ${r.equipos_dominio} dispositivos del dominio registró uso `
-             + `en los últimos ${r.dias || 30} días.`
+             + `en ${escapeHtml(r.periodo || 'el período')}.`
              + (cuando ? ` La última actividad conocida es del ${escapeHtml(cuando)}.` : '');
     }
 
@@ -4150,7 +4198,7 @@
      * hover son circulos sueltos, no vertices de la polilinea, asi que si las
      * dos cuentas se separan el punto queda al lado de su linea. */
     function geometriaUso(data) {
-        const n = (data.dias || []).length || 1;
+        const n = (data.puntos || []).length || 1;
         const { w, h, padL, padR, padT, padB } = USO_VB;
         const plotW = w - padL - padR;
         const plotH = h - padT - padB;
@@ -4164,7 +4212,8 @@
     }
 
     function graficoUso(data, dibujadas) {
-        const dias = data.dias || [];
+        const puntos = data.puntos || [];
+        const porHora = data.granularidad === 'hora';
         const { n, w, h, padL, padR, padT, padB, plotW, plotH, ticks, x, y } = geometriaUso(data);
 
         // Guias y rotulos del eje Y en cifras redondas.
@@ -4173,42 +4222,45 @@
             <text class="uso-tick" x="${padL - 8}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${formatNumero(v)}</text>`).join('');
 
         // Eje X: un paso que deje las etiquetas sin pisarse, contado DESDE EL
-        // ULTIMO DIA hacia atras. Anclarlo al ultimo y no al primero es lo que
-        // garantiza que el dia de hoy siempre lleve rotulo: si el paso no
-        // divide justo a la ventana, contando desde el principio el ultimo
-        // rotulo cae dias antes del final y el grafico se lee como si le
+        // ULTIMO PUNTO hacia atras. Anclarlo al ultimo y no al primero es lo
+        // que garantiza que el punto en curso siempre lleve rotulo: si el
+        // paso no divide justo a la ventana, contando desde el principio el
+        // ultimo rotulo cae antes del final y el grafico se lee como si le
         // faltara el tramo mas reciente, que es el que mas se mira.
         const paso   = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 46))));
         const rotula = new Set();
         for (let i = n - 1; i >= 0; i -= paso) rotula.add(i);
 
-        const ejeX = dias.map((d, i) => (!rotula.has(i) ? '' : `
-            <text class="uso-tick" x="${x(i).toFixed(1)}" y="${h - padB + 16}" text-anchor="middle">${etiquetaDia(d)}</text>`)).join('');
+        const ejeX = puntos.map((p, i) => (!rotula.has(i) ? '' : `
+            <text class="uso-tick" x="${x(i).toFixed(1)}" y="${h - padB + 16}" text-anchor="middle">${etiquetaPunto(p, porHora)}</text>`)).join('');
 
         const lineas = dibujadas.map((s) => {
             const pts = (s.valores || []).map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
             return `<polyline class="uso-linea ${claseSlot(s)}" points="${pts}"/>`;
         }).join('');
 
-        // Un punto por serie, escondido: el hover lo mueve a la columna que
-        // se esta mirando en lugar de dibujar 30 x 7 circulos permanentes.
-        const puntos = dibujadas.map((s) => `
+        // Un circulo por serie, escondido: el hover lo mueve a la columna que
+        // se esta mirando en lugar de dibujar n x 7 puntos permanentes.
+        const marcas = dibujadas.map((s) => `
             <circle class="uso-punto ${claseSlot(s)}" r="3.5" cx="0" cy="0" hidden/>`).join('');
 
-        // Columnas invisibles: una por dia, el area sensible del hover. Son
+        // Columnas invisibles: una por punto, el area sensible del hover. Son
         // mucho mas anchas que la linea, asi no hay que apuntarle al pixel.
-        const hit = dias.map((d, i) => `
+        const hit = puntos.map((p, i) => `
             <rect class="uso-hit" x="${(padL + (plotW * i) / n).toFixed(1)}" y="${padT}"
                   width="${(plotW / n).toFixed(2)}" height="${plotH}"
                   data-i="${i}" data-x="${x(i).toFixed(1)}"/>`).join('');
 
+        const alt = `Comandos por dispositivo y por ${porHora ? 'hora' : 'día'}, `
+                  + `${escapeHtml(data.resumen?.etiqueta || '')}`;
+
         return `
             <div class="uso-plot">
                 <svg class="uso-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet"
-                     role="img" aria-label="Señales registradas por dispositivo y por día en los últimos ${n} días">
+                     role="img" aria-label="${alt}">
                     ${ejeY}${ejeX}
                     <line class="uso-cross" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" hidden/>
-                    ${lineas}${puntos}${hit}
+                    ${lineas}${marcas}${hit}
                 </svg>
                 <div class="uso-tip" hidden></div>
             </div>`;
@@ -4231,53 +4283,33 @@
         return { tope, ticks };
     }
 
-    // 'YYYY-MM-DD' -> 'DD/MM'
-    function etiquetaDia(dia) {
-        const m = String(dia ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        return m ? `${m[3]}/${m[2]}` : '';
+    /* Rotulo del eje X. La clave del punto es 'YYYY-MM-DD' en las ventanas
+     * por dia y 'YYYY-MM-DD HH:00:00' en la de 24 h; el eje muestra 'DD/MM' o
+     * 'HH:00' segun el caso. En 24 h la fecha no aporta -- son todas de hoy o
+     * de ayer -- y la hora es justamente lo que se esta mirando. */
+    function etiquetaPunto(punto, porHora) {
+        const m = String(punto ?? '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}))?/);
+        if (!m) return '';
+        return porHora ? `${m[4] ?? '00'}:00` : `${m[3]}/${m[2]}`;
     }
 
-    /* Vista de tabla: el gemelo accesible del grafico. Lista TODOS los
-     * equipos con actividad, no solo los seis que entran en la paleta, asi
-     * que ninguna cifra queda escondida atras de "otros" ni del hover. */
-    function tablaUso(data) {
-        const dias   = data.dias || [];
-        const series = data.series || [];
-
-        const cabecera = series.map((s) => `
-            <th><span class="uso-tabla-serie ${claseSlot(s)}">${s.slot ? '<i></i>' : ''}${escapeHtml(s.nombre)}</span></th>`).join('');
-
-        const filas = dias.map((d, i) => {
-            const celdas = series.map((s) => celdaUso(s.valores[i])).join('');
-            const total  = series.reduce((acc, s) => acc + (s.valores[i] || 0), 0);
-            return `<tr><td>${escapeHtml(formatDate(d) || d)}</td>${celdas}<td>${celdaValor(total)}</td></tr>`;
-        }).join('');
-
-        const totales = series.map((s) => `<td>${formatNumero(s.total)}</td>`).join('');
-
-        return `
-            <div class="uso-tabla-wrap table-card">
-                <table class="uso-tabla">
-                    <thead><tr><th>Fecha</th>${cabecera}<th>Total</th></tr></thead>
-                    <tbody>${filas}</tbody>
-                    <tfoot><tr><td>Total</td>${totales}<td>${formatNumero(data.resumen?.total || 0)}</td></tr></tfoot>
-                </table>
-            </div>`;
-    }
-
-    const celdaValor = (v) => (v ? formatNumero(v) : '<span class="uso-cero">0</span>');
-    const celdaUso   = (v) => `<td>${celdaValor(v || 0)}</td>`;
-
-    /* Cablea lo que el HTML no puede: los dos botones de la cabecera y el
-     * hover del grafico (cruz vertical + puntos + tooltip). Se llama despues
-     * de cada render. */
+    /* Cablea lo que el HTML no puede: los chips de periodo, el boton de
+     * refrescar y el hover del grafico (cruz vertical + puntos + tooltip).
+     * El otro icono de la cabecera NO se cablea aca: es un <a href="#/actividad">
+     * y lo resuelve el router por hash, asi que ademas sirve para abrir el
+     * modulo en una pestaña nueva. Se llama despues de cada render. */
     function activarUso(cont) {
-        const btnVista = cont.querySelector('[data-act="vista"]');
-        const btnRefr  = cont.querySelector('[data-act="refrescar"]');
+        const btnRefr = cont.querySelector('[data-act="refrescar"]');
 
-        btnVista?.addEventListener('click', () => {
-            usoVista = usoVista === 'tabla' ? 'grafico' : 'tabla';
-            pintarUso();
+        // Cambiar de ventana SI vuelve a pedir: son datos distintos, no otra
+        // vista de los mismos. Se ignora el click en el chip ya activo para
+        // no gastar una consulta en repintar lo mismo.
+        cont.querySelectorAll('.uso-chips [data-ventana]').forEach((chip) => {
+            chip.addEventListener('click', () => {
+                if (chip.dataset.ventana === usoVentana) return;
+                usoVentana = chip.dataset.ventana;
+                cargarUso();
+            });
         });
 
         btnRefr?.addEventListener('click', () => {
@@ -4340,11 +4372,12 @@
         });
     }
 
-    /* Contenido del tooltip: el dia y, debajo, cada serie dibujada con su
-     * cifra. Se ordena de mayor a menor para que el orden de las filas
-     * coincida con el orden vertical de las lineas en esa columna. */
+    /* Contenido del tooltip: el punto (dia u hora, segun la ventana) y,
+     * debajo, cada serie dibujada con su cifra. Se ordena de mayor a menor
+     * para que el orden de las filas coincida con el orden vertical de las
+     * lineas en esa columna. */
     function tipUso(data, dibujadas, i) {
-        const dia   = (data.dias || [])[i];
+        const dia   = (data.puntos || [])[i];
         const filas = dibujadas
             .map((s) => ({ s, v: s.valores[i] || 0 }))
             .sort((a, b) => b.v - a.v)
@@ -4439,9 +4472,9 @@
             viewCard('Razón social',     escapeHtml(c.razon), true),
             viewCard('Condición fiscal', c.condicion ? escapeHtml(c.condicion_texto || c.condicion) : ''),
             viewCard('CUIT',             c.cuit ? `<code>${escapeHtml(c.cuit)}</code>` : ''),
-            viewCard('Contacto',         escapeHtml(c.contacto)),
+            viewCard('Contacto',         escapeHtml(c.contacto), true),
+            viewCard('Correo',           escapeHtml(c.correo)),
             viewCard('Celular',          escapeHtml(c.celular)),
-            viewCard('Correo',           escapeHtml(c.correo), true),
         ].join('');
     }
 
@@ -4460,11 +4493,11 @@
                 `<input type="text" id="fc-cuit" maxlength="13" inputmode="numeric"
                         placeholder="11 dígitos" value="${escapeHtml(c.cuit)}">`),
             editCard('Contacto', 'fc-contacto',
-                `<input type="text" id="fc-contacto" maxlength="255" value="${escapeHtml(c.contacto)}">`),
+                `<input type="text" id="fc-contacto" maxlength="255" value="${escapeHtml(c.contacto)}">`, true),
+            editCard('Correo', 'fc-correo',
+                `<input type="email" id="fc-correo" maxlength="255" value="${escapeHtml(c.correo)}">`),
             editCard('Celular', 'fc-celular',
                 `<input type="tel" id="fc-celular" maxlength="255" value="${escapeHtml(c.celular)}">`),
-            editCard('Correo', 'fc-correo',
-                `<input type="email" id="fc-correo" maxlength="255" value="${escapeHtml(c.correo)}">`, true),
         ].join('');
     }
 

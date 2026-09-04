@@ -44,7 +44,15 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 const ORDEN_VALIDO = ['id', 'emision', 'vencimiento', 'total', 'serie'];
-const MAX_LIMITE   = 1000;
+
+/**
+ * Limite por defecto del listado. Bajo a proposito: un contrato factura un
+ * puñado de comprobantes por mes y lo que se mira es lo ultimo emitido, no el
+ * historial completo. El front arranca con el mismo valor y se sube desde el
+ * modal de Filtros hasta MAX_LIMITE.
+ */
+const DEFAULT_LIMITE = 10;
+const MAX_LIMITE     = 1000;
 const MAX_RENGLONES = 200;
 
 /** Tipos de talonario que entran en cada solapa del panel. */
@@ -100,11 +108,11 @@ function handleList(string $tipo): void
     $estado = trim((string) ($_GET['estado'] ?? ''));
     $desde  = fechaFiltro($_GET['desde'] ?? '');
     $hasta  = fechaFiltro($_GET['hasta'] ?? '');
-    $limite = (int)         ($_GET['limite'] ?? 100);
+    $limite = (int)         ($_GET['limite'] ?? DEFAULT_LIMITE);
     $orden  = (string)      ($_GET['orden']  ?? 'id');
     $dir    = strtolower((string) ($_GET['dir'] ?? 'desc')) === 'asc' ? 'ASC' : 'DESC';
 
-    if ($limite <= 0)         $limite = 100;
+    if ($limite <= 0)         $limite = DEFAULT_LIMITE;
     if ($limite > MAX_LIMITE) $limite = MAX_LIMITE;
     if (!in_array($orden, ORDEN_VALIDO, true)) $orden = 'id';
     if (!in_array($estado, ESTADOS_VISIBLES, true)) $estado = '';

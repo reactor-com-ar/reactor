@@ -115,22 +115,29 @@ implementes cada uno.
 
 `api/dashboard_senales.php` + `renderDashboard()` agregan debajo de las stat
 cards un gráfico de líneas multi-serie: una línea por dispositivo del dominio,
-un punto por día, sobre los últimos 30 días. SVG dibujado a mano, como el de
-Conexión. Reglas que no se deducen del esquema:
+sobre una ventana que elige el usuario (24 h / 7 / 15 / 30 días, **por defecto
+30 días** — ver "Selector de período" más abajo). SVG dibujado a mano, como el
+de Conexión. Reglas que no se deducen del esquema:
 
-- **Sólo cuentan los mensajes que empiezan con `RET=`.** `senales` mezcla
-  varias familias en la misma tabla y la mayoría no es uso del equipo:
-  `REP=LAT` / `REP=CNX` / `REP=INI` son latido, conexión y arranque (llegan
-  igual sin que nadie toque el equipo), `REP=SNS` / `REP=CAP` / `REP=CEN` son
-  reportes periódicos de sensores, y `CMD=…` (sentido `'S'`) es la orden que
-  sale hacia el equipo. `RET=…` es la **respuesta** del equipo a esa orden y
-  es la única familia que prueba que alguien lo operó. En la ventana medida
-  son 17.516 de 70.290 filas de un dominio — el filtro cambia el ranking, no
-  sólo la escala: un equipo puede ser el 2º en señales totales y el 8º en uso
-  real. Se cuenta la respuesta y no el `CMD=` que la provoca, para no contar
-  dos veces la misma interacción. Al ser todas entrantes **no hace falta
-  filtrar por `sentido`**: el prefijo ya lo determina.
-- **Un día sin respuestas vale 0, no "sin dato".** Es la diferencia de fondo
+- **Sólo cuentan los mensajes que empiezan con `CMD=`, que son salientes.**
+  `senales` mezcla varias familias en la misma tabla y la mayoría no es uso
+  del equipo: `REP=LAT` / `REP=CNX` / `REP=INI` son latido, conexión y
+  arranque (llegan igual sin que nadie toque el equipo), `REP=SNS` /
+  `REP=CAP` / `REP=CEN` son reportes periódicos de sensores, y `RET=…`
+  (sentido `'E'`) es la respuesta del equipo. `CMD=…` es la **orden** que
+  sale hacia el equipo: en la ventana medida son 18.064 de 71.789 filas de un
+  dominio, todas con `sentido = 'S'`. El filtro cambia el ranking, no sólo la
+  escala: un equipo puede ser el 2º en señales totales y el 8º en uso real.
+- **Se cuenta la orden (`CMD=`) y no la respuesta (`RET=`).** Lo que el
+  gráfico mide es cuánto se **operó** el equipo, y eso es una acción de la
+  plataforma sobre el equipo, no del equipo sobre la plataforma. Contar
+  `RET=` haría que un equipo que dejó de contestar apareciera como "sin uso"
+  cuando en realidad se lo siguió comandando — que es justo lo que hay que
+  ver. En la ventana medida la diferencia son 195 mensajes (18.064 `CMD=`
+  contra 17.869 `RET=`): órdenes que no obtuvieron respuesta.
+- Al ser todas salientes **no hace falta filtrar por `sentido`**: el prefijo
+  ya lo determina (verificado: las 18.064 son `'S'`).
+- **Un día sin comandos vale 0, no "sin dato".** Es la diferencia de fondo
   con el gráfico de Conexión: allá el eje Y es una *medición* y las horas sin
   reporte son un corte en la línea; acá es un *conteo* y que nadie haya usado
   el equipo es el dato. Las líneas van enteras, sin huecos.
@@ -192,25 +199,175 @@ Conexión. Reglas que no se deducen del esquema:
 - **Dashboard hace dos cargas independientes**, no una: el inventario es
   instantáneo y el gráfico agrega cientos de miles de filas. Unirlas haría
   esperar a los números de arriba sin necesidad.
-- El botón ☰ del encabezado alterna gráfico ↔ tabla **sin volver a pedir** (es
-  la misma información mirada de dos formas y la consulta no es barata); el de
-  refrescar sí re-consulta.
+- **El botón ☰ del encabezado va al módulo Actividad** (`<a href="#/actividad">`,
+  no un `<button>` cableado: lo resuelve el router por hash, así que además
+  sirve para abrir el módulo en una pestaña nueva). **No hay vista de tabla**
+  — existió hasta el 03/09/2026 y se descartó por pedido explícito. Con eso
+  las cifras exactas del gráfico quedan sólo en el tooltip; el sustituto es
+  Actividad, que lista los registros de fondo. Si alguna vez hace falta el
+  detalle numérico del gráfico, el payload ya trae la serie de **cada** equipo
+  (`series` completo, con `slot = null` en los que no entraron a la paleta):
+  no hay que tocar el endpoint, sólo volver a dibujar la tabla.
+
+**Selector de período (24 h / 7 / 15 / 30 días, por defecto 30 días).** Chips en
+el encabezado de la tarjeta, `?ventana=24h|7d|15d|30d`. Reglas propias:
+
+- **La granularidad la decide la ventana, no un parámetro aparte**: 24 h se
+  agrupa por **hora** (24 puntos, eje en `HH:00`) y las ventanas en días por
+  **día** (7 / 15 / 30 puntos, eje en `DD/MM`). Agrupar 24 h por día daría un
+  gráfico de un solo punto y 30 días por hora daría 720 puntos ilegibles; por
+  eso la unidad viaja dentro de `VENTANAS` y el front no puede combinarlas
+  mal. Por lo mismo el payload habla de `puntos` / `granularidad` y no de
+  `dias`.
+- **La expresión de `GROUP BY` sale de una lista cerrada, no del pedido**: va
+  interpolada en el SQL (`DATE(fecha)` o `DATE_FORMAT(...)`), así que un valor
+  de afuera sería inyección. Y tiene que producir **exactamente** las mismas
+  claves que arma `puntos()` en PHP, o el emparejamiento falla en silencio y
+  la serie queda toda en cero.
+- **Una ventana desconocida cae en la de defecto, no corta con 4xx**: el front
+  sólo manda claves de `opciones`, así que llegar con otra cosa es una URL a
+  mano y no vale romperle la pantalla al usuario. El front después lee
+  `resumen.ventana` para marcar el chip que corresponde a lo que se está
+  viendo, no el que se clickeó.
+- **Los chips los arma el front con `opciones` del backend**, no con una lista
+  propia: dos listas se desincronizan y el front terminaría ofreciendo una
+  ventana que el endpoint no sabe servir.
+- **La ventana por defecto está declarada dos veces** — `usoVentana` en
+  `app.js` y `VENTANA_DEFECTO` en el endpoint — y **tienen que decir lo
+  mismo**. El front la manda siempre explícita, así que la del backend sólo
+  entra en juego si se pega la URL del endpoint a mano; pero si se cambia una
+  sola, el chip marcado deja de coincidir con lo que se sirve.
+- **Al cambiar de ventana se atenúa el gráfico que ya está** (`.uso-cargando`)
+  en vez de reemplazarlo por un cartel de "cargando": así no salta el alto de
+  la página. Los chips quedan al 100% para que se vea cuál se acaba de elegir.
+- **`etiqueta` y `periodo` son dos strings distintos** ("últimos 7 días" para
+  el encabezado suelto, "los últimos 7 días" para meter en una oración). El
+  artículo no se pega en el front porque el género cambia con la unidad —
+  *las* últimas 24 horas contra *los* últimos 7 días — y esa concordancia no
+  es lógica de presentación.
+- Costo medido en dev (dominio de 13 equipos): 0,04 s de búsqueda del piso
+  —constante, no depende de la ventana— más 0,004 s (24 h) a 0,06 s (30 días)
+  de agregación.
+
+**El "ahora" de la ventana sale de la base (`SELECT NOW()`), no de PHP**, por
+la misma razón que en la pestaña Conexión: los dos relojes no están alineados
+(PHP en UTC, la sesión de MySQL en -03:00, medido el 03/09/2026) y
+`senales.fecha` la escribe la base. Con el reloj de PHP la ventana se corre 3
+horas hacia adelante, los últimos puntos caen en el futuro y salen siempre en
+cero, así que el gráfico se lee como si los equipos hubieran dejado de
+responder.
+
+### Dispositivos → modal Consultar → pestaña General
+
+La ficha **no muestra todo lo que devuelve el endpoint**: son 16 campos de los
+~35 que sirve `api/dispositivos.php`. Quedan fuera a propósito:
+
+- **`id`**: no hay tarjeta `Código`. El id ya encabeza el modal
+  (`Consultar dispositivo #N`), así que repetirlo adentro es ruido.
+- **`dominio`**: el panel filtra todo por el dominio de la sesión, así que la
+  columna sólo puede tener un valor y repetirlo en cada ficha no informa nada.
+- **Catálogos que administra Reactor y el cliente no elige**: `agente`,
+  `transceptor` y `chip`. Se conservan `modelo` y `producto`, que son los que
+  identifican el equipo para el usuario.
+- **Credenciales del equipo**: `identidad` y `llave`. Son secretos de
+  aprovisionamiento MQTT, no datos que el cliente tenga que leer ni copiar;
+  el equipo se identifica por `uuid` (`Identificador`) y `serial` (`Serie`).
+- **Provisión y adopción**: `senalesLimite`, `fabricacion`, `instalacion`,
+  `adoptado` y `adopcion`. Son del ciclo de vida interno — el mismo criterio
+  por el que `Editar` sólo expone `nombre`.
+- **Monitoreo completo**: `monitoreo`, `monitoreoIntervalo`,
+  `monitoreoUltimo`, `monitoreoSiguiente` y `monitoreoCorreos`.
+- **`conexion`**: no hay tarjeta `Última conexión`. La actividad reciente la
+  cuenta `Último latido`, que llega solo y es el que de verdad dice si el
+  equipo sigue vivo.
+- **`coordenadas` e `indicadores`**: strings crudos del sistema histórico, sin
+  formato ni mapa que los haga legibles.
+
+**La paridad de la grilla es parte del diseño, no un accidente.** `.view-grid`
+es flex con `flex-grow: 1` (CSS §11), así que una tarjeta sola en su renglón
+se estira al 100% — se lee como un campo destacado a propósito cuando en
+realidad es el sobrante de una cuenta impar. Los 16 campos son **par**, así
+que van todos en `view-card-half` y la ficha cierra en ocho renglones parejos,
+del primero (`Identificador` + `Nombre`) al último (`Latidos` + `Firmware`).
+**Agregar o quitar un solo campo rompe eso**: si la lista queda impar hay que
+marcar una tarjeta `view-card-full` en una ranura **impar** (para que los
+bloques de arriba y de abajo sigan cerrando de a dos), no simplemente editar
+la lista y dejar que se estire la última.
+
+El pie del modal tampoco lleva el botón ☰ de "Más acciones" que sí tienen los
+otros módulos: sus opciones (copiar identificador / MAC / coordenadas,
+habilitar-deshabilitar) están todas en el menú contextual de la fila, y dos de
+las tres de copiar apuntaban a campos que la ficha ya no muestra. El pie queda
+en `Cerrar` + `Editar`.
 
 ### Dispositivos → modal Consultar → pestaña Conexión
 
 `api/dispositivo_conexion.php` + `vistaConexion()` agregan al modal de
 Consultar una segunda pestaña con la **serie temporal** del nivel de señal
-(la primera, **General**, es la ficha completa de siempre). Es un gráfico de
+(la primera, **General**, es la ficha de datos del equipo). Es un gráfico de
 línea dibujado a mano en SVG: eje X = tiempo, eje Y = nivel en dBm, un punto
 por hora, con selector de período (24 h / 48 h / 7 días). Reglas que no se
 deducen del esquema:
 
-- **La serie tiene un punto por cada hora de la ventana, reporte o no el
-  equipo.** Las horas sin mediciones viajan con `dbm = null` y se dibujan
-  como un **corte** en la línea, nunca interpoladas: que un equipo deje de
-  informar tres horas es exactamente lo que hay que poder ver. Cuando una
-  hora con dato queda aislada entre dos cortes se le dibuja el punto aunque
-  no haya segmento, si no sería invisible.
+- **EL EQUIPO NO INFORMA SU NIVEL EN CADA MENSAJE, y esa es la clave de todo
+  el gráfico.** `WSN` viaja **sólo** en `REP=CNX` (reconexión), `REP=INI`
+  (arranque) y `RET=WSN` (respuesta a un pedido explícito). Medido sobre un
+  equipo real en dev: `REP=CNX` 575 mensajes / 575 con nivel, `REP=INI` 88 /
+  88, pero **`REP=SNS` 125 / 0 y `REP=LAT` 51 / 0** — ni el latido ni los
+  reportes de sensores lo llevan (`REP=LAT|LAT=32|IDT=…`,
+  `REP=SNS|CNL=2|VAL=1|IDT=…`: no hay ningún campo de señal ahí). Un equipo
+  con enlace estable puede pasar el día entero mandando mensajes sin informar
+  el nivel **ni una vez**. Por eso "hay señales todo el día en Actividad pero
+  el gráfico muestra 3 puntos" **no es un bug del filtro**: son mensajes que
+  no traen el dato. Ampliar el `LIKE` no sirve — no hay nada más que buscar.
+- **El nivel SE ARRASTRA: la hora sin lectura propia hereda la última
+  conocida** (`estimado = true` + `origen`, la hora de la que salió el
+  valor). No es relleno cosmético: el nivel no cambia porque nadie lo mida,
+  así que la última lectura es la mejor estimación disponible. Es lo que
+  convierte 3 puntos sueltos en una línea legible.
+- **El arrastre se siembra con la última lectura ANTERIOR a la ventana**
+  (`ultimaAntes()`, hasta **7 días** hacia atrás). Sin eso, un equipo estable
+  que informó por última vez antes del período empieza el gráfico en el aire.
+  Más de una semana no se busca: un nivel de hace 10 días no dice nada del
+  actual, y ahí la línea arranca recién en la primera lectura real.
+- **La estimación se muestra como estimación, y por tres vías a la vez**: el
+  tramo arrastrado va **punteado y más tenue** (`.senal-linea-est`), esas
+  horas **no llevan punto** (los puntos son sólo las horas medidas) y el
+  tooltip dice `sin reporte · último nivel conocido: -61 dBm · … (de <hora>)`.
+  Si el tramo estimado se dibujara igual que el medido, un equipo que informó
+  dos veces en el día se vería idéntico a uno que informó cada hora — que es
+  exactamente lo que no puede pasar. **Al tocar el gráfico, mantener las
+  tres.**
+- **`resumen.horas_con_dato` cuenta horas MEDIDAS (`muestras > 0`), no horas
+  dibujadas.** Desde el arrastre, `dbm !== null` es casi toda la ventana:
+  contarlo así diría "24 de 24 horas con reporte" de un equipo que informó
+  tres veces. La tarjeta **Cobertura** es lo único que pone en números cuánto
+  de la línea es estimación.
+- **Los puntos son las horas medidas, en las tres ventanas.** En 7 días son
+  hasta ~168 y se achican (r 3 en vez de 3,5) para que no se empasten. Al
+  pasar el mouse, el punto de esa hora se repite agrandado
+  (`.senal-punto-activo`, r 5,5, con anillo oscuro para despegarlo del trazo)
+  — **sólo si la hora fue medida**: sobre una hora estimada el tooltip lo
+  aclara y no aparece ninguna marca.
+- **Los tramos de la línea se agrupan por tipo, no se dibujan uno por uno**:
+  se juntan los segmentos consecutivos sólidos o punteados en una sola
+  polilínea cada uno. 168 `<line>` sueltas pierden los empalmes redondeados y
+  llenan el DOM sin necesidad. Un tramo es sólido sólo si **sus dos extremos**
+  son lecturas reales.
+- **El hover lo capturan columnas invisibles de alto completo** (`.senal-hit`,
+  una por hora), no los círculos. Apuntarle a un punto de radio 3 con el mouse
+  es imposible, y en 7 días hay 168: la columna da el dato con sólo estar a la
+  altura correcta del eje X.
+- **El tooltip se acota al ancho del plot.** Va centrado sobre su columna
+  (`translate(-50%)`), así que en las horas de los extremos se salía por el
+  costado: como `.modal-body` tiene `overflow-y: auto`, CSS le vuelve `auto`
+  también al eje X, y aparecía una **barra de scroll horizontal** en el modal
+  con el texto cortado. `activarConexion()` acota el centro contra
+  `plot.width` (midiendo el tooltip en `visibility: hidden`, porque con el
+  atributo `hidden` es `display: none` y `offsetWidth` da 0), y
+  `.senal-plot` lleva `overflow-x: clip` de red de contención —
+  **`clip` y no `hidden`**: `hidden` cortaría también el desborde vertical,
+  que es el normal del tooltip porque se dibuja arriba del punto.
 - **El valor de la hora es el promedio de esa hora**, no una muestra: un
   equipo activo informa decenas de veces por hora. `minimo` / `maximo` van
   aparte, para el tooltip. En cambio `promedio` / `mejor` / `peor` del
@@ -251,6 +408,20 @@ deducen del esquema:
   sólo cuesta scan, quedarse corto perdería mediciones.
 - **La ventana termina en la hora en curso**, así que en dev el gráfico sale
   vacío: la base de desarrollo es una copia con datos hasta mayo de 2026.
+- **El "ahora" de la ventana sale de la base (`SELECT NOW()`), no de PHP.**
+  Los dos relojes **no** están alineados: medido el 03/09/2026, PHP corre en
+  **UTC** y la sesión de MySQL en **-03:00**. Como `senales.fecha` la escribe
+  la base, armar la ventana con `new DateTimeImmutable('now')` la corría 3
+  horas hacia adelante: las últimas 3 horas caían en el futuro, salían
+  siempre vacías, y la línea terminaba antes del borde derecho del gráfico —
+  se leía como si el equipo hubiera dejado de reportar hace 3 horas cuando
+  estaba reportando normalmente. Comparar contra el mismo reloj que escribe la
+  columna es lo único que lo evita de raíz, aunque después se alinee la zona
+  horaria del contenedor. **El drift sigue ahí**: cualquier endpoint nuevo que
+  compare fechas de la base contra un `now()` de PHP tiene el mismo bug
+  (empezando por `api/dashboard_senales.php`, que todavía usa el reloj de PHP
+  para su ventana de 30 días — ahí 3 horas sobre 30 días casi no se nota, pero
+  el patrón está mal igual).
 - **La pestaña se carga recién al abrirla** (y sólo una vez): la consulta es
   cara y la mayoría de las consultas al dispositivo no la miran. Cambiar de
   período sí vuelve a pedir.
@@ -347,6 +518,77 @@ nunca. Reglas que no se deducen del esquema:
   helper acepta el rótulo del botón rojo para acciones irreversibles que no
   son una baja.
 
+### Actividad → modal Consultar: tres pestañas (General / Usuario / Dispositivo)
+
+El modal muestra el registro en **General** y agrega una ficha por cada
+entidad que el registro referencia. Reglas que no se deducen del esquema:
+
+- **Las fichas las arma `api/actividad.php?id=N` con los mismos `LEFT JOIN`
+  del registro, y ésa es la decisión de fondo.** Lo natural sería pedirlas a
+  `api/usuarios.php?id=N` y `api/dispositivos.php?id=N`, que ya tienen la
+  ficha curada — pero los dos filtran por **`dominio`, que en esas tablas es
+  el dominio ACTUAL**: `usuarios.dominio` es el dominio *activo* de la cuenta
+  (cambia cada vez que la persona usa *Cambiar dominio*) y
+  `dispositivos.dominio` es el dueño *de turno* (liberar mueve el equipo al
+  dominio 1). Un registro de hace seis meses puede apuntar a un usuario que
+  desde entonces se pasó a otro dominio o a un equipo que se liberó, y esas
+  dos consultas devolverían **404 sobre actividad perfectamente válida**. El
+  control de acceso ya lo dio `r.dominio = :dom` en el registro.
+- **El corte de "no hay ficha" mira `u.id` / `d.id`, no `r.usuario` /
+  `r.dispositivo`**: esas columnas arrastran el centinela `0` del sistema
+  histórico además de `NULL` (ver `project_perfiles_centinela_cero`), y con
+  los dos el `LEFT JOIN` no resuelve. El `id` del lado unido es el único
+  indicador confiable de que la fila existe.
+- **Las tres solapas están siempre**, aunque el registro no tenga usuario o
+  dispositivo: ahí el panel muestra un estado vacío explícito. Que una
+  pestaña aparezca y desaparezca según la fila haría saltar el modal y
+  dejaría al usuario sin saber si falta la pestaña o si no hay dato.
+- **Las tres fichas tienen 8 campos — par a propósito.** `.view-grid` es flex
+  con `flex-grow: 1` (CSS §11): con la cuenta impar la última tarjeta se
+  estira al 100% y se lee como un campo destacado deliberado. Mismo criterio
+  que Dispositivos → General y Usuarios → Consultar.
+- **General perdió cuatro campos** (03/09/2026): `UUID del dispositivo`,
+  `Número de canal`, `Correo` y `Dominio`. Los dos primeros y el correo no se
+  perdieron — pasaron a las pestañas nuevas (`Identificador` del equipo,
+  `Correo` del usuario). `Dominio` no vuelve en ningún lado: el panel filtra
+  todo por el dominio de la sesión, así que la columna sólo puede tener un
+  valor (el mismo criterio con el que se excluyó de Dispositivos → General y
+  de Usuarios → Consultar).
+- **El modal pasó a `wide: true`** (880px): con tres solapas y tarjetas al
+  50%, los 520px del ancho base quedaban apretados. Es el mismo ancho del
+  otro modal con pestañas, Consultar dispositivo.
+- **Ninguna de las dos fichas se carga bajo demanda**, a diferencia de
+  Dispositivo → Conexión: vienen en el mismo `GET` porque son cinco `JOIN`
+  por PK sobre una sola fila (3,7 ms medidos en dev), no una agregación.
+- El conmutador de solapas es `montarPestanas(backdrop, onMostrar)`,
+  compartido con el modal de Dispositivos. `onMostrar` es opcional y sólo lo
+  usan los paneles que se piden al abrirse.
+
+### Actividad → la ventana de búsqueda es fija y el modal de Consultar no tiene ☰
+
+Dos recortes de UI del 03/09/2026 sobre `renderActividad()`:
+
+- **El pie del modal de Consultar es sólo `Cerrar`.** No lleva el botón ☰ de
+  "Más acciones" que sí tienen otros módulos: sus tres opciones (filtrar por
+  este usuario, filtrar por este dispositivo, copiar detalle) ya viven en el
+  menú contextual de la fila, que es desde donde se abre el modal. Tampoco hay
+  acción primaria: `api/actividad.php` sólo responde `GET`.
+- **"Ventana de búsqueda" salió del modal de Filtros, pero la ventana sigue
+  existiendo.** `actividad.ventana` queda clavada en 200.000 en
+  `ACTIVIDAD_DEFAULTS` y **se sigue mandando en cada `GET`** — sacarla del
+  payload devolvería la búsqueda vacía de 14 s sobre los ~3M de `registros`
+  (ver `project_registros_scale`). Lo que se quitó es la posibilidad de
+  **ampliarla** desde la UI, que era justamente la opción cara. Como el select
+  ya no está, la línea `#ac-ventana-nota` bajo la tarjeta de ayuda dejó de
+  decir "ampliá la ventana desde Filtros" y ahora manda a **buscar por
+  código**, que es el único camino al historial viejo (el backend resuelve el
+  lookup por id sin ventana). `api/actividad.php` conserva su lista `VENTANAS`
+  y sigue validando contra ella: el día que haga falta reponer el selector,
+  el backend ya lo soporta.
+- Al sacar el select, `Dispositivo` quedaba solo en un `.filters-grid` de dos
+  columnas con media columna vacía a la derecha, así que pasó a ser un
+  `.form-group` suelto a todo el ancho.
+
 ### Comprobantes (Facturas y Recibos)
 
 `api/comprobantes.php` + `renderComprobantes()` sirven **las dos pantallas**
@@ -441,6 +683,113 @@ mismas tablas. Reglas que no se deducen del esquema:
   mismo criterio del legacy en `reactor-app/sesion/recuperar.php`. Si el
   correo de credenciales falla, la cuenta **no** se revierte: ya es válida, y
   la persona está mirando la pantalla que se las muestra.
+
+#### Invitaciones → el listado
+
+Las columnas son `Identificador` / `Emitida` / `Emisor` / `Destinatario` /
+`Estado` / `Acciones` (03/09/2026):
+
+- **No hay columna `Código`.** El id no se muestra en ninguna parte del
+  módulo —tampoco en el modal— porque la invitación se identifica por su
+  `uuid`, que es lo que viaja en el enlace del correo. El filtro por código
+  sigue estando en el modal de Filtros: es el atajo para el soporte, no una
+  columna.
+- **`Emisor` y `Destinatario` se pintan con la misma celda** (`celdaPersona()`):
+  nombre arriba en `.td-nombre` (blanco, 600) y debajo correo y celular en
+  `.td-id` (tenue, monoespaciada). Lo único que cambia es de dónde salen los
+  datos — el emisor los toma de `usuarios` por el `LEFT JOIN` y el
+  destinatario de la propia `invitaciones`. Que las dos columnas se lean
+  igual es el punto: son las dos personas de la misma fila.
+- **El emisor ya no muestra `usuarios.usuario`** (la cuenta de acceso) como
+  segunda línea. Queda **sólo de reemplazo del nombre** cuando
+  `usuarios.nombre` viene vacío, para que la celda no arranque sin encabezado.
+  En los datos de dev la cuenta es el propio correo, así que mostrarla
+  repetía la línea de abajo.
+- **El `SELECT` del listado trae `u.correo` y `u.celular`**, que antes eran
+  exclusivos del `GET` por id. `mapInvitacion()` los pasa por la lista de
+  extras (`array_key_exists`), así que la consulta que no los pide sigue sin
+  la clave.
+- **La búsqueda rápida cubre lo que se ve**: al aparecer el correo y el
+  celular del emisor en la columna, se sumaron `u.correo` y `u.celular` al
+  `OR` del filtro `q`. Un dato visible que no se puede buscar se lee como un
+  buscador roto.
+
+#### Invitaciones → modal Consultar
+
+La ficha son **9 campos en dos bloques** separados por una divisoria
+(`.view-sep`, CSS §11b): arriba la invitación (`Estado` / `Dominio` /
+`Emisor` / `Identificador`) y abajo a quién fue y cuándo (`Nombre` /
+`Correo` / `Celular` / `Emitida` / `Abierta`). Recortes del 03/09/2026
+respecto de lo que devuelve `api/invitaciones.php`:
+
+- **El título es `Consultar invitación` a secas, sin el `#id`** que sí
+  llevan los otros modales de consulta del panel, y tampoco hay tarjeta
+  `Código`: en este módulo el id no se muestra en ningún lado. El
+  identificador visible es el `uuid`, que ocupa media tarjeta al lado de
+  `Emisor`.
+- **El emisor se muestra con un solo campo, su nombre.** Salieron
+  `Cuenta del emisor` (`usuarios.usuario`) y `Correo del emisor`: identifican
+  internamente a una cuenta del propio dominio, que ya se consulta desde
+  Usuarios.
+- **`Destinatario` pasó a llamarse `Nombre`**, y `Correo` va antes que
+  `Celular` — el correo es el canal por el que sale la invitación
+  (el celular lo completa el invitado al aceptar, así que en las pendientes
+  está vacío).
+- **La divisoria obliga a mirar la paridad por bloque, no sobre el total.**
+  El de arriba son cuatro tarjetas media y cierra solo; el de abajo son
+  cinco, así que `Nombre` va `view-card-full` en la **ranura impar** y deja
+  `Correo` + `Celular` y `Emitida` + `Abierta` en dos renglones parejos.
+  Sin eso, la grilla flex estira la última tarjeta del bloque y se lee como
+  un destaque deliberado. **Agregar o quitar un campo obliga a rehacer esa
+  cuenta en el bloque que se tocó.**
+- **El pie es sólo `Cerrar`**: sin acción primaria (una invitación emitida no
+  se edita) y **sin el botón ☰ de "Más acciones"** — filtrar por emisor,
+  filtrar por estado y copiar ya viven en el menú contextual de la fila, que
+  es desde donde se abre el modal. Mismo recorte que Actividad y Usuarios.
+
+### Usuarios → el alta es una invitación, y no hay edición
+
+El módulo se recortó a **consultar, habilitar/deshabilitar y eliminar**
+(03/09/2026). Reglas que no se deducen del esquema:
+
+- **`+ Nuevo usuario` no da de alta: invita.** El botón abre
+  `formInvitacion()`, el mismo modal del módulo Invitaciones —un solo campo, el
+  correo— y el `POST api/invitaciones.php` encola el envío. La cuenta la crea
+  el propio invitado al aceptar. **Si esa persona ya está registrada no se
+  duplica el usuario**: `perfilAsegurado()` en `invitacion/aceptar.php` le
+  agrega el perfil de este dominio y le deja intactos la contraseña y el
+  dominio activo. Por eso el alta no necesita backend propio — el circuito de
+  invitaciones ya resuelve los dos casos.
+- **No queda ningún camino a `formUsuario()`.** Se le sacó `Editar` al menú
+  contextual de la fila y también el botón primario del modal de Consultar, y
+  el alta pasó a ser la invitación: la función quedó **sin call sites**, y con
+  ella el `POST` / `PUT` de `api/usuarios.php`, que siguen en el endpoint pero
+  no los usa ninguna pantalla — salvo el `PUT`, que dispara `toggleUsuario()`.
+- **`handleUpdate()` reescribe la fila entera**: el payload tiene que mandar
+  `roles` y `habilitado` tomados del registro que trae el `GET`, o el guardado
+  borra los roles y deshabilita la cuenta. `toggleUsuario()` ya lo hace así y
+  `formUsuario()` también — tenerlo presente si alguna vez se repone la
+  edición.
+- **Menú contextual de la fila**: `Consultar` → `Habilitar` / `Deshabilitar` →
+  separador → `Eliminar`. Se aparta del orden del skill `abm_design`, que
+  intercala `Editar` antes de la baja.
+- **El modal de Consultar usa `wide: 'xl'`** (`.modal-xl`, 1040px = el doble
+  del ancho base), no el `modal-wide` de 880px de los dumps y las tablas.
+- **El pie de Consultar es sólo `Cerrar`**: sin botón ☰ de "Más acciones"
+  —copiar usuario / correo y habilitar-deshabilitar viven en el menú de la
+  fila— y sin acción primaria `Editar`.
+- **La ficha no muestra `id`, `autenticacion`, `roles`, `panel` ni `dominio`.**
+  El id ya encabeza el modal (`Consultar usuario #N`); `autenticacion`, `roles`
+  y `panel` son internos del sistema histórico; y `dominio` sólo puede tener un
+  valor, porque el panel filtra todo por el dominio de la sesión — el mismo
+  criterio con el que se excluyó de Dispositivos → General.
+- **Abre con `Identificador` (el `uuid`) y cierra con `Estado`.** El uuid ocupa
+  la ranura donde estaba `Código`, con ese rótulo y no "UUID". Son 10 tarjetas,
+  **todas `half`**: cinco renglones que cierran de a dos. `Nombre` dejó de ser
+  `full` al sacar `dominio` — con 10 campos la fila entera desbalanceaba la
+  grilla, y a 1040px de modal media tarjeta le sobra ancho. **Agregar o quitar
+  un campo deja la cuenta impar** y estira la última a todo el ancho, que se
+  lee como un destaque deliberado (mismo criterio que Dispositivos → General).
 
 ### Módulos de ficha única
 

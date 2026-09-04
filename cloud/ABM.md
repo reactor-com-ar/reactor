@@ -27,7 +27,7 @@ Las columnas del listado deben respetar este orden:
      - **Pegadas a `Consultar`, sin divisor**, cuando la acción es otra forma de *ver* el registro (ej.: Usuarios → "Listar perfiles" va inmediatamente debajo de Consultar, antes de Editar).
      - **Al final del bloque no destructivo, separadas por divisor**, para el resto (copiar valores, navegaciones secundarias).
    - Orden completo resultante: `Consultar · [extras de consulta] · Editar · --- · [extras generales] · --- · Eliminar`.
-   - **Acciones de navegación cruzada** (listar los registros relacionados en su propio módulo): dejan el id en una variable `pendingXxxFilter` del scope de la app y navegan con `window.location.hash = '#/<ruta>'`. El módulo destino consume ese pending en su `render*()`, lo vuelca al `state` del filtro correspondiente y lo limpia. El filtro usado tiene que existir además como campo del **Modal de Filtros** del módulo destino, para que el usuario vea por qué la lista viene acotada y pueda limpiarlo. Ejemplos: Dominios → "Ver dispositivos asociados" (`#/dispositivos`, filtro `Dominio`), Usuarios → "Listar perfiles" (`#/profiles`, filtro `Usuario`).
+   - **Acciones de navegación cruzada** (listar los registros relacionados en su propio módulo): dejan el id en una variable `pendingXxxFilter` del scope de la app y navegan con `window.location.hash = '#/<ruta>'`. El módulo destino consume ese pending en su `render*()`, lo vuelca al `state` del filtro correspondiente y lo limpia. El filtro usado tiene que existir además como campo del **Modal de Filtros** del módulo destino, para que el usuario vea por qué la lista viene acotada y pueda limpiarlo. Ejemplos: Dominios → "Ver dispositivos asociados" (`#/dispositivos`, filtro `Dominio`), Usuarios → "Listar perfiles" (`#/profiles`, filtro `Usuario`), Dispositivos → "Listar señales" (`#/signals`, filtro `Dispositivo`).
 
 ### Límite de resultados
 - Por defecto: **100**.
@@ -72,3 +72,12 @@ El formulario de búsqueda debe respetar este orden de campos:
 ### Alta / Edición
 - El modal de **crear un nuevo registro** y el de **editar** deben incluir **todos los campos** de la entidad.
 - Ambos modales comparten la misma estructura de campos; la única diferencia es si vienen precargados con los datos del registro (edición) o vacíos (alta).
+
+### Eliminar
+- La baja de un registro **sin dependencias** usa el `confirmDialog` estándar (§15 de `DESIGN.md`): título, una frase y los botones `Cancelar` / `Eliminar`.
+- Cuando la baja **arrastra filas de otras tablas**, el `confirmDialog` no alcanza: hay que mostrar un **modal de confirmación con el desglose del impacto** (§15.1 de `DESIGN.md`). Es obligatorio cuando la entidad es el lado padre de FKs con `ON DELETE CASCADE`, `ON DELETE SET NULL` o `ON DELETE RESTRICT`.
+  - Las cantidades **se piden al backend** antes de abrir el modal (endpoint `?impacto=1&id=N` del propio recurso), nunca se estiman en el front ni se hardcodean.
+  - El desglose separa **lo que se elimina** de **lo que se conserva sin la referencia**. Son consecuencias distintas y el operador tiene que poder distinguirlas.
+  - Si existe un **bloqueo** (una FK `RESTRICT` que el backend decide no resolver por su cuenta), el modal lo explica, dice qué hay que hacer para destrabarlo y **no ofrece el botón de confirmar**.
+  - El endpoint `DELETE` **repite todas las validaciones** del modal: el desglose es informativo, no un permiso. Y hace la limpieza en **una transacción**, respetando el orden que imponen las FKs.
+- Referencia: Usuarios (`openUserDeleteModal` en `app.js`, `handleImpacto()` / `handleDelete()` en `api/users.php`).

@@ -520,6 +520,9 @@ th.action-col, td.action-col {
 }
 .modal-backdrop.open .modal { transform: scale(1) translateY(0); }
 .modal-wide { max-width: 880px; }
+/* Doble del ancho base (520px). Para fichas de muchos campos donde la
+ * .view-grid entra comoda de a dos tarjetas por renglon. */
+.modal-xl   { max-width: 1040px; }
 .modal-header {
     flex: 0 0 auto;
     padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
@@ -559,6 +562,10 @@ th.action-col, td.action-col {
     display: flex; flex-direction: column; gap: 4px;
     min-width: 0;
 }
+/* Divisoria entre bloques de campos de una misma ficha (ej. la invitacion
+ * arriba y el destinatario abajo). Ocupa el renglon entero, asi el flujo
+ * de la grilla sigue cerrando de a dos tarjetas a cada lado. */
+.view-sep { flex: 1 1 100%; height: 1px; background: var(--border); }
 .view-card-half  { flex: 1 1 calc(50% - 6px); }
 .view-card-third { flex: 1 1 calc(33.333% - 8px); }
 .view-card-full  { flex: 1 1 100%; }
@@ -707,7 +714,14 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
                        letter-spacing: .04em; color: var(--muted); }
 .senal-chips         { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.senal-plot { position: relative; }
+/* `overflow-x: clip` es la red de contencion del tooltip: aunque el calculo
+   de su posicion fallara, nada puede desbordar hacia los costados y sacarle
+   una barra de scroll horizontal al `.modal-body` (que al tener
+   `overflow-y: auto` vuelve `auto` tambien al eje X). Va `clip` y no `hidden`
+   a proposito: `hidden` cortaria tambien el desborde vertical -- que es el
+   normal del tooltip, que se dibuja ARRIBA del punto -- y `clip` deja el eje
+   Y en `visible`. */
+.senal-plot { position: relative; overflow-x: clip; }
 .senal-svg  {
     display: block; width: 100%; height: auto;
     background: color-mix(in srgb, var(--surface) 88%, #000);
@@ -726,14 +740,37 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 .senal-tick { fill: var(--muted); font-size: 10px; font-family: monospace; }
 .senal-unidad { font-size: 9px; letter-spacing: .04em; }
 
-/* `non-scaling-stroke`: el SVG escala con el modal y sin esto la linea
+/* La linea va en BLANCO, no en un color de la paleta: el fondo del plot son
+   las tres zonas de calidad (verde / ambar / rojo) y cualquier color se pelea
+   con alguna de las tres. El blanco es el unico que contrasta parejo con las
+   tres y deja que el color siga significando "banda", no "serie".
+
+   `non-scaling-stroke`: el SVG escala con el modal y sin esto la linea
    engordaria o adelgazaria con el ancho de la pantalla. */
 .senal-linea {
-    fill: none; stroke: var(--info); stroke-width: 2;
+    fill: none; stroke: #fff; stroke-width: 2;
     stroke-linejoin: round; stroke-linecap: round;
     vector-effect: non-scaling-stroke;
 }
-.senal-punto { fill: var(--info); }
+.senal-punto { fill: #fff; }
+
+/* Tramo ARRASTRADO: el equipo no informo en esas horas y la linea trae el
+   ultimo nivel conocido. Va punteado y mas tenue para que no se confunda con
+   un tramo medido -- si los dos se dibujaran igual, un equipo que informo dos
+   veces en el dia se veria igual que uno que informo cada hora. El punteado
+   no es el unico indicio: esas horas tampoco llevan punto, el tooltip dice
+   "sin reporte / ultimo nivel conocido" y la tarjeta Cobertura da el conteo
+   de horas realmente medidas. */
+.senal-linea-est { stroke: rgba(255,255,255,.5); stroke-dasharray: 4 4; }
+
+/* Punto de la hora que esta bajo el mouse. El anillo oscuro lo despega de la
+   linea blanca: sin el, agrandar el punto sobre su propio trazo no se nota. */
+.senal-punto-activo {
+    fill: #fff; stroke: #0d0d0d; stroke-width: 2;
+    vector-effect: non-scaling-stroke; pointer-events: none;
+}
+.senal-punto-activo[hidden] { display: none; }
+
 .senal-cross {
     stroke: rgba(255,255,255,.35); stroke-width: 1; stroke-dasharray: 3 3;
     vector-effect: non-scaling-stroke; pointer-events: none;
@@ -941,7 +978,6 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 .uso-linea { stroke: var(--serie); }
 .uso-punto { fill:   var(--serie); }
 .uso-legend-line,
-.uso-tabla-serie i,
 .uso-tip-fila i       { background: var(--serie); }
 
 .uso-head {
@@ -954,8 +990,27 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 }
 .uso-title i    { color: var(--muted); font-size: .9rem; }
 .uso-hint       { font-size: .78rem; font-weight: 400; color: var(--muted); }
-.uso-actions    { display: flex; gap: 2px; flex-shrink: 0; }
-.uso-actions .btn-icon-sm.active { color: var(--primary); background: var(--bg); }
+.uso-actions    { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Uno de los dos iconos es <a> (va al modulo Actividad) y el otro <button>
+   (refresca). El display explicito los deja del mismo alto: un <a> es inline
+   y sin esto el glifo se apoya en la linea base y queda unos pixeles corrido
+   respecto del boton. */
+.uso-actions .btn-icon-sm { display: inline-flex; align-items: center; }
+
+/* Chips de periodo (24 h / 7 / 15 / 30 dias). Reusan .filter-chip de los ABM
+   pero mas chicos: aca conviven con el titulo en una barra de 1 linea, no en
+   un modal de filtros. */
+.uso-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.uso-chips .filter-chip { padding: 4px 10px; font-size: .74rem; }
+
+/* Mientras llegan los datos de otra ventana se atenua el grafico que ya
+   esta, en vez de reemplazarlo por un cartel de "cargando": asi no salta el
+   alto de la pagina ni parpadea el bloque entero. Los chips quedan al 100%
+   para que se vea cual se acaba de elegir. */
+.uso-cargando .uso-legend,
+.uso-cargando .uso-plot,
+.uso-cargando .uso-hint { opacity: .45; transition: opacity .15s; }
+.uso-cargando .uso-plot { pointer-events: none; }
 
 /* Referencia. Va SIEMPRE que haya dos series o mas: es lo que evita que el
    color sea el unico portador de la identidad. El nombre y el total van en
@@ -1024,37 +1079,14 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 .uso-tip-nombre   { flex: 1; color: var(--muted); }
 .uso-tip-valor    { font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Muestra de color de una serie: el mismo trazo corto en la referencia, en
-   el tooltip y en la tabla, para que las tres se lean como lo mismo. */
+/* Muestra de color de una serie: el mismo trazo corto en la referencia y en
+   el tooltip, para que las dos se lean como lo mismo. */
 .uso-legend-line,
-.uso-tabla-serie i,
 .uso-tip-fila i {
     display: inline-block;
     width: 14px; height: 3px; border-radius: 2px; flex: 0 0 auto;
 }
-.uso-tabla-serie i, .uso-tip-fila i { width: 10px; }
-
-/* Vista tabla: el gemelo accesible del grafico. Toda cifra que el grafico
-   solo muestra como posicion se lee aca como numero. */
-.uso-tabla-wrap    { max-height: 340px; overflow: auto; border-radius: var(--radius); }
-.uso-tabla th,
-.uso-tabla td      { white-space: nowrap; }
-/* Las columnas de cifras van a la derecha y con cifras de ancho fijo: son 30
-   filas por 10 equipos y alineadas a la izquierda no hay forma de comparar
-   un 212 con un 3.634 de un vistazo. La primera columna es la fecha y se
-   queda a la izquierda. */
-.uso-tabla td:not(:first-child),
-.uso-tabla th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
-.uso-tabla thead th { position: sticky; top: 0; z-index: 1; }
-.uso-tabla tfoot td {
-    position: sticky; bottom: 0;
-    background: var(--bg); font-weight: 700; border-top: 1px solid var(--border);
-}
-.uso-tabla-serie   { display: inline-flex; align-items: center; gap: 6px; }
-/* Un dia sin senales es un cero real, no un dato faltante, pero en una
-   tabla de 30 filas los ceros son ruido: se atenuan para que las cifras que
-   importan salten a la vista. */
-.uso-cero          { color: var(--muted); }
+.uso-tip-fila i { width: 10px; }
 
 /* ---------- 16. Tile grid (menu de tarjetas) ---------- */
 .tile-grid {

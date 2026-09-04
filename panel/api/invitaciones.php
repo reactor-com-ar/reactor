@@ -137,17 +137,24 @@ function handleList(): void
         // Un placeholder por columna: con EMULATE_PREPARES=false (lib/db.php)
         // PDO no admite repetir el mismo nombre en un statement (HY093).
         $ors = [];
-        foreach (['i.uuid', 'i.nombre', 'i.celular', 'i.correo', 'u.nombre', 'u.usuario'] as $n => $columna) {
+        // Se busca por todo lo que el listado muestra, incluidos el correo y
+        // el celular del emisor: si estan en la columna, tienen que encontrarse.
+        foreach (['i.uuid', 'i.nombre', 'i.celular', 'i.correo',
+                  'u.nombre', 'u.usuario', 'u.correo', 'u.celular'] as $n => $columna) {
             $ors[]             = $columna . ' LIKE :q' . $n;
             $params[':q' . $n] = '%' . $q . '%';
         }
         $where[] = '(' . implode(' OR ', $ors) . ')';
     }
 
+    // El listado muestra al emisor con sus tres datos de contacto, igual que
+    // al destinatario, asi que el JOIN trae tambien correo y celular.
     $sql = 'SELECT i.id, i.uuid, i.dominio, i.emisor, i.nombre, i.celular,
                    i.correo, i.emitida, i.abierta, i.estado,
                    u.nombre  AS emisor_nombre,
-                   u.usuario AS emisor_login
+                   u.usuario AS emisor_login,
+                   u.correo  AS emisor_correo,
+                   u.celular AS emisor_celular
             FROM invitaciones i
             LEFT JOIN usuarios u ON u.id = i.emisor
             WHERE ' . implode(' AND ', $where) . '
@@ -418,8 +425,9 @@ function mapInvitacion(array $r, array $textos): array
         'dominio'       => isset($r['dominio']) && $r['dominio'] !== null ? (int) $r['dominio'] : null,
     ];
 
-    // Campos que solo trae el GET por id (modal de Consulta).
-    foreach (['emisor_correo', 'dominio_nombre'] as $extra) {
+    // Campos que no traen las dos consultas: `emisor_celular` es del listado
+    // y `dominio_nombre` del GET por id (modal de Consulta).
+    foreach (['emisor_correo', 'emisor_celular', 'dominio_nombre'] as $extra) {
         if (array_key_exists($extra, $r)) {
             $out[$extra] = $texto($extra);
         }

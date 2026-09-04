@@ -940,6 +940,10 @@
                 view:     true, onView:   () => openDeviceViewModal(d),
                 edit:     true, onEdit:   () => openDeviceModal(d),
                 delete:   true, onDelete: () => confirmDeleteDevice(d),
+                extraAfterView: [
+                    { act: 'go-signals', label: 'Listar señales', icon: 'fa-signal-stream',
+                      onSelect: () => { pendingSignalsDeviceFilter = d.id; window.location.hash = '#/signals'; } },
+                ],
             });
         }
         function wireRowActions() {
@@ -3330,20 +3334,122 @@
         });
     }
 
-    function confirmDeleteUser(usr) {
-        confirmDialog(
-            'Eliminar usuario',
-            `¿Eliminar al usuario "${usr.nombre}" (${usr.email})? Esta acción no se puede deshacer.`,
-            async () => {
-                try {
-                    await api('users.php?id=' + usr.id, { method: 'DELETE' });
-                    toast('Usuario eliminado');
-                    navigate();
-                } catch (e) {
-                    toast(e.message, 'error');
-                }
+    // Borrar un usuario arrastra dependencias en 13 tablas con tres
+    // comportamientos distintos (ver `api/users.php`): filas que se eliminan,
+    // filas que sobreviven sin usuario asociado y filas que bloquean el borrado.
+    // El `confirmDialog` genérico (§15 de DESIGN.md) no alcanza para mostrar
+    // eso, así que se pide el detalle real al backend y se abre un modal propio.
+    async function confirmDeleteUser(usr) {
+        let impacto;
+        try {
+            impacto = await api('users.php?impacto=1&id=' + encodeURIComponent(usr.id));
+        } catch (e) {
+            toast(e.message, 'error');
+            return;
+        }
+        openUserDeleteModal(usr, impacto);
+    }
+
+    function openUserDeleteModal(usr, impacto) {
+        const bloqueos   = impacto.bloqueos   || [];
+        const elimina    = impacto.elimina    || [];
+        const desvincula = impacto.desvincula || [];
+        // Dos motivos de bloqueo distintos: dependencias que hay que reasignar a
+        // mano, o que el usuario sea el que está logueado (perdería la sesión).
+        const bloqueado  = bloqueos.length > 0 || impacto.es_propio;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const seccion = (titulo, icono, cls, items, badge) => !items.length ? '' : `
+            <div class="del-section">
+                <div class="del-section-title ${cls}"><i class="fa-solid ${icono}"></i> ${escape(titulo)}</div>
+                <ul class="del-list">${items.map(it => linea(it, badge)).join('')}</ul>
+            </div>`;
+
+        const avisoPropio = !impacto.es_propio ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>Es tu propio usuario: no podés eliminarlo desde tu sesión.</div>
+            </div>`;
+
+        const avisoBloqueo = !bloqueos.length ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar todavía.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Reasigná esos registros a otro usuario y volvé a intentar.
+                </div>
+            </div>`;
+
+        // Un usuario recién creado puede no tener ninguna dependencia.
+        const sinDatos = (elimina.length || desvincula.length) ? '' : `
+            <div class="del-empty">No tiene datos asociados en el resto del sistema.</div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Eliminar usuario</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente a
+                        <strong>${escape(usr.nombre)}</strong>
+                        <code>#${usr.id}</code>
+                        ${usr.email ? `<span class="muted">· ${escape(usr.email)}</span>` : ''}
+                    </div>
+                    ${avisoPropio}
+                    ${avisoBloqueo}
+                    ${sinDatos}
+                    ${seccion('Se eliminarán junto con el usuario', 'fa-trash',      'del-danger', elimina,    'badge-danger')}
+                    ${seccion('Se conservarán, sin usuario asociado', 'fa-link-slash', 'del-warn',   desvincula, 'badge-warn')}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cancelar</button>
+                    ${bloqueado ? '' : `<button class="btn btn-danger" data-act="ok">Eliminar usuario</button>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                const res = await api('users.php?id=' + encodeURIComponent(usr.id), { method: 'DELETE' });
+                close();
+                // El backend devuelve lo que realmente borró: se informa para
+                // que el número visto en el modal quede confirmado.
+                const partes = [];
+                if (res && res.perfiles)     partes.push(`${res.perfiles} perfil(es)`);
+                if (res && res.sesiones)     partes.push(`${res.sesiones} sesión(es)`);
+                if (res && res.invitaciones) partes.push(`${res.invitaciones} invitación(es)`);
+                toast(partes.length ? `Usuario eliminado — ${partes.join(', ')}` : 'Usuario eliminado');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
             }
-        );
+        });
     }
 
     /* ---------- Views: Perfiles ---------- */

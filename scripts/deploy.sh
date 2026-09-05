@@ -4,7 +4,8 @@
 # Host objetivo:  paloalto.reactor.com.ar
 # URLs servidas:  https://cloud.reactor.com.ar
 #                 https://panel.reactor.com.ar
-#                 https://app.reactor.com.ar   (app end-user; alias pwa.)
+#                 https://app.reactor.com.ar   (app end-user;
+#                                               alias pwa. / newapp. / webapp.)
 #
 # Uso:
 #   bash deploy.sh           # solo sube cambios (NO toca los contenedores)
@@ -259,6 +260,6 @@ echo "================================================"
 echo "  Deploy completo"
 echo "    cloud: https://cloud.reactor.com.ar"
 echo "    panel: https://panel.reactor.com.ar"
-echo "    app:   https://app.reactor.com.ar   (alias: pwa.reactor.com.ar)"
+echo "    app:   https://app.reactor.com.ar   (alias: pwa. / newapp. / webapp.)"
 echo "================================================"
 echo ""

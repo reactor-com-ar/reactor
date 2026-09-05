@@ -14,7 +14,8 @@
 #   DOMAIN          - default cloud.reactor.com.ar
 #   PANEL_DOMAIN    - default panel.reactor.com.ar
 #   PWA_DOMAIN      - default app.reactor.com.ar
-#   PWA_DOMAIN_ALIAS- default pwa.reactor.com.ar (el dominio de preview)
+#   PWA_DOMAIN_ALIASES - alias del vhost de app, separados por espacio.
+#                     Default: pwa. newapp. webapp.
 #   CERTBOT_EMAIL   - default javieralvarez@databox.net.ar
 # ============================================================
 
@@ -27,12 +28,21 @@ PWA_PORT_HOST=8115        # app end-user
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
 PANEL_DOMAIN="${PANEL_DOMAIN:-panel.reactor.com.ar}"
 # La app end-user se sirve en app.reactor.com.ar (DNS repuntado a este server
-# el 2026-09-05). pwa.reactor.com.ar se mantiene como alias del mismo vhost:
-# era el dominio de preview y puede seguir en accesos directos y pestañas
-# abiertas. Cuando ya no lo use nadie, se saca de PWA_DOMAIN_ALIAS y del
-# certificado.
+# el 2026-09-05) y responde ademas por una lista de alias, todos apuntando al
+# MISMO vhost del contenedor (8115):
+#   pwa.    - era el dominio de preview; sigue en accesos directos y pestañas
+#             abiertas, por eso no se saca.
+#   newapp. - alias adicional.
+#   webapp. - alias adicional.
+# Los tres tienen que estar en tres lugares o el dominio no funciona:
+#   1) el server_name de nginx (abajo), o el request cae en el primer server
+#      block y se sirve el vhost equivocado;
+#   2) el certificado (bloque de certbot, mas abajo), o el browser tira
+#      ERR_CERT_COMMON_NAME_INVALID;
+#   3) el ServerAlias de docker/vhosts.conf.
+# Cuando alguno deje de usarse, se saca de PWA_DOMAIN_ALIASES y de vhosts.conf.
 PWA_DOMAIN="${PWA_DOMAIN:-app.reactor.com.ar}"
-PWA_DOMAIN_ALIAS="${PWA_DOMAIN_ALIAS:-pwa.reactor.com.ar}"
+PWA_DOMAIN_ALIASES="${PWA_DOMAIN_ALIASES:-pwa.reactor.com.ar newapp.reactor.com.ar webapp.reactor.com.ar}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-javieralvarez@databox.net.ar}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
@@ -207,11 +217,11 @@ server {
 }
 
 # app.reactor.com.ar -> Apache 8115 (app end-user)
-# El alias pwa.reactor.com.ar era el dominio de preview y se conserva: quedo en
-# accesos directos y pestañas de la etapa de desarrollo.
+# Los alias (pwa. / newapp. / webapp.) van al mismo backend -- ver
+# PWA_DOMAIN_ALIASES arriba.
 server {
     listen 80;
-    server_name ${PWA_DOMAIN} ${PWA_DOMAIN_ALIAS};
+    server_name ${PWA_DOMAIN} ${PWA_DOMAIN_ALIASES};
     location / {
         proxy_pass         http://127.0.0.1:${PWA_PORT_HOST};
         proxy_set_header   Host \$host;
@@ -270,7 +280,6 @@ else
     RESOLVED_CLOUD=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PANEL=$(dig +short A "$PANEL_DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PWA=$(dig +short A "$PWA_DOMAIN" @8.8.8.8 | tail -n1)
-    RESOLVED_PWA_ALIAS=$(dig +short A "$PWA_DOMAIN_ALIAS" @8.8.8.8 | tail -n1)
 
     # Armar lista de dominios cuyo DNS YA apunta al server (-d por cada uno).
     CERT_DOMAINS=()
@@ -289,11 +298,16 @@ else
     else
         echo "        DNS de $PWA_DOMAIN -> ${RESOLVED_PWA:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
     fi
-    if [ "$RESOLVED_PWA_ALIAS" = "$PUBLIC_IP" ]; then
-        CERT_DOMAINS+=("-d" "$PWA_DOMAIN_ALIAS")
-    else
-        echo "        DNS de $PWA_DOMAIN_ALIAS -> ${RESOLVED_PWA_ALIAS:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
-    fi
+    # Un alias que todavia no tenga el DNS apuntado no debe voltear la emision
+    # del resto: se saltea y el cert sale con los que si resuelven.
+    for PWA_ALIAS in $PWA_DOMAIN_ALIASES; do
+        RESOLVED_PWA_ALIAS=$(dig +short A "$PWA_ALIAS" @8.8.8.8 | tail -n1)
+        if [ "$RESOLVED_PWA_ALIAS" = "$PUBLIC_IP" ]; then
+            CERT_DOMAINS+=("-d" "$PWA_ALIAS")
+        else
+            echo "        DNS de $PWA_ALIAS -> ${RESOLVED_PWA_ALIAS:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+        fi
+    done
 
     if [ ${#CERT_DOMAINS[@]} -eq 0 ]; then
         echo "        Ningun dominio resolvio al servidor -- configurar DNS y volver a correr para SSL."

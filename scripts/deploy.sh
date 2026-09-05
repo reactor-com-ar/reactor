@@ -4,7 +4,7 @@
 # Host objetivo:  paloalto.reactor.com.ar
 # URLs servidas:  https://cloud.reactor.com.ar
 #                 https://panel.reactor.com.ar
-#                 https://pwa.reactor.com.ar   (app end-user, dominio temporal)
+#                 https://app.reactor.com.ar   (app end-user; alias pwa.)
 #
 # Uso:
 #   bash deploy.sh           # solo sube cambios (NO toca los contenedores)
@@ -137,7 +137,7 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no \
         done
         # app/ es el ultimo docroot que se sumo: si el compose del server
         # todavia no lo bind-montea, subir los archivos no alcanza -- el
-        # contenedor sirve /var/www/app vacio y pwa.reactor.com.ar da 404.
+        # contenedor sirve /var/www/app vacio y app.reactor.com.ar da 404.
         if ! grep -q '/var/www/app' \"$BASE_REMOTE/$COMPOSE_FILE\" 2>/dev/null; then
             echo 'REACTOR_COMPOSE_SIN_APP'
         fi
@@ -241,7 +241,7 @@ if echo "$SYNC_OUT" | grep -q '^REACTOR_COMPOSE_SIN_APP$'; then
     echo "           Los archivos se subieron, pero el contenedor no los sirve todavia."
     echo "           Correr una vez: bash scripts/aprovisionar.sh"
     echo "           (regenera el compose con el puerto 8115, agrega el server block"
-    echo "            de nginx para pwa.reactor.com.ar y suma el dominio al cert SSL)."
+    echo "            de nginx para app.reactor.com.ar y suma el dominio al cert SSL)."
     echo ""
 fi
 
@@ -259,6 +259,6 @@ echo "================================================"
 echo "  Deploy completo"
 echo "    cloud: https://cloud.reactor.com.ar"
 echo "    panel: https://panel.reactor.com.ar"
-echo "    app:   https://pwa.reactor.com.ar   (temporal -- pasa a app.reactor.com.ar)"
+echo "    app:   https://app.reactor.com.ar   (alias: pwa.reactor.com.ar)"
 echo "================================================"
 echo ""

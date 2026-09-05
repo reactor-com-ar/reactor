@@ -30,10 +30,10 @@ require_once __DIR__ . '/db.php';
  */
 function appDominioActivo(array $usuario): array
 {
-    $vacio = ['perfil' => 0, 'dominio' => 0, 'nombre' => '', 'panel' => 0, 'rol' => ''];
+    $vacio = ['perfil' => 0, 'dominio' => 0, 'nombre' => '', 'panel' => 0, 'rol' => '', 'situacion' => ''];
 
     $sel = 'SELECT p.id AS perfil, p.dominio, p.panel, p.tipo,
-                   d.nombre,
+                   d.nombre, d.situacion,
                    r.nombre AS rol
             FROM perfiles p
             LEFT JOIN dominios d ON d.id = p.dominio
@@ -67,11 +67,12 @@ function appDominioActivo(array $usuario): array
 function appContextoDesdeFila(array $row): array
 {
     return [
-        'perfil'  => (int) $row['perfil'],
-        'dominio' => (int) $row['dominio'],
-        'nombre'  => (string) ($row['nombre'] ?? ''),
-        'panel'   => (int) ($row['panel'] ?? 0),
-        'rol'     => appRolDelPerfil($row),
+        'perfil'    => (int) $row['perfil'],
+        'dominio'   => (int) $row['dominio'],
+        'nombre'    => (string) ($row['nombre'] ?? ''),
+        'panel'     => (int) ($row['panel'] ?? 0),
+        'rol'       => appRolDelPerfil($row),
+        'situacion' => (string) ($row['situacion'] ?? ''),
     ];
 }
 
@@ -209,7 +210,7 @@ function appPanelesDelDominio(int $dominio, int $panelRecordado): array
  * Entorno, que es el equivalente del `print_r($_SESSION)` del legacy.
  *
  * @return array{perfil:int, dominio:int, nombre:string, panel:int,
- *               panelNombre:string, rol:string, origen:string}
+ *               panelNombre:string, rol:string, situacion:string, origen:string}
  */
 function appContextoSesion(array $usuario): array
 {
@@ -253,6 +254,7 @@ function appContextoSesion(array $usuario): array
         'panel'       => $paneles['activo'],
         'panelNombre' => $paneles['nombre'],
         'rol'         => $ctx['rol'],
+        'situacion'   => $ctx['situacion'],
         'origen'      => $origen,
     ];
 
@@ -275,7 +277,7 @@ function appPerfilHabilitado(int $perfil, int $usuario): ?array
 
     $stmt = db()->prepare(
         'SELECT p.id AS perfil, p.dominio, p.panel, p.tipo,
-                d.nombre,
+                d.nombre, d.situacion,
                 r.nombre AS rol
          FROM perfiles p
          LEFT JOIN dominios d ON d.id = p.dominio

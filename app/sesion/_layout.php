@@ -12,6 +12,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/lib/auth.php';
+require_once dirname(__DIR__) . '/lib/analytics.php';
 
 function sesionCacheBust(): string
 {
@@ -47,9 +48,22 @@ function sesionPantalla(string $encabezado, string $formulario, string $error = 
     <link rel="apple-touch-icon" sizes="180x180"     href="/favicon/apple-icon-180x180.png?v=<?= $cb ?>">
     <meta name="theme-color" content="#C11313">
 
+    <!-- Las pantallas de sesión también son PWA: quien abre la app sin sesión
+         entra por acá, y desde acá tiene que poder instalarla. -->
+    <link rel="manifest" href="/manifest.json?v=<?= $cb ?>">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Reactor">
+    <meta name="mobile-web-app-capable" content="yes">
+
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="/assets/css/style.css?v=<?= $cb ?>">
+
+    <!-- El legacy incluye la etiqueta desde `sistema/cabeza.php`, que es el head
+         de TODAS sus pantallas, login incluido: la visita se cuenta desde que
+         la persona llega, tenga sesión o no. Se mantiene ese alcance. -->
+    <?php appAnalytics(); ?>
 </head>
 <body class="sesion-page">
 
@@ -68,6 +82,18 @@ function sesionPantalla(string $encabezado, string $formulario, string $error = 
     <?= $formulario ?>
 
 </main>
+
+<script>
+// Registrar el service worker también acá. No alcanza con hacerlo en la app:
+// un celular que abre la PWA sin sesión se queda en esta pantalla, y es
+// justamente donde conviene que el worker legacy se reemplace cuanto antes.
+// (No se carga app.js entero: esta pantalla no tiene sidebar ni modales.)
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/serviceworker.js').catch(function () {});
+    });
+}
+</script>
 
 </body>
 </html>

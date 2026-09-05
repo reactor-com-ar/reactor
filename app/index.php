@@ -16,6 +16,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/contexto.php';
 require_once __DIR__ . '/lib/controles.php';
+require_once __DIR__ . '/lib/analytics.php';
 
 $usuario = requireAuth();
 
@@ -48,12 +49,32 @@ $dominioDetalles = [
     'Chips'        => (string) $contadores['chips'],
 ];
 
-// Situacion del dominio (misma semantica que `dominios.situacion` en el legacy):
-// 1 = normal, 2 = por suspender (advertencia), 3 = suspendido.
-$dominioSituacion = 2;
+// Situacion del dominio, tal cual la usa el legacy en `panel/index.php`:
+//
+//   '1' normal      -> sin advertencia, controles a la vista
+//   '2' limitado    -> advertencia de "pronto sera suspendida", PERO los
+//                      controles se siguen mostrando (el servicio anda)
+//   '3' suspendido  -> advertencia de "ha sido suspendida" y NO se dibuja
+//                      ningun control
+//
+// Las etiquetas salen de `reactor-panel/inicio/widget011.php` ("Servicio
+// normal / limitado / suspendido"). El legacy compara con `!= '3'` para
+// decidir si dibuja los controles, o sea que cualquier valor raro (vacio,
+// NULL, un 4) se comporta como normal. Se replica ese criterio: ante un dato
+// inesperado conviene dejar al usuario operar, no bloquearlo.
+$dominioSituacion = $contexto['situacion'];
+$servicioSuspendido = ($dominioSituacion === '3');
 
 // Mesa de ayuda: WhatsApp de soporte. Lo usan las dos entradas (topbar y Ajustes).
 $soporteUrl = 'https://api.whatsapp.com/send/?phone=5491163099315&text=Hola+Reactor&type=phone_number&app_absent=0';
+
+// "Entorno" es una herramienta de diagnostico, no una pantalla de usuario: solo
+// la ve esta cuenta. Es un id concreto y no un rol a proposito — no existe hoy
+// ningun permiso que represente "puede ver el diagnostico", y colgarlo del rol
+// Administrador se lo abriria a 469 perfiles.
+const APP_USUARIO_DIAGNOSTICO = 3;
+
+$verEntorno = ((int) ($usuario['id'] ?? 0)) === APP_USUARIO_DIAGNOSTICO;
 
 // Lado servidor del modal "Entorno": el equivalente del `print_r($_SESSION)`
 // de `reactor-app/cuenta/entorno.php`.
@@ -125,6 +146,18 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
     <meta name="theme-color" content="#C11313">
     <meta name="msapplication-TileColor" content="#C11313">
 
+    <!-- PWA. El manifest va en `/manifest.json`, la misma ruta que usa el
+         legacy, y declara `"id": "/"`: asi los celulares que ya tienen la app
+         instalada la ACTUALIZAN en vez de que les aparezca una segunda. -->
+    <link rel="manifest" href="/manifest.json?v=<?= $cb ?>">
+
+    <!-- iOS no lee el manifest: el modo standalone y la barra de estado se
+         piden con estos meta. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Reactor">
+    <meta name="mobile-web-app-capable" content="yes">
+
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
@@ -132,6 +165,9 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
          (assets/fonts/small-lcd-sign.ttf, @font-face en style.css) -->
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= $cb ?>">
+
+    <!-- Google Analytics (solo si hay propiedad configurada; ver lib/analytics.php) -->
+    <?php appAnalytics(); ?>
 </head>
 <body data-version="<?= $cb ?>">
 
@@ -193,10 +229,12 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                            data-modal="modal-usuario">
                             <i class="fa-solid fa-user"></i> Mi Usuario
                         </a>
-                        <a href="#/cuenta/entorno" class="nav-subitem" data-route="cuenta-entorno"
-                           data-modal="modal-entorno">
-                            <i class="fa-solid fa-layer-group"></i> Entorno
-                        </a>
+                        <?php if ($verEntorno): ?>
+                            <a href="#/cuenta/entorno" class="nav-subitem" data-route="cuenta-entorno"
+                               data-modal="modal-entorno">
+                                <i class="fa-solid fa-layer-group"></i> Entorno
+                            </a>
+                        <?php endif; ?>
                         <a href="/sesion/cerrar" class="nav-subitem" data-route="cuenta-salir">
                             <i class="fa-solid fa-right-from-bracket"></i> Cerrar Sesi&oacute;n
                         </a>
@@ -262,12 +300,12 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
 
             <div class="panel-feed">
 
-                <?php if ($dominioSituacion === 2): ?>
+                <?php if ($dominioSituacion === '2'): ?>
                     <div class="advertencia" role="alert">
                         <h4>Advertencia</h4>
                         <div>Su cuenta pronto ser&aacute; suspendida por falta de pago.</div>
                     </div>
-                <?php elseif ($dominioSituacion === 3): ?>
+                <?php elseif ($servicioSuspendido): ?>
                     <div class="advertencia" role="alert">
                         <h4>Advertencia</h4>
                         <div>Su cuenta ha sido suspendida por falta de pago.
@@ -275,11 +313,14 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                     </div>
                 <?php endif; ?>
 
-                <?php if (!$controles): ?>
-                    <p class="lista-aviso">Este panel no tiene controles.</p>
-                <?php endif; ?>
+                <?php // Con el servicio suspendido el legacy no dibuja ni un control. ?>
+                <?php if (!$servicioSuspendido): ?>
 
-                <?php foreach ($controles as $c): ?>
+                    <?php if (!$controles): ?>
+                        <p class="lista-aviso">Este panel no tiene controles.</p>
+                    <?php endif; ?>
+
+                    <?php foreach ($controles as $c): ?>
                     <?php $off = !$c['online']; ?>
                     <article class="panel" data-control="<?= (int) $c['id'] ?>">
 
@@ -336,7 +377,9 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                         </div>
 
                     </article>
-                <?php endforeach; ?>
+                    <?php endforeach; ?>
+
+                <?php endif; ?>
             </div>
 
         </main>
@@ -552,7 +595,10 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
 
 <!-- Modal "Entorno": diagnostico de la sesion, pensado para pasarle datos a la
      mesa de ayuda. La parte del servidor se imprime aca; la del navegador
-     (cookies, storage, pantalla) la arma app.js recien al abrir el modal. -->
+     (cookies, storage, pantalla) la arma app.js recien al abrir el modal.
+     Va dentro del mismo `if` que el item del menu: si no, el HTML con los
+     datos de sesion se serviria igual a todos, aunque no hubiera como abrirlo. -->
+<?php if ($verEntorno): ?>
 <div class="modal-fondo" id="modal-entorno">
     <div class="modal-caja" role="dialog" aria-modal="true"
          aria-labelledby="modal-entorno-titulo">
@@ -600,6 +646,7 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
         </footer>
     </div>
 </div>
+<?php endif; ?>
 
 <div class="toast" id="toast" role="status"></div>
 

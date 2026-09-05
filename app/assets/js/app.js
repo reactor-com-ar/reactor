@@ -813,12 +813,66 @@
         setInterval(checkVersion, 60000);
     }
 
-    // ---------- Install button (placeholder) ----------
+    // ---------- Service worker ----------
+    // Se registra SIEMPRE, no solo para instalar la app: los celulares que hoy
+    // tienen la PWA legacy arrastran un worker viejo en `/serviceworker.js` con
+    // estrategia cache-first sobre todo el origen. Registrar el nuestro en esa
+    // misma ruta es lo que lo reemplaza (ver el comentario del archivo).
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/serviceworker.js')
+                .catch(function () { /* sin SW la app funciona igual */ });
+        });
+    }
+
+    // ---------- Instalar la app ----------
+    // Chrome/Android avisa con `beforeinstallprompt` que se puede instalar, y
+    // exige que el prompt salga desde un gesto del usuario: por eso se guarda
+    // el evento y se dispara recien en el click del item del menu.
     var btnInstall = document.getElementById('btn-install');
+    var promptDiferido = null;
+
+    function yaInstalada() {
+        return window.matchMedia('(display-mode: standalone)').matches
+            || window.navigator.standalone === true;   // iOS
+    }
+
+    // Si la app ya corre instalada, el item no tiene sentido.
+    if (btnInstall && yaInstalada()) {
+        btnInstall.hidden = true;
+    }
+
+    window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        promptDiferido = e;
+    });
+
+    window.addEventListener('appinstalled', function () {
+        promptDiferido = null;
+        if (btnInstall) btnInstall.hidden = true;
+        showToast('Reactor se instaló en tu dispositivo');
+    });
+
     if (btnInstall) {
         btnInstall.addEventListener('click', function (e) {
             e.preventDefault();
-            showToast('Instalar la app');
+
+            if (promptDiferido) {
+                promptDiferido.prompt();
+                promptDiferido.userChoice.then(function () {
+                    // El evento no se puede reusar: si el usuario cancela,
+                    // el navegador lo vuelve a emitir cuando corresponda.
+                    promptDiferido = null;
+                });
+                return;
+            }
+
+            // iOS no implementa `beforeinstallprompt`: solo se puede instalar a
+            // mano desde el menu Compartir.
+            var esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            showToast(esIOS
+                ? 'Tocá Compartir y elegí "Agregar a inicio"'
+                : 'Usá el menú del navegador para instalar la app');
         });
     }
 })();

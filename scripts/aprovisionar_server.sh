@@ -13,7 +13,8 @@
 # Variables que recibe (opcionales, con default):
 #   DOMAIN          - default cloud.reactor.com.ar
 #   PANEL_DOMAIN    - default panel.reactor.com.ar
-#   PWA_DOMAIN      - default pwa.reactor.com.ar
+#   PWA_DOMAIN      - default app.reactor.com.ar
+#   PWA_DOMAIN_ALIAS- default pwa.reactor.com.ar (el dominio de preview)
 #   CERTBOT_EMAIL   - default javieralvarez@databox.net.ar
 # ============================================================
 
@@ -25,11 +26,13 @@ PANEL_PORT_HOST=8087      # panel
 PWA_PORT_HOST=8115        # app end-user
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
 PANEL_DOMAIN="${PANEL_DOMAIN:-panel.reactor.com.ar}"
-# TEMPORAL: la app end-user se publica en pwa.reactor.com.ar mientras se
-# termina. app.reactor.com.ar todavia apunta al server legacy (otra IP);
-# cuando se repunte ese DNS aca, cambiar este default por app.reactor.com.ar
-# (o pasar PWA_DOMAIN) y re-correr para que certbot emita el cert nuevo.
-PWA_DOMAIN="${PWA_DOMAIN:-pwa.reactor.com.ar}"
+# La app end-user se sirve en app.reactor.com.ar (DNS repuntado a este server
+# el 2026-09-05). pwa.reactor.com.ar se mantiene como alias del mismo vhost:
+# era el dominio de preview y puede seguir en accesos directos y pestañas
+# abiertas. Cuando ya no lo use nadie, se saca de PWA_DOMAIN_ALIAS y del
+# certificado.
+PWA_DOMAIN="${PWA_DOMAIN:-app.reactor.com.ar}"
+PWA_DOMAIN_ALIAS="${PWA_DOMAIN_ALIAS:-pwa.reactor.com.ar}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-javieralvarez@databox.net.ar}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
@@ -47,11 +50,14 @@ sudo dnf update -y -q
 echo "        OK"
 
 # ---- 2. Instalar Docker, Git, Nginx, bind-utils, python3, cronie ----
-# cronie: Amazon Linux 2023 viene SIN cron. Sin el no existe /etc/cron.d y el
-# paso 9 falla al escribir /etc/cron.d/certbot -- con `set -e` eso aborta el
-# script entero justo al final y, peor, el certificado queda sin renovacion
-# automatica (se cae solo a los 90 dias). Tambien lo necesita el Programador
-# de tareas de cloud/ (/etc/cron.d/reactor-cloud).
+# cronie: Amazon Linux 2023 viene SIN cron. Lo necesita el Programador de
+# tareas de cloud/ (/etc/cron.d/reactor-cloud).
+#
+# OJO: instalar cronie NO deja `crond` corriendo. Verificado el 2026-09-05: el
+# host lo tenia inactivo, asi que todo lo que dependiera de /etc/cron.d nunca
+# se ejecuto. Por eso la renovacion del certificado (paso 9) pasó a un timer de
+# systemd. El cron del Programador de tareas vive DENTRO del contenedor, que si
+# lo tiene corriendo, y por eso ese si funciona.
 echo "[ 2/9 ] Instalando Docker, Nginx, bind-utils, python3, cronie..."
 sudo dnf install -y -q docker git nginx bind-utils python3 python3-pip augeas-libs cronie
 sudo systemctl enable docker nginx crond
@@ -200,12 +206,12 @@ server {
     }
 }
 
-# pwa.reactor.com.ar -> Apache 8115 (app end-user)
-# TEMPORAL: dominio de preview mientras se termina la app. Cuando salga a
-# produccion pasa a app.reactor.com.ar (repuntar el DNS y cambiar PWA_DOMAIN).
+# app.reactor.com.ar -> Apache 8115 (app end-user)
+# El alias pwa.reactor.com.ar era el dominio de preview y se conserva: quedo en
+# accesos directos y pestañas de la etapa de desarrollo.
 server {
     listen 80;
-    server_name ${PWA_DOMAIN};
+    server_name ${PWA_DOMAIN} ${PWA_DOMAIN_ALIAS};
     location / {
         proxy_pass         http://127.0.0.1:${PWA_PORT_HOST};
         proxy_set_header   Host \$host;
@@ -264,6 +270,7 @@ else
     RESOLVED_CLOUD=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PANEL=$(dig +short A "$PANEL_DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PWA=$(dig +short A "$PWA_DOMAIN" @8.8.8.8 | tail -n1)
+    RESOLVED_PWA_ALIAS=$(dig +short A "$PWA_DOMAIN_ALIAS" @8.8.8.8 | tail -n1)
 
     # Armar lista de dominios cuyo DNS YA apunta al server (-d por cada uno).
     CERT_DOMAINS=()
@@ -281,6 +288,11 @@ else
         CERT_DOMAINS+=("-d" "$PWA_DOMAIN")
     else
         echo "        DNS de $PWA_DOMAIN -> ${RESOLVED_PWA:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+    fi
+    if [ "$RESOLVED_PWA_ALIAS" = "$PUBLIC_IP" ]; then
+        CERT_DOMAINS+=("-d" "$PWA_DOMAIN_ALIAS")
+    else
+        echo "        DNS de $PWA_DOMAIN_ALIAS -> ${RESOLVED_PWA_ALIAS:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
     fi
 
     if [ ${#CERT_DOMAINS[@]} -eq 0 ]; then
@@ -312,15 +324,54 @@ else
             echo "        AVISO: certbot fallo. Revisar /var/log/letsencrypt/letsencrypt.log"
         fi
 
-        if [ ! -f /etc/cron.d/certbot ]; then
-            # mkdir -p: red de seguridad por si cronie no quedo instalado.
-            # Sin esto el tee falla y `set -e` mata el script en la ultima
-            # linea, dejando el certificado sin renovacion automatica.
-            sudo mkdir -p /etc/cron.d
-            echo "0 0,12 * * * root /opt/certbot/bin/python -c 'import random; import time; time.sleep(random.random() * 3600)' && /usr/bin/certbot renew -q" \
-                | sudo tee /etc/cron.d/certbot > /dev/null
-            echo "        Cron de renovacion creado en /etc/cron.d/certbot"
-        fi
+        # Renovacion automatica por TIMER de systemd, no por cron.
+        #
+        # Antes esto escribia /etc/cron.d/certbot. No servia: en este host
+        # `crond` esta inactivo (Amazon Linux 2023 no lo trae corriendo, y el
+        # cron del Programador de tareas de cloud vive DENTRO del contenedor,
+        # no aca). Resultado: el archivo existia y nadie lo ejecutaba nunca.
+        # Se detecto el 2026-09-05, con el certificado a tres meses de vencer y
+        # sin ningun mecanismo que lo renovara.
+        #
+        # systemd si esta corriendo, asi que el timer no depende de instalar ni
+        # habilitar nada mas. `installer = nginx` queda anotado en
+        # /etc/letsencrypt/renewal/*.conf, asi que certbot recarga nginx solo
+        # cuando efectivamente renueva.
+        echo "        Configurando renovacion automatica (timer de systemd)..."
+        sudo tee /etc/systemd/system/certbot-renew.service > /dev/null <<'UNIT'
+[Unit]
+Description=Renovacion de certificados Let's Encrypt (reactor)
+Documentation=https://certbot.eff.org/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot renew -q
+UNIT
+
+        sudo tee /etc/systemd/system/certbot-renew.timer > /dev/null <<'UNIT'
+[Unit]
+Description=Corre certbot renew dos veces por dia
+
+[Timer]
+# Dos corridas diarias con desfasaje aleatorio, que es lo que recomienda
+# Let's Encrypt para no golpear la API a la misma hora que todo el mundo.
+OnCalendar=*-*-* 00,12:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now certbot-renew.timer
+        echo "        Timer certbot-renew.timer habilitado ($(systemctl is-active certbot-renew.timer))"
+
+        # Limpieza del mecanismo viejo, para no dejar dos cosas compitiendo si
+        # alguien llegara a levantar crond mas adelante.
+        sudo rm -f /etc/cron.d/certbot
     fi
 fi
 

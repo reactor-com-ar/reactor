@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sin conexi&oacute;n &middot; Reactor</title>
+    <meta name="theme-color" content="#C11313">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <!-- Todo inline y sin fuentes externas: esta pagina se sirve justamente
+         cuando no hay red, asi que no puede depender de ningun otro archivo
+         mas alla del logo, que el service worker precachea junto con ella. -->
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            padding: 24px;
+            text-align: center;
+            background: #C11313;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        img { width: 88px; height: auto; }
+        h1 { font-size: 1.25rem; font-weight: 600; }
+        p  { font-size: .95rem; line-height: 1.5; color: rgba(255,255,255,.85); max-width: 320px; }
+        button {
+            margin-top: 4px;
+            border: none;
+            border-radius: 20px;
+            background: rgba(0,0,0,.18);
+            color: #fff;
+            font: inherit;
+            font-size: .95rem;
+            padding: 11px 26px;
+            cursor: pointer;
+        }
+        button:hover { background: rgba(0,0,0,.28); }
+    </style>
+</head>
+<body>
+    <img src="/assets/img/logo.png" alt="Reactor">
+    <h1>Sin conexi&oacute;n</h1>
+    <p>No pudimos conectarnos con Reactor. Revis&aacute; tu conexi&oacute;n a internet e intent&aacute; de nuevo.</p>
+    <button type="button" onclick="location.reload()">Reintentar</button>
+</body>
+</html>

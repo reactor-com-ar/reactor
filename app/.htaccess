@@ -4,3 +4,22 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME}\.php -f
 RewriteRule ^(.+?)/?$ $1.php [L]
+
+# Rutas del legacy que ya no existen -> al inicio.
+#
+# Cuando app.reactor.com.ar deje de apuntar al proyecto viejo, los accesos
+# directos y links guardados de los usuarios van a seguir pidiendo URLs que
+# aca no existen (/cuenta, /dominio/actividad, /cambiar/panel, /panel/index,
+# /teclados...). Sin esto se llevan un 404; con esto caen en la app.
+#
+# Que NO se redirige, y por que:
+#   - api/     : un endpoint que no existe tiene que devolver 404, no HTML.
+#                Redirigirlo haria que el fetch parsee el index como si fuera
+#                JSON y falle con un error que no dice nada.
+#   - assets/, favicon/ : un archivo faltante tiene que fallar como archivo.
+#                Devolver el HTML del index en lugar de un .css o un .png
+#                rompe de formas mucho mas confusas que un 404.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/(api|assets|favicon)/
+RewriteRule ^ / [R=302,L]

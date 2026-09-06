@@ -10,8 +10,26 @@ host en dev).
 ## Dominios
 
 - Prod: `panel.reactor.com.ar` (nginx proxea al puerto 8087 del contenedor
-  `reactor-apache`).
+  `reactor-apache`). **Es el único punto de entrada válido a futuro.**
+- Prod, **temporal**: `control.reactor.com.ar` **no sirve el panel: redirige**
+  con un `301` a `panel.reactor.com.ar` conservando path y query string. Nunca
+  llega a Apache — lo resuelve nginx. Existe sólo para la transición desde el
+  legacy y se elimina cuando termine, sacándolo de `PANEL_DOMAIN_ALIASES` en
+  [scripts/aprovisionar_server.sh](../scripts/aprovisionar_server.sh) (que lo
+  usa para el bloque de redirect y para el certificado) y reemitiendo el cert
+  sin ese `-d`.
+  El redirect va dentro de `location /` y **no** a nivel `server`: nginx evalúa
+  los `return` del contexto server antes de elegir el `location`, así que un
+  `return` suelto redirigiría también el desafío ACME y voltearía la renovación
+  del certificado — que es el mismo para los 7 dominios.
 - Dev: `http://localhost:8087`.
+
+**No acoplar nada a `control.`**, justamente porque se va: la cookie de sesión
+es host-only a propósito (no se amplió a `.reactor.com.ar`, así que la sesión
+no se comparte entre los dos dominios) y los correos de invitación enlazan
+siempre a `panel.` — ver `panelBaseUrl()` en
+[lib/invitaciones.php](lib/invitaciones.php), que fija el dominio en producción
+en vez de derivarlo del `Host`.
 
 ## Reglas de shell (obligatorias — skill `crear_backoffice`)
 
@@ -140,6 +158,106 @@ Reglas que la función garantiza, y que por eso no hay que repetir en los llamad
 Si el alta necesita una columna nueva, se agrega en la función y la reciben los dos
 caminos. Cloud tiene su propio canal equivalente en `cloud/lib/usuarios_alta.php`
 (son separados porque no comparten docroot).
+
+## Páginas públicas (sin sesión)
+
+Son las únicas pantallas que se sirven sin JWT. Hoy hay dos familias —
+`invitacion/` (ver / aceptar / rechazar) y `recuperar/` (pedir enlace /
+restablecer)— y **todas comparten el shell de
+[lib/publico.php](lib/publico.php)**: la tarjeta roja del login, el
+`X-Robots-Tag: noindex` y el `Cache-Control: no-store`. No pasan por
+`api/bootstrap.php`, así que **tampoco pasan por el único
+`date_default_timezone_set()` del panel** — ver la regla del reloj más abajo.
+
+- **Las rutas de assets del shell son `../`**, o sea que sirve para páginas
+  ubicadas **un nivel** bajo el docroot. Una más profunda tendría que pasar su
+  propio prefijo.
+- **Las clases CSS conservan el prefijo `inv-`** (`.inv-card`, `.inv-lead`,
+  `.inv-note`, `.inv-dato`, `.inv-acciones`) aunque ya no sean sólo de
+  invitaciones: son las de la tarjeta pública en general. Renombrarlas es
+  tocar cuatro pantallas para nada. CSS §19.
+- `invitacion/_layout.php` quedó como **alias** de las funciones `publico*`
+  con los nombres históricos, para no tocar las tres pantallas que ya los
+  usaban.
+- `panelBaseUrl()` se mudó a [lib/base_url.php](lib/base_url.php): la usan dos
+  circuitos que no tienen nada que ver entre sí (el enlace de invitación y el
+  de recuperación) y los dos necesitan la misma regla de host fijo en
+  producción.
+
+### Recuperación de contraseña (`recuperar/`)
+
+Enlace de un solo uso por correo. El login lleva a `recuperar/` con el link
+`¿Olvidaste tu contraseña?` (`.login-alt`, CSS §18), la persona pide el enlace
+en `recuperar/index.php` y elige la contraseña nueva en
+`recuperar/restablecer.php?t=<token>`. La lógica vive en
+[lib/recuperacion.php](lib/recuperacion.php) y los pedidos en la tabla
+`recuperaciones` (migración
+`cloud/sql/migrations/20260905_2100_crear_recuperaciones.sql`).
+
+**Reemplaza al legacy, no lo copia.** `reactor-app/sesion/recuperar.php`
+mandaba **la contraseña** en el cuerpo del mail —puede hacerlo porque
+`usuarios.contrasena` es cifrado reversible, no hash—. Acá viaja un enlace: la
+contraseña vieja no sale por correo, el enlace vence y se puede invalidar. El
+legacy no se toca y sigue funcionando sobre la misma tabla `usuarios`.
+
+Reglas que no se deducen del esquema:
+
+- **En la base se guarda el SHA-256 del token, no el token.** Lo que viaja en
+  el enlace son 32 bytes de CSPRNG en base64url (43 chars) y no queda escrito
+  en ningún lado: quien lea la base no puede armar un enlace válido. Sin salt
+  ni algoritmo lento a propósito — son 256 bits aleatorios, no una contraseña:
+  no hay diccionario que atacar.
+- **Todas las fechas se comparan contra `NOW()` de la base, nunca contra un
+  reloj de PHP.** Es el mismo drift documentado en los gráficos de señal (PHP
+  en UTC, la sesión de MySQL en -03:00) y acá pega más fuerte: estas páginas no
+  pasan por `api/bootstrap.php`, que es lo único que fija la zona horaria de
+  PHP en el panel. Con el reloj equivocado un enlace de 60 minutos nace vencido
+  o dura cuatro horas. Por eso `expira` se calcula con `DATE_ADD(NOW(), ...)`,
+  la vigencia se resuelve en el `SELECT` (`r.expira > NOW() AS vigente`) y el
+  cupo se cuenta con `DATE_SUB(NOW(), INTERVAL 1 HOUR)`.
+- **`expira` es una columna y no un cálculo sobre `solicitada`**: el TTL puede
+  cambiar y los enlaces ya emitidos tienen que conservar el suyo.
+- **La respuesta del formulario es siempre la misma**, exista o no la cuenta.
+  Los cuatro caminos que no mandan nada —cuenta inexistente, deshabilitada, sin
+  correo cargado y cupo agotado— terminan en la misma pantalla que el envío
+  exitoso: es un formulario público de un BackOffice y distinguirlos lo
+  convertiría en un verificador de usuarios y correos del sistema.
+- **La única excepción es que se caiga el microservicio de correo**, y ahí sí
+  se muestra el error. Callar una falla de infraestructura deja a la persona
+  esperando un mail que nunca va a llegar; la pista que da sobre la existencia
+  de la cuenta sólo aparece durante una caída y no vale ese precio.
+- **La fila y el envío van en una transacción**, igual que el alta de
+  invitaciones: un token que nadie recibió no le sirve a nadie y además consume
+  cupo.
+- **Cupo de la última hora: 3 por cuenta y 10 por IP.** El de cuenta es el que
+  de verdad protege a alguien de recibir veinte correos; el de IP es flojo
+  a propósito porque en producción nginx proxea al contenedor y `REMOTE_ADDR`
+  puede ser la del proxy para todos. **Se lee `REMOTE_ADDR` y no
+  `X-Forwarded-For`**: ese header lo pone el cliente y falsearlo saltearía el
+  cupo.
+- **Usar un enlace cierra todos los pedidos abiertos de esa cuenta**, no sólo
+  el que se usó: si alguien pidió tres, los otros dos dejan de servir.
+- **El `UPDATE` de consumo lleva `usada IS NULL AND expira > NOW()` en el
+  `WHERE`** — es el candado contra el doble envío (dos pestañas, un reintento
+  del navegador). Si no afecta ninguna fila, no se toca la contraseña.
+- **El formulario pide la contraseña dos veces y no usa el ojito** que sí tiene
+  `app/`. La pantalla se abre desde un enlace de correo, así que puede terminar
+  en una máquina prestada; y si se tipea mal, la persona queda afuera de la
+  cuenta que acaba de recuperar con el enlace ya consumido.
+- **El máximo son 36 caracteres**, igual que en `app/api/contrasena.php`:
+  `usuarios.contrasena` es varchar(50) y guarda el base64 del cifrado legacy
+  (4*ceil(n/3)). Con 37 caracteres son 52 y MySQL la truncaría.
+- **La búsqueda acepta usuario o correo** (`usuario = :u OR LOWER(correo) = :c`,
+  primera por id): quien perdió la contraseña no tiene por qué acordarse de con
+  cuál entra, y `usuarios` no tiene `UNIQUE` en ninguna de las dos columnas.
+- **La FK de `recuperaciones` es `ON DELETE CASCADE`**, a diferencia del
+  `RESTRICT` de casi todo el esquema: un token sin su usuario no vale nada, y
+  con `RESTRICT` esta tabla se sumaría a la lista de cosas que hay que borrar a
+  mano antes de eliminar una cuenta (que ya arrastra `perfiles`).
+- **Cambiar la contraseña NO cierra las sesiones abiertas.** El JWT es
+  stateless (12 h de TTL) y no hay nada en el token que se pueda invalidar
+  desde la base. Si alguna vez hace falta, el camino es un claim de versión en
+  el JWT contra una columna de `usuarios`, no tocar esta pantalla.
 
 ## Módulos
 

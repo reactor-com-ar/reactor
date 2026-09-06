@@ -37,7 +37,18 @@ const PRECARGA = [OFFLINE, '/assets/img/logo.png'];
 self.addEventListener('install', (evento) => {
     evento.waitUntil(
         caches.open(CACHE)
-            .then((cache) => cache.addAll(PRECARGA))
+            // Se guarda recurso por recurso y se ignora el que falle, EN VEZ
+            // de `cache.addAll()`, que es atomico: si uno solo de los archivos
+            // no se puede bajar, addAll rechaza, la instalacion falla y este
+            // worker NO se activa nunca. Y como el worker que sigue mandando
+            // en ese caso es el legacy —cache-first sobre todo el origen—, un
+            // 404 en una imagen dejaria a los celulares con el worker viejo
+            // para siempre, que es exactamente lo que este archivo viene a
+            // resolver. Fallar la instalacion por un recurso opcional es peor
+            // que quedarse sin ese recurso.
+            .then((cache) => Promise.all(
+                PRECARGA.map((url) => cache.add(url).catch(() => null))
+            ))
             // `skipWaiting` para que el worker viejo se vaya en la primera
             // visita y no cuando el usuario cierre todas las pestañas: en una
             // PWA instalada eso puede no pasar nunca.
@@ -57,6 +68,29 @@ self.addEventListener('activate', (evento) => {
     );
 });
 
+/* Respuesta de ultimo recurso cuando no hay red NI pantalla offline cacheada.
+ *
+ * `respondWith()` TIENE que recibir una Response. Si se le pasa `undefined`
+ * —que es justo lo que devuelve `caches.match()` cuando el recurso no esta— el
+ * navegador corta la navegacion con un error de red y muestra
+ * "No se puede acceder a este sitio / ERR_FAILED", sin ninguna pista de que el
+ * culpable fue el service worker. Por eso nunca se devuelve el resultado de
+ * `caches.match()` pelado. */
+function respuestaSinConexion() {
+    return new Response(
+        '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
+        + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<title>Sin conexión</title></head>'
+        + '<body style="font-family:sans-serif;background:#262f38;color:#f0f0f0;'
+        + 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">'
+        + '<div style="text-align:center;padding:24px">'
+        + '<h1 style="font-size:1.2rem;margin:0 0 8px">Sin conexión</h1>'
+        + '<p style="opacity:.7;margin:0">Revisá tu conexión y volvé a intentar.</p>'
+        + '</div></body></html>',
+        { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+    );
+}
+
 self.addEventListener('fetch', (evento) => {
     const pedido = evento.request;
 
@@ -65,7 +99,9 @@ self.addEventListener('fetch', (evento) => {
     if (pedido.mode !== 'navigate') return;
 
     evento.respondWith(
-        fetch(pedido).catch(() => caches.match(OFFLINE))
+        fetch(pedido).catch(() =>
+            caches.match(OFFLINE).then((r) => r || respuestaSinConexion())
+        )
     );
 });
 

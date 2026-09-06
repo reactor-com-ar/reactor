@@ -1,6 +1,18 @@
 # URLs sin extension: /foo sirve foo.php cuando existe.
 RewriteEngine On
+# La condicion mira el DESTINO ($1.php), no `REQUEST_FILENAME.php`.
+#
+# Con REQUEST_FILENAME la regla entra en bucle: Apache trunca esa variable al
+# prefijo que SI existe en disco. Para `/index/foo` queda valiendo el directorio
+# raiz + `index`, y `+.php` encuentra `index.php`: la condicion da true, la regla
+# dispara con $1 = "index/foo" y reescribe a `index/foo.php`, que no existe. La
+# vuelta siguiente repite y agrega otro `.php`, hasta que Apache corta con 500
+# ("exceeded the limit of 10 internal redirects").
+#
+# Pasa con CUALQUIER `/<algo>/<lo que sea>` donde `<algo>.php` exista.
+# Comprobando `$1.php` la regla solo dispara cuando el archivo que va a servir
+# existe de verdad.
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteCond %{DOCUMENT_ROOT}/$1.php -f
 RewriteRule ^(.+?)/?$ $1.php [L]

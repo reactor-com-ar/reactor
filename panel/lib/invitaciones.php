@@ -22,6 +22,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/env.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/databox.php';
+require_once __DIR__ . '/base_url.php';
 
 /* Codigos de `invitaciones.estado` (varchar(1)), heredados del legacy. */
 const INVITACION_PENDIENTE = '1';
@@ -36,33 +37,10 @@ const INVITACION_SIN_FECHA = '1500-01-01 00:00:00';
 const INVITACION_UUID_LARGO = 10;
 
 /**
- * URL base con la que se arma el enlace del correo.
- *
- * En produccion es fija (`https://panel.reactor.com.ar`) a proposito: el
- * enlace viaja dentro de un mail, asi que derivarlo del Host de la request
- * dejaria que un Host falseado mandara a los invitados a otro dominio.
- * En desarrollo si se deriva de la request (localhost:8087), porque ahi no
- * existe un host fijo. `PANEL_BASE_URL` en el .env pisa las dos.
+ * Enlace publico que recibe el invitado.
+ * `panelBaseUrl()` vive en lib/base_url.php: la comparte con el enlace de
+ * recuperacion de contrasena, que tiene la misma regla de host fijo.
  */
-function panelBaseUrl(): string
-{
-    if (defined('PANEL_BASE_URL') && trim((string) PANEL_BASE_URL) !== '') {
-        return rtrim(trim((string) PANEL_BASE_URL), '/');
-    }
-    if (APP_ENV === 'production') {
-        return 'https://panel.reactor.com.ar';
-    }
-
-    $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
-    if ($host === '' || !preg_match('/^[A-Za-z0-9.\-]+(:\d+)?$/', $host)) {
-        $host = 'localhost:8087';
-    }
-    $esHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off');
-
-    return ($esHttps ? 'https' : 'http') . '://' . $host;
-}
-
-/** Enlace publico que recibe el invitado. */
 function invitacionUrl(string $uuid): string
 {
     return panelBaseUrl() . '/invitacion/?uid=' . rawurlencode($uuid);

@@ -1,25 +1,93 @@
-# URLs sin extension: /foo sirve foo.php cuando existe.
 RewriteEngine On
+
+# ---------------------------------------------------------------------------
+# Esquema real de la request (http o https).
+#
+# Apache NO lo sabe: nginx termina el TLS y le habla HTTP plano al contenedor,
+# asi que para Apache toda request es HTTP. Cualquier redirect con [R] que arme
+# mod_rewrite sale entonces como `http://...` aunque el usuario haya entrado
+# por HTTPS, degradando la conexion y CAMBIANDO DE ORIGEN.
+#
+# Medido en produccion, era el bug que dejaba sin abrir los accesos directos:
+#   https://app.reactor.com.ar/panel/  ->  http://app.reactor.com.ar/  ->  https://...
+# Tres saltos, uno en claro por el puerto 80, y con un service worker
+# registrado en el origen https ese rebote termina en ERR_FAILED.
+#
+# El dato bueno lo manda nginx en X-Forwarded-Proto (aprovisionar_server.sh).
+# ---------------------------------------------------------------------------
+RewriteRule ^ - [E=ESQUEMA:http]
+RewriteCond %{HTTP:X-Forwarded-Proto} =https [OR]
+RewriteCond %{HTTPS} =on
+RewriteRule ^ - [E=ESQUEMA:https]
+
+# URLs sin extension: /foo sirve foo.php cuando existe.
+# La condicion mira el DESTINO ($1.php), no `REQUEST_FILENAME.php`.
+#
+# Con REQUEST_FILENAME esta regla entra en bucle: Apache trunca esa variable al
+# prefijo que SI existe en disco, asi que para `/panel/index` vale
+# `/var/www/app/panel` y `+.php` encuentra `panel.php`. La condicion da true, la
+# regla dispara con $1 = "panel/index" y reescribe a `panel/index.php`, que no
+# existe; la vuelta siguiente repite y agrega otro `.php`, hasta que Apache
+# corta con 500 ("exceeded the limit of 10 internal redirects").
+#
+# Pasaba con CUALQUIER `/<algo>/<lo que sea>` donde `<algo>.php` existiera:
+# /index/foo, /supervisor/foo, /panel/index... Comprobando `$1.php` la regla
+# solo dispara cuando el archivo que va a servir existe de verdad.
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteCond %{DOCUMENT_ROOT}/$1.php -f
 RewriteRule ^(.+?)/?$ $1.php [L]
 
-# Rutas del legacy que ya no existen -> al inicio.
+# `/panel/` -> el puente, servido directo y SIN redirect.
 #
-# Cuando app.reactor.com.ar deje de apuntar al proyecto viejo, los accesos
-# directos y links guardados de los usuarios van a seguir pidiendo URLs que
-# aca no existen (/cuenta, /dominio/actividad, /cambiar/panel, /panel/index,
-# /teclados...). Sin esto se llevan un 404; con esto caen en la app.
+# Es la URL que quedo guardada en los accesos directos de la pantalla de inicio
+# (la de la captura del usuario), y el unico caso donde evitar el redirect
+# importa: en iOS, un redirect HTTP desde el punto de arranque de un icono
+# saca a la app del modo standalone y la abre en Safari. `/panel` sin barra lo
+# resuelve la regla de extension de arriba, que ya encuentra `panel.php`.
 #
-# Que NO se redirige, y por que:
+# EL PATRON TIENE QUE SER EXACTO, no `^panel(/.*)?$`. En un .htaccess el
+# prefijo per-directory de `/panel/index` es `/panel/`, asi que la sustitucion
+# relativa `panel.php` se resuelve a `/panel/panel.php` — que vuelve a matchear
+# ese patron amplio y entra en bucle: Apache corta con 500 y
+# "exceeded the limit of 10 internal redirects". Las rutas con mas segmentos
+# (`/panel/index`) las toma el catch-all de abajo, que redirige y no reescribe.
+#
+# El puente es `panel.php` y no `panel/index.php` a proposito: si `panel` fuera
+# un directorio, `/panel` sin barra lo agarraria mod_dir antes que cualquier
+# RewriteRule y responderia un 301 armado con esquema `http://`.
+RewriteRule ^panel/$ panel.php [L]
+
+# Rutas del legacy que ya no existen -> al inicio, via panel.php.
+#
+# Los accesos directos y favoritos de los usuarios siguen pidiendo URLs de la
+# app vieja (/cuenta, /dominio/actividad, /cambiar/panel, /teclados...). Sin
+# esto se llevan un 404.
+#
+# SE SIRVE UNA PAGINA, NO SE MANDA UN REDIRECT (ojo: la regla NO lleva [R]).
+# Los motivos completos estan en panel.php, pero en corto son dos:
+#
+#   1. Un redirect con [R] sale absoluto y con el esquema que ve Apache, que
+#      detras de nginx es siempre `http://` aunque el usuario haya entrado por
+#      HTTPS. Eso degradaba la conexion y cambiaba de origen. Sin [R] no hay
+#      Location que armar y el problema no puede volver a aparecer.
+#   2. En iOS, un redirect HTTP desde la URL que quedo guardada en la pantalla
+#      de inicio saca a la app del modo standalone y la abre en Safari.
+#
+# Que NO se toca, y por que:
 #   - api/     : un endpoint que no existe tiene que devolver 404, no HTML.
-#                Redirigirlo haria que el fetch parsee el index como si fuera
+#                Servirle el puente haria que el fetch lo parsee como si fuera
 #                JSON y falle con un error que no dice nada.
-#   - assets/, favicon/ : un archivo faltante tiene que fallar como archivo.
-#                Devolver el HTML del index en lugar de un .css o un .png
-#                rompe de formas mucho mas confusas que un 404.
+#   - assets/, favicon/ y cualquier ruta con extension de archivo: tienen que
+#                fallar como archivo. Devolver HTML en lugar de un .css o un
+#                .png rompe de formas mucho mas confusas que un 404.
+#
+# Este sí es un redirect, y con el esquema tomado de X-Forwarded-Proto (ver el
+# bloque del principio). Son URLs que se abren en una pestaña normal, donde un
+# 302 no molesta; el caso delicado —el acceso directo de la pantalla de inicio,
+# que apunta a /panel— lo resuelve la regla de arriba sin redirect.
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_URI} !^/(api|assets|favicon)/
-RewriteRule ^ / [R=302,L]
+RewriteCond %{REQUEST_URI} !\.(css|js|json|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|map|txt|xml)$ [NC]
+RewriteRule ^ %{ENV:ESQUEMA}://%{HTTP_HOST}/ [R=302,L]

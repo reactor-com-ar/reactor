@@ -2416,6 +2416,30 @@ CREATE TABLE `publicidades` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `recuperaciones`
+--
+
+DROP TABLE IF EXISTS `recuperaciones`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `recuperaciones` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `usuario` int NOT NULL,
+  `token` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `correo` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `origen` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `solicitada` datetime NOT NULL,
+  `expira` datetime NOT NULL,
+  `usada` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_recuperaciones_token` (`token`),
+  KEY `ix_recuperaciones_usuario` (`usuario`,`solicitada`),
+  KEY `ix_recuperaciones_origen` (`origen`,`solicitada`),
+  CONSTRAINT `fk_recuperaciones_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `referencias`
 --
 

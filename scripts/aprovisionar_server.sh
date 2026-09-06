@@ -26,7 +26,28 @@ APP_PORT_HOST=8086        # cloud
 PANEL_PORT_HOST=8087      # panel
 PWA_PORT_HOST=8115        # app end-user
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
+# El BackOffice se sirve en panel.reactor.com.ar y responde ademas por
+# control.reactor.com.ar (DNS apuntado a este server el 2026-09-05), que va al
+# MISMO vhost del contenedor (8087). Igual que con los alias de la app, tiene
+# que estar en los tres lugares o el dominio no funciona: server_name de nginx,
+# certificado, y ServerAlias de docker/vhosts.conf.
+#
+# control. ES TEMPORAL: existe solo para la transicion desde el legacy. El
+# unico punto de entrada valido a futuro es panel.reactor.com.ar. Cuando la
+# migracion termine se saca de los tres lugares:
+#   1) PANEL_DOMAIN_ALIASES, aca (deja de entrar al server_name y al cert);
+#   2) el ServerAlias de docker/vhosts.conf;
+#   3) el certificado, reemitiendo sin ese -d
+#      (sudo certbot --nginx --cert-name cloud.reactor.com.ar -d ... sin control.)
+# Y despues se baja el registro DNS.
+#
+# Por eso NO se acoplo nada a control.: la cookie de sesion sigue siendo
+# host-only (no se amplio a .reactor.com.ar) y los correos de invitacion
+# siguen enlazando a panel. (ver panelBaseUrl() en panel/lib/invitaciones.php).
+# Sacar el alias no deberia romper nada mas que los links que alguien haya
+# guardado apuntando ahi.
 PANEL_DOMAIN="${PANEL_DOMAIN:-panel.reactor.com.ar}"
+PANEL_DOMAIN_ALIASES="${PANEL_DOMAIN_ALIASES:-control.reactor.com.ar}"
 # La app end-user se sirve en app.reactor.com.ar (DNS repuntado a este server
 # el 2026-09-05) y responde ademas por una lista de alias, todos apuntando al
 # MISMO vhost del contenedor (8115):
@@ -196,6 +217,22 @@ server {
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto \$scheme;
+        # Reescribe el esquema de los Location que emite Apache.
+        #
+        # Apache esta detras de este proxy y solo ve HTTP, asi que todo redirect
+        # absoluto que genera sale como `http://`, aunque el usuario haya
+        # entrado por HTTPS: degrada la conexion, cambia de origen y rebota por
+        # el puerto 80. Con un service worker registrado en el origen https eso
+        # termina en ERR_FAILED.
+        #
+        # Aplica a los DOS generadores de Apache: mod_dir (el 301 que agrega la
+        # barra a un directorio) y mod_rewrite con [R]. Del lado de Apache se
+        # puede arreglar el segundo leyendo X-Forwarded-Proto, pero no el
+        # primero: mod_dir no mira esa cabecera. Por eso el arreglo va aca.
+        #
+        # Acotado a \$host: solo toca los redirect al MISMO dominio, no los que
+        # apunten a un sitio externo.
+        proxy_redirect     http://\$host/ https://\$host/;
         client_max_body_size 50M;
         proxy_read_timeout 120s;
     }
@@ -211,8 +248,58 @@ server {
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto \$scheme;
+        # Reescribe el esquema de los Location que emite Apache.
+        #
+        # Apache esta detras de este proxy y solo ve HTTP, asi que todo redirect
+        # absoluto que genera sale como `http://`, aunque el usuario haya
+        # entrado por HTTPS: degrada la conexion, cambia de origen y rebota por
+        # el puerto 80. Con un service worker registrado en el origen https eso
+        # termina en ERR_FAILED.
+        #
+        # Aplica a los DOS generadores de Apache: mod_dir (el 301 que agrega la
+        # barra a un directorio) y mod_rewrite con [R]. Del lado de Apache se
+        # puede arreglar el segundo leyendo X-Forwarded-Proto, pero no el
+        # primero: mod_dir no mira esa cabecera. Por eso el arreglo va aca.
+        #
+        # Acotado a \$host: solo toca los redirect al MISMO dominio, no los que
+        # apunten a un sitio externo.
+        proxy_redirect     http://\$host/ https://\$host/;
         client_max_body_size 50M;
         proxy_read_timeout 120s;
+    }
+}
+
+# control.reactor.com.ar -> 301 a panel.reactor.com.ar
+#
+# TEMPORAL: control. NO sirve la aplicacion, solo redirige. El unico punto de
+# entrada valido es panel. (ver PANEL_DOMAIN_ALIASES arriba).
+#
+# \$request_uri conserva path y query, asi que un link viejo a
+#   https://control.reactor.com.ar/invitacion/?uid=abc
+# termina en
+#   https://panel.reactor.com.ar/invitacion/?uid=abc
+#
+# 301 (permanente) a proposito: hace que navegadores y favoritos adopten
+# panel. y dejen de pedir control., que es lo que queremos antes de darlo de
+# baja. Contrapartida: el navegador lo cachea de forma persistente.
+#
+# EL REDIRECT VA ADENTRO DE \`location /\`, NO a nivel server. nginx evalua los
+# \`return\` del contexto server en la fase rewrite, ANTES de elegir el location:
+# con un \`return\` suelto, el pedido de Let's Encrypt a
+# /.well-known/acme-challenge/<token> tambien se redirigiria y la validacion
+# fallaria -- y control. comparte certificado con los otros 6 dominios, asi que
+# voltearia la renovacion de todos. Adentro de \`location /\`, el location que
+# certbot inserta al renovar es mas especifico y gana.
+# Verificado con \`certbot renew --dry-run\`: los 7 dominios validan.
+#
+# certbot le agrega el bloque 443 (necesita el cert igual que si sirviera
+# contenido: sin el, el navegador corta con error de certificado antes de leer
+# el redirect). Por eso control. sigue en la lista de -d.
+server {
+    listen 80;
+    server_name ${PANEL_DOMAIN_ALIASES};
+    location / {
+        return 301 https://${PANEL_DOMAIN}\$request_uri;
     }
 }
 
@@ -228,6 +315,22 @@ server {
         proxy_set_header   X-Real-IP \$remote_addr;
         proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto \$scheme;
+        # Reescribe el esquema de los Location que emite Apache.
+        #
+        # Apache esta detras de este proxy y solo ve HTTP, asi que todo redirect
+        # absoluto que genera sale como `http://`, aunque el usuario haya
+        # entrado por HTTPS: degrada la conexion, cambia de origen y rebota por
+        # el puerto 80. Con un service worker registrado en el origen https eso
+        # termina en ERR_FAILED.
+        #
+        # Aplica a los DOS generadores de Apache: mod_dir (el 301 que agrega la
+        # barra a un directorio) y mod_rewrite con [R]. Del lado de Apache se
+        # puede arreglar el segundo leyendo X-Forwarded-Proto, pero no el
+        # primero: mod_dir no mira esa cabecera. Por eso el arreglo va aca.
+        #
+        # Acotado a \$host: solo toca los redirect al MISMO dominio, no los que
+        # apunten a un sitio externo.
+        proxy_redirect     http://\$host/ https://\$host/;
         client_max_body_size 50M;
         proxy_read_timeout 120s;
     }
@@ -293,6 +396,16 @@ else
     else
         echo "        DNS de $PANEL_DOMAIN -> ${RESOLVED_PANEL:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
     fi
+    # Mismo criterio que con los alias de la app: el que todavia no tenga el
+    # DNS apuntado se saltea y no voltea la emision del resto.
+    for PANEL_ALIAS in $PANEL_DOMAIN_ALIASES; do
+        RESOLVED_PANEL_ALIAS=$(dig +short A "$PANEL_ALIAS" @8.8.8.8 | tail -n1)
+        if [ "$RESOLVED_PANEL_ALIAS" = "$PUBLIC_IP" ]; then
+            CERT_DOMAINS+=("-d" "$PANEL_ALIAS")
+        else
+            echo "        DNS de $PANEL_ALIAS -> ${RESOLVED_PANEL_ALIAS:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+        fi
+    done
     if [ "$RESOLVED_PWA" = "$PUBLIC_IP" ]; then
         CERT_DOMAINS+=("-d" "$PWA_DOMAIN")
     else

@@ -80,6 +80,8 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
                 <span>Ingresar</span>
             </button>
         </form>
+
+        <a class="login-alt" href="recuperar/">&iquest;Olvidaste tu contrase&ntilde;a?</a>
     </section>
 </main>
 

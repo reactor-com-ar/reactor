@@ -1219,12 +1219,31 @@ body.login-page { background: var(--bg); }
 .login-page .btn-primary:disabled { background: rgba(255,255,255,.6); color: var(--primary); cursor: not-allowed; }
 .login-submit                     { justify-content: center; padding: 10px 16px; margin-top: 4px; }
 
-/* ---------- 19. Invitacion publica (invitacion/) ----------
- * Las tres pantallas que ve el invitado (ver / aceptar / rechazar) NO son
- * parte de la SPA: son paginas sueltas, sin sesion, que reusan la tarjeta
- * roja del login. Todo lo de abajo vive dentro de .login-card, asi que
- * sigue las reglas del chrome rojo (blanco y negros translucidos, nunca
- * --text / --muted / --border).
+/* Unica accion secundaria del login: el acceso a recuperar/. Va como texto
+   y no como boton para que no compita con Ingresar — es la salida de
+   emergencia, no un camino alternativo. Subrayado permanente (no solo en
+   hover) porque sobre el rojo pleno un link sin subrayar no se distingue
+   del resto del texto blanco. */
+.login-alt {
+    align-self: center;
+    margin-top: -4px;
+    font-size: .8rem;
+    color: rgba(255,255,255,.82);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.login-alt:hover { color: #fff; }
+
+/* ---------- 19. Paginas publicas (invitacion/ + recuperar/) ----------
+ * Las pantallas sin sesion del panel: las tres del invitado (ver / aceptar
+ * / rechazar) y las dos de recuperacion de contrasena (pedir el enlace /
+ * restablecer). NO son parte de la SPA: son paginas sueltas que reusan la
+ * tarjeta roja del login y comparten el shell de lib/publico.php. Todo lo
+ * de abajo vive dentro de .login-card, asi que sigue las reglas del chrome
+ * rojo (blanco y negros translucidos, nunca --text / --muted / --border).
+ *
+ * Las clases conservan el prefijo `inv-` con el que nacieron: son las de la
+ * tarjeta publica en general, no las de invitaciones.
  */
 .inv-card  { max-width: 420px; }
 .inv-lead  { font-size: .87rem; color: rgba(255,255,255,.85); line-height: 1.5; text-align: center; }

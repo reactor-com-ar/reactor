@@ -3,13 +3,31 @@
 declare(strict_types=1);
 
 /**
- * ABM de `usuarios` (esquema real en db/schema.sql).
+ * Modulo Usuarios: ABM de los PERFILES del dominio (esquema en db/schema.sql).
  *
- *   GET    api/usuarios.php            -> listado + resumen + perfiles del dominio
- *   GET    api/usuarios.php?id=N       -> un registro (todos los campos visibles)
- *   POST   api/usuarios.php            -> alta
- *   PUT    api/usuarios.php            -> modificacion
- *   DELETE api/usuarios.php?id=N       -> baja
+ *   GET    api/usuarios.php            -> listado + resumen + roles del dominio
+ *   GET    api/usuarios.php?id=N       -> un perfil (con los datos de su cuenta)
+ *   PUT    api/usuarios.php            -> {id, habilitado}: habilita / deshabilita
+ *   DELETE api/usuarios.php?id=N       -> elimina el PERFIL (el acceso), no la cuenta
+ *
+ * LA FILA ES UN PERFIL, NO UN USUARIO, y esa es la decision de fondo. Lo que el
+ * modulo lista es quien tiene acceso a este dominio, y eso vive en `perfiles`:
+ * `usuarios.dominio` es el dominio ACTIVO de la cuenta —el ultimo que la persona
+ * uso, en cualquiera de los sistemas que comparten la tabla— y no la lista de
+ * dominios a los que puede entrar. Filtrar `usuarios` por `dominio` escondia a
+ * todo el que estuviera trabajando en otro lado: medido en dev, el dominio
+ * `Patio San Ignacio` tiene 152 perfiles y solo 15 cuentas con ese dominio
+ * activo (137 accesos invisibles); en el conjunto de la base son 2.227 perfiles.
+ *
+ * POR LO MISMO EL ESTADO DE LA FILA ES `perfiles.habilitado`, no
+ * `usuarios.habilitado`: son dos cosas distintas y en los datos estan
+ * desalineadas (154 perfiles deshabilitados de cuentas habilitadas y 18 al
+ * reves). El de la cuenta viaja igual como dato aparte (`usuario_habilitado`),
+ * porque una cuenta deshabilitada no entra ni con el perfil habilitado.
+ *
+ * LAS DOS COLUMNAS SON `tinyint(1) NOT NULL DEFAULT 0` y admiten UN SOLO par de
+ * valores: 1 = habilitado, 0 = deshabilitado. Nada de 'S'/'N', NULL ni cadena
+ * vacia -- ver 20260905_2200_habilitado_tinyint_0_1.sql.
  *
  * ALCANCE: todo se acota al dominio de la sesion (requireDominioId()). Ningun
  * query corre sin ese filtro, ni siquiera el lookup por id.
@@ -17,14 +35,33 @@ declare(strict_types=1);
  * CREDENCIALES: `contrasena` y `clave` nunca se devuelven. La contrasena se
  * guarda con el cifrado historico (reactor_legacy_encriptar), que es
  * reversible con la clave global — exponerla seria filtrarla en claro.
+ *
+ * NO HAY ALTA NI EDICION. El alta es una invitacion (POST api/invitaciones.php:
+ * la cuenta y el perfil los crea el propio invitado al aceptar) y los datos de
+ * la persona los administra su cuenta, no este modulo.
  */
 
 require __DIR__ . '/bootstrap.php';
-require_once __DIR__ . '/legacy_crypto.php';
-require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 
-const ORDEN_VALIDO = ['id', 'usuario', 'nombre', 'correo', 'registrado', 'ingresado'];
-const MAX_LIMITE   = 1000;
+/**
+ * Columnas ordenables -> expresion SQL. Es un mapa y no una lista porque la
+ * fila sale de tres tablas: el valor va interpolado en el ORDER BY, asi que
+ * nunca puede salir del request.
+ */
+const ORDEN_VALIDO = [
+    'id'         => 'p.id',
+    'usuario'    => 'u.usuario',
+    'nombre'     => 'u.nombre',
+    'correo'     => 'u.correo',
+    'rol'        => 'r.nombre',
+    'registrado' => 'u.registrado',
+    'ingresado'  => 'u.ingresado',
+];
+
+const MAX_LIMITE = 1000;
+
+// HABILITADO (1) y DESHABILITADO (0) viven en lib/habilitado.php, que llega
+// por el bootstrap. Son los DOS unicos valores de la columna en toda la base.
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -33,14 +70,13 @@ try {
         case 'GET':
             isset($_GET['id']) ? handleGet((int) $_GET['id']) : handleList();
             break;
-        case 'POST':   handleCreate(); break;
         case 'PUT':    handleUpdate(); break;
         case 'DELETE': handleDelete(); break;
         default:
             json_error('Metodo no permitido', 405);
     }
 } catch (Throwable $e) {
-    json_error('Error al procesar usuarios: ' . $e->getMessage(), 500);
+    json_error('Error al procesar perfiles: ' . $e->getMessage(), 500);
 }
 
 /* ------------------------------------------------------------------ */
@@ -53,7 +89,7 @@ function handleList(): void
 
     $q      = trim((string) ($_GET['q']      ?? ''));
     $codigo = (int)         ($_GET['codigo'] ?? 0);
-    $perfil = (int)         ($_GET['perfil'] ?? 0);
+    $rol    = (int)         ($_GET['rol']    ?? 0);
     $estado = (string)      ($_GET['estado'] ?? 'todos');
     $limite = (int)         ($_GET['limite'] ?? 100);
     $orden  = (string)      ($_GET['orden']  ?? 'id');
@@ -61,65 +97,76 @@ function handleList(): void
 
     if ($limite <= 0)          $limite = 100;
     if ($limite > MAX_LIMITE)  $limite = MAX_LIMITE;
-    if (!in_array($orden, ORDEN_VALIDO, true)) $orden = 'id';
+    if (!array_key_exists($orden, ORDEN_VALIDO)) $orden = 'id';
 
-    $where  = ['u.dominio = :dom'];
+    $where  = ['p.dominio = :dom'];
     $params = [':dom' => $dominio];
 
     if ($codigo > 0) {
-        $where[]        = 'u.id = :cod';
+        $where[]        = 'p.id = :cod';
         $params[':cod'] = $codigo;
     }
-    if ($perfil > 0) {
-        $where[]         = 'u.perfil = :perf';
-        $params[':perf'] = $perfil;
+    if ($rol > 0) {
+        $where[]        = 'p.rol = :rol';
+        $params[':rol'] = $rol;
     }
     if ($estado === 'habilitados') {
-        $where[] = "UPPER(COALESCE(u.habilitado,'')) IN ('S','1','Y')";
+        $where[]         = 'p.habilitado = :hab';
+        $params[':hab']  = HABILITADO;
     } elseif ($estado === 'deshabilitados') {
-        $where[] = "UPPER(COALESCE(u.habilitado,'')) NOT IN ('S','1','Y')";
+        // Sin COALESCE: la columna es NOT NULL, asi que "no habilitado" es
+        // exactamente 0 y no hace falta cubrir el NULL.
+        $where[]         = 'p.habilitado = :hab';
+        $params[':hab']  = DESHABILITADO;
     }
     if ($q !== '') {
         // Un placeholder por columna: con EMULATE_PREPARES=false, PDO no admite
         // repetir el mismo nombre en un statement (SQLSTATE HY093).
         $ors = [];
-        foreach (['u.usuario', 'u.nombre', 'u.correo', 'u.celular'] as $i => $columna) {
+        foreach (['u.usuario', 'u.nombre', 'u.correo', 'u.celular', 'p.nombre'] as $i => $columna) {
             $ors[]             = $columna . ' LIKE :q' . $i;
             $params[':q' . $i] = '%' . $q . '%';
         }
         $where[] = '(' . implode(' OR ', $ors) . ')';
     }
 
-    $sql = 'SELECT u.id, u.uuid, u.nombre, u.usuario, u.correo, u.celular,
-                   u.habilitado, u.registrado, u.ingresado, u.roles,
-                   u.perfil, p.nombre AS perfil_nombre
-            FROM usuarios u
-            LEFT JOIN perfiles p ON p.id = u.perfil
+    // LEFT JOIN y no INNER: hay perfiles sin cuenta (`perfiles.usuario` NULL o
+    // con el centinela 0) y perfiles sin rol (145 en dev). Con INNER se
+    // esconderian, y esconder una fila que ademas no le sirve a nadie es
+    // justamente lo que impide limpiarla.
+    $sql = 'SELECT p.id, p.uuid, p.nombre AS perfil_nombre, p.habilitado,
+                   p.rol, p.tipo, r.nombre AS rol_nombre,
+                   u.id AS usuario_id, u.uuid AS usuario_uuid, u.nombre, u.usuario,
+                   u.correo, u.celular, u.habilitado AS usuario_habilitado,
+                   u.registrado, u.ingresado
+            FROM perfiles p
+            LEFT JOIN usuarios u ON u.id = p.usuario
+            LEFT JOIN roles    r ON r.id = p.rol
             WHERE ' . implode(' AND ', $where) . '
-            ORDER BY u.' . $orden . ' ' . $dir . '
+            ORDER BY ' . ORDEN_VALIDO[$orden] . ' ' . $dir . '
             LIMIT ' . $limite;
 
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
-    $usuarios = array_map('mapUsuario', $stmt->fetchAll());
+    $filas = array_map('mapPerfil', $stmt->fetchAll());
 
     // Resumen sobre el dominio completo, no sobre la pagina devuelta.
     $res = db()->prepare(
-        "SELECT COUNT(*) AS total,
-                SUM(CASE WHEN UPPER(COALESCE(habilitado,'')) IN ('S','1','Y') THEN 1 ELSE 0 END) AS habilitados
-         FROM usuarios WHERE dominio = :dom"
+        'SELECT COUNT(*) AS total,
+                SUM(CASE WHEN habilitado = :hab THEN 1 ELSE 0 END) AS habilitados
+         FROM perfiles WHERE dominio = :dom'
     );
-    $res->execute([':dom' => $dominio]);
+    $res->execute([':dom' => $dominio, ':hab' => HABILITADO]);
     $r = $res->fetch() ?: ['total' => 0, 'habilitados' => 0];
 
     json_ok([
-        'usuarios' => $usuarios,
-        'perfiles' => perfilesDelDominio($dominio),
+        'perfiles' => $filas,
+        'roles'    => rolesDelDominio($dominio),
         'resumen'  => [
             'total'          => (int) $r['total'],
             'habilitados'    => (int) $r['habilitados'],
             'deshabilitados' => (int) $r['total'] - (int) $r['habilitados'],
-            'mostrados'      => count($usuarios),
+            'mostrados'      => count($filas),
         ],
     ]);
 }
@@ -132,65 +179,42 @@ function handleGet(int $id): void
     }
 
     $stmt = db()->prepare(
-        'SELECT u.id, u.uuid, u.nombre, u.usuario, u.correo, u.celular,
-                u.habilitado, u.autenticacion, u.registrante, u.registrado,
-                u.ingresado, u.roles, u.perfil, u.dominio, u.panel,
-                p.nombre AS perfil_nombre,
+        'SELECT p.id, p.uuid, p.nombre AS perfil_nombre, p.habilitado,
+                p.rol, p.tipo, p.dominio, r.nombre AS rol_nombre,
+                u.id AS usuario_id, u.uuid AS usuario_uuid, u.nombre, u.usuario,
+                u.correo, u.celular, u.habilitado AS usuario_habilitado,
+                u.autenticacion, u.registrado, u.ingresado,
                 d.nombre AS dominio_nombre,
-                r.nombre AS registrante_nombre
-         FROM usuarios u
-         LEFT JOIN perfiles p ON p.id = u.perfil
-         LEFT JOIN dominios d ON d.id = u.dominio
-         LEFT JOIN usuarios r ON r.id = u.registrante
-         WHERE u.id = :id AND u.dominio = :dom
+                g.nombre AS registrante_nombre
+         FROM perfiles p
+         LEFT JOIN usuarios u ON u.id = p.usuario
+         LEFT JOIN roles    r ON r.id = p.rol
+         LEFT JOIN dominios d ON d.id = p.dominio
+         LEFT JOIN usuarios g ON g.id = u.registrante
+         WHERE p.id = :id AND p.dominio = :dom
          LIMIT 1'
     );
     $stmt->execute([':id' => $id, ':dom' => $dominio]);
     $row = $stmt->fetch();
     if (!$row) {
-        json_error('Usuario no encontrado en este dominio', 404);
+        json_error('Perfil no encontrado en este dominio', 404);
     }
 
-    json_ok(['usuario' => mapUsuario($row)]);
+    json_ok(['perfil' => mapPerfil($row)]);
 }
 
 /* ------------------------------------------------------------------ */
-/* Alta / Modificacion / Baja                                          */
+/* Habilitar / Deshabilitar / Baja                                     */
 /* ------------------------------------------------------------------ */
 
-function handleCreate(): void
-{
-    $dominio = requireDominioId();
-    $in      = readJson();
-
-    $datos      = validar($in, $dominio, null);
-    $contrasena = (string) ($in['contrasena'] ?? '');
-    if ($contrasena === '') {
-        json_error('La contrasena es obligatoria', 422);
-    }
-    validarContrasena($contrasena);
-
-    // El INSERT no se hace aca: `usuarioAlta()` es el canal unico de alta del
-    // panel (lo comparte con invitacion/aceptar.php). Es quien cifra la
-    // contrasena y quien fija las constantes de alta (autenticacion,
-    // habilitado, perfiles, dominios, paneles) -- por eso no se le pasa
-    // `habilitado`: al crear siempre nace '1'. Se cambia despues, editando.
-    $ctx = sessionContext() ?? [];
-    $id  = usuarioAlta(db(), [
-        'nombre'      => $datos['nombre'],
-        'usuario'     => $datos['usuario'],
-        'contrasena'  => $contrasena,
-        'correo'      => $datos['correo'],
-        'celular'     => $datos['celular'],
-        'perfil'      => $datos['perfil'],
-        'dominio'     => $dominio,
-        'roles'       => $datos['roles'],
-        'registrante' => (int) ($ctx['id'] ?? 0),
-    ]);
-
-    json_ok(['id' => $id], 201);
-}
-
+/**
+ * Unico UPDATE del modulo: toca `perfiles.habilitado` y nada mas.
+ *
+ * No reescribe la fila entera a proposito — los datos del perfil (nombre, rol,
+ * tipo) los administra Reactor y los de la persona son de su cuenta, asi que
+ * un PUT con payload completo solo podia romper cosas que esta pantalla no
+ * muestra.
+ */
 function handleUpdate(): void
 {
     $dominio = requireDominioId();
@@ -199,48 +223,46 @@ function handleUpdate(): void
     if ($id <= 0) {
         json_error('Codigo invalido', 422);
     }
-
-    // El registro tiene que existir DENTRO del dominio de la sesion.
-    $own = db()->prepare('SELECT id FROM usuarios WHERE id = :id AND dominio = :dom LIMIT 1');
-    $own->execute([':id' => $id, ':dom' => $dominio]);
-    if (!$own->fetchColumn()) {
-        json_error('Usuario no encontrado en este dominio', 404);
+    if (!array_key_exists('habilitado', $in)) {
+        json_error('Falta el estado', 422);
     }
 
-    $datos      = validar($in, $dominio, $id);
-    $contrasena = (string) ($in['contrasena'] ?? '');
-
-    $sql = 'UPDATE usuarios
-               SET nombre = :nombre, usuario = :usuario, correo = :correo,
-                   celular = :celular, habilitado = :habilitado,
-                   perfil = :perfil, roles = :roles';
-    $params = [
-        ':nombre'     => $datos['nombre'],
-        ':usuario'    => $datos['usuario'],
-        ':correo'     => $datos['correo'],
-        ':celular'    => $datos['celular'],
-        ':habilitado' => $datos['habilitado'],
-        ':perfil'     => $datos['perfil'],
-        ':roles'      => $datos['roles'],
-        ':id'         => $id,
-        ':dom'        => $dominio,
-    ];
-
-    // Contrasena vacia = no se toca.
-    if ($contrasena !== '') {
-        validarContrasena($contrasena);
-        $sql                  .= ', contrasena = :contrasena';
-        $params[':contrasena'] = reactor_legacy_encriptar($contrasena);
+    perfilDelDominio($id, $dominio);
+    // Deshabilitar el perfil con el que se esta trabajando cierra el panel en
+    // el request siguiente: el gate de acceso lo resuelve contra la base, no
+    // contra el token (lib/acceso.php).
+    if (esPerfilDeLaSesion($id)) {
+        json_error('No podes cambiar el estado de tu propio perfil', 409);
     }
 
-    $sql .= ' WHERE id = :id AND dominio = :dom';
+    // Se escribe el ENTERO 1 o 0, nunca un booleano de PHP: PDO bindea `false`
+    // como cadena vacia y en la columna vieja (varchar) eso dejaba un tercer
+    // valor que ninguna pantalla sabia leer. Hoy la columna es tinyint NOT NULL
+    // y el motor lo rechazaria, pero el binding correcto es el entero.
+    $habilitado = !empty($in['habilitado']) ? HABILITADO : DESHABILITADO;
 
-    $stmt = db()->prepare($sql);
-    $stmt->execute($params);
+    $stmt = db()->prepare(
+        'UPDATE perfiles SET habilitado = :hab WHERE id = :id AND dominio = :dom'
+    );
+    $stmt->execute([':hab' => $habilitado, ':id' => $id, ':dom' => $dominio]);
 
-    json_ok(['id' => $id]);
+    json_ok(['id' => $id, 'habilitado' => $habilitado === HABILITADO]);
 }
 
+/**
+ * Elimina el PERFIL: la persona pierde el acceso a este dominio y conserva la
+ * cuenta, la contrasena y los accesos que tenga en otros dominios.
+ *
+ * Antes hay que borrar sus filas de `sesiones`: `fk_sesiones_perfil` es
+ * ON DELETE RESTRICT y 1.917 de los 2.227 perfiles de dev tienen alguna, asi
+ * que sin esto la baja fallaba con 1451 en la enorme mayoria de las filas. Una
+ * sesion del sistema historico que apunta a un perfil que ya no existe no se
+ * puede retomar, asi que borrarlas es cerrar el acceso que se acaba de quitar.
+ *
+ * `usuarios.perfil` NO se toca aca: su FK es ON DELETE SET NULL y la base lo
+ * resuelve sola. Si el perfil borrado era el activo de esa cuenta, el login
+ * elige otro (api/login.php -> perfilesAdministrador()).
+ */
 function handleDelete(): void
 {
     $dominio = requireDominioId();
@@ -249,16 +271,29 @@ function handleDelete(): void
         json_error('Codigo invalido', 422);
     }
 
-    $ctx = sessionContext() ?? [];
-    if ($id === (int) ($ctx['id'] ?? 0)) {
-        json_error('No podes eliminar tu propio usuario', 409);
+    perfilDelDominio($id, $dominio);
+    if (esPerfilDeLaSesion($id)) {
+        json_error('No podes eliminar tu propio perfil', 409);
     }
 
-    $stmt = db()->prepare('DELETE FROM usuarios WHERE id = :id AND dominio = :dom');
-    $stmt->execute([':id' => $id, ':dom' => $dominio]);
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('DELETE FROM sesiones WHERE perfil = :id')->execute([':id' => $id]);
 
-    if ($stmt->rowCount() === 0) {
-        json_error('Usuario no encontrado en este dominio', 404);
+        $stmt = $pdo->prepare('DELETE FROM perfiles WHERE id = :id AND dominio = :dom');
+        $stmt->execute([':id' => $id, ':dom' => $dominio]);
+        if ($stmt->rowCount() === 0) {
+            $pdo->rollBack();
+            json_error('Perfil no encontrado en este dominio', 404);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
     }
 
     json_ok(['id' => $id]);
@@ -268,45 +303,85 @@ function handleDelete(): void
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Normaliza una fila de `usuarios` para el front. Nunca incluye credenciales. */
-function mapUsuario(array $r): array
+/**
+ * Normaliza una fila del listado para el front. Nunca incluye credenciales.
+ *
+ * `habilitado` es SIEMPRE el del perfil; el de la cuenta viaja aparte en
+ * `usuario_habilitado`.
+ */
+function mapPerfil(array $r): array
 {
-    $hab = strtoupper(trim((string) ($r['habilitado'] ?? '')));
-
     $out = [
-        'id'            => (int) $r['id'],
-        'uuid'          => (string) ($r['uuid'] ?? ''),
-        'nombre'        => (string) ($r['nombre'] ?? ''),
-        'usuario'       => (string) ($r['usuario'] ?? ''),
-        'correo'        => (string) ($r['correo'] ?? ''),
-        'celular'       => (string) ($r['celular'] ?? ''),
-        'habilitado'    => in_array($hab, ['S', '1', 'Y'], true),
-        'perfil'        => isset($r['perfil']) && $r['perfil'] !== null ? (int) $r['perfil'] : null,
-        'perfil_nombre' => (string) ($r['perfil_nombre'] ?? ''),
-        'roles'         => (string) ($r['roles'] ?? ''),
-        'registrado'    => (string) ($r['registrado'] ?? ''),
-        'ingresado'     => (string) ($r['ingresado'] ?? ''),
+        'id'                 => (int) $r['id'],
+        'uuid'               => (string) ($r['uuid'] ?? ''),
+        'perfil_nombre'      => (string) ($r['perfil_nombre'] ?? ''),
+        'habilitado'         => (int) ($r['habilitado'] ?? 0) === HABILITADO,
+        'rol'                => isset($r['rol']) && $r['rol'] !== null ? (int) $r['rol'] : null,
+        'rol_nombre'         => (string) ($r['rol_nombre'] ?? ''),
+        'usuario_id'         => !empty($r['usuario_id']) ? (int) $r['usuario_id'] : null,
+        'usuario_uuid'       => (string) ($r['usuario_uuid'] ?? ''),
+        'usuario'            => (string) ($r['usuario'] ?? ''),
+        'nombre'             => (string) ($r['nombre'] ?? ''),
+        'correo'             => (string) ($r['correo'] ?? ''),
+        'celular'            => (string) ($r['celular'] ?? ''),
+        // `usuarios.habilitado` es el mismo tinyint(1) 0/1 que el del perfil:
+        // las dos filas con 'S'/'N' del sistema historico las normalizo
+        // 20260905_2200_habilitado_tinyint_0_1.sql.
+        'usuario_habilitado' => (int) ($r['usuario_habilitado'] ?? 0) === HABILITADO,
+        'registrado'         => (string) ($r['registrado'] ?? ''),
+        'ingresado'          => (string) ($r['ingresado'] ?? ''),
+        // Le permite al front no ofrecer las acciones que el backend va a
+        // rechazar (deshabilitar / eliminar el perfil de la propia sesion).
+        'es_propio'          => esPerfilDeLaSesion((int) $r['id']),
     ];
 
     // Campos que solo trae el GET por id (modal de Consulta).
-    foreach (['autenticacion', 'dominio_nombre', 'registrante_nombre'] as $extra) {
+    foreach (['tipo', 'dominio_nombre', 'registrante_nombre', 'autenticacion'] as $extra) {
         if (array_key_exists($extra, $r)) {
             $out[$extra] = (string) ($r[$extra] ?? '');
-        }
-    }
-    foreach (['dominio', 'registrante', 'panel'] as $extra) {
-        if (array_key_exists($extra, $r)) {
-            $out[$extra] = $r[$extra] !== null ? (int) $r[$extra] : null;
         }
     }
 
     return $out;
 }
 
-function perfilesDelDominio(int $dominio): array
+/** Corta con 404 si el perfil no es de este dominio. Devuelve la fila. */
+function perfilDelDominio(int $id, int $dominio): array
 {
     $stmt = db()->prepare(
-        'SELECT id, nombre FROM perfiles WHERE dominio = :dom ORDER BY nombre ASC'
+        'SELECT id, usuario, habilitado FROM perfiles WHERE id = :id AND dominio = :dom LIMIT 1'
+    );
+    $stmt->execute([':id' => $id, ':dom' => $dominio]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        json_error('Perfil no encontrado en este dominio', 404);
+    }
+
+    return $row;
+}
+
+/** ¿Es el perfil con el que esta trabajando la sesion en curso? */
+function esPerfilDeLaSesion(int $id): bool
+{
+    $ctx = sessionContext() ?? [];
+
+    return $id > 0 && $id === (int) ($ctx['perfil'] ?? 0);
+}
+
+/**
+ * Roles presentes entre los perfiles del dominio — el catalogo del filtro.
+ *
+ * Sale de `perfiles` y no de la tabla `roles` entera: ofrecer un rol que no
+ * tiene ninguna fila en este dominio solo da un listado vacio.
+ */
+function rolesDelDominio(int $dominio): array
+{
+    $stmt = db()->prepare(
+        'SELECT DISTINCT r.id, r.nombre
+         FROM perfiles p
+         INNER JOIN roles r ON r.id = p.rol
+         WHERE p.dominio = :dom
+         ORDER BY r.nombre ASC'
     );
     $stmt->execute([':dom' => $dominio]);
 
@@ -314,73 +389,6 @@ function perfilesDelDominio(int $dominio): array
         'id'     => (int) $r['id'],
         'nombre' => (string) ($r['nombre'] ?? ''),
     ], $stmt->fetchAll());
-}
-
-/** Valida y normaliza el payload de alta/edicion. Corta con 422 si algo falla. */
-function validar(array $in, int $dominio, ?int $idActual): array
-{
-    $nombre  = trim((string) ($in['nombre']  ?? ''));
-    $usuario = trim((string) ($in['usuario'] ?? ''));
-    $correo  = trim((string) ($in['correo']  ?? ''));
-    $celular = trim((string) ($in['celular'] ?? ''));
-    $roles   = trim((string) ($in['roles']   ?? ''));
-    $perfil  = (int) ($in['perfil'] ?? 0);
-
-    if ($nombre === '')             json_error('El nombre es obligatorio', 422);
-    if (mb_strlen($nombre) > 100)   json_error('El nombre no puede superar 100 caracteres', 422);
-    if ($usuario === '')            json_error('El usuario es obligatorio', 422);
-    if (mb_strlen($usuario) > 100)  json_error('El usuario no puede superar 100 caracteres', 422);
-    if (!preg_match('/^[A-Za-z0-9._@-]+$/', $usuario)) {
-        json_error('El usuario solo admite letras, numeros y . _ - @', 422);
-    }
-    if ($correo !== '' && !filter_var($correo, FILTER_VALIDATE_EMAIL)) {
-        json_error('El correo no es valido', 422);
-    }
-    if (mb_strlen($correo) > 100)   json_error('El correo no puede superar 100 caracteres', 422);
-    if (mb_strlen($celular) > 15)   json_error('El celular no puede superar 15 caracteres', 422);
-    if ($celular !== '' && !preg_match('/^[+0-9\s().-]+$/', $celular)) {
-        json_error('El celular solo admite numeros, espacios y los signos + ( ) - .', 422);
-    }
-    if (mb_strlen($roles) > 255)    json_error('Los roles no pueden superar 255 caracteres', 422);
-
-    // `usuario` es la credencial de login: unico en toda la tabla, no solo
-    // dentro del dominio. La DB no tiene UNIQUE, asi que se valida aca.
-    $dup = db()->prepare('SELECT id FROM usuarios WHERE usuario = :u AND id <> :id LIMIT 1');
-    $dup->execute([':u' => $usuario, ':id' => $idActual ?? 0]);
-    if ($dup->fetchColumn()) {
-        json_error('Ya existe un usuario con ese nombre de usuario', 409);
-    }
-
-    // El perfil tiene que pertenecer al mismo dominio.
-    if ($perfil > 0) {
-        $chk = db()->prepare('SELECT id FROM perfiles WHERE id = :p AND dominio = :dom LIMIT 1');
-        $chk->execute([':p' => $perfil, ':dom' => $dominio]);
-        if (!$chk->fetchColumn()) {
-            json_error('El perfil no pertenece a este dominio', 422);
-        }
-    }
-
-    return [
-        'nombre'     => $nombre,
-        'usuario'    => $usuario,
-        'correo'     => $correo === '' ? null : $correo,
-        'celular'    => $celular === '' ? null : $celular,
-        'roles'      => $roles === '' ? null : $roles,
-        'perfil'     => $perfil > 0 ? $perfil : null,
-        'habilitado' => !empty($in['habilitado']) ? 'S' : 'N',
-    ];
-}
-
-function validarContrasena(string $contrasena): void
-{
-    if (mb_strlen($contrasena) < 4) {
-        json_error('La contrasena debe tener al menos 4 caracteres', 422);
-    }
-    // `usuarios.contrasena` es varchar(50) y el cifrado legacy es base64:
-    // 36 chars de texto plano ya ocupan 48. Se corta antes para no truncar.
-    if (mb_strlen($contrasena) > 32) {
-        json_error('La contrasena no puede superar 32 caracteres', 422);
-    }
 }
 
 function readJson(): array

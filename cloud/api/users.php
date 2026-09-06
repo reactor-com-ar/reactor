@@ -89,8 +89,7 @@ function handleList(): void
     );
 
     $usuarios = array_map(static function (array $r): array {
-        $hab = strtoupper((string) ($r['habilitado'] ?? ''));
-        $r['activo'] = in_array($hab, ['S', '1', 'Y'], true);
+        $r['activo'] = esHabilitado($r['habilitado'] ?? 0);
         unset($r['habilitado']);
         return $r;
     }, $stmt->fetchAll());
@@ -151,7 +150,7 @@ function handleCreate(): void
     $rol      = trim((string) ($in['rol']      ?? 'operador'));
     $password = (string) ($in['password'] ?? '');
     // `activo` llega del toggle del formulario pero no se usa en el alta:
-    // `habilitado` es una constante ('1'). Se respeta al editar.
+    // `habilitado` es una constante (1). Se respeta al editar.
 
     validarComunes($email, $nombre, $celular, $rol);
     if ($password === '')          json_error('La contrasena es obligatoria', 422);
@@ -171,7 +170,7 @@ function handleCreate(): void
     // El INSERT no se hace aca: `usuarioAlta()` es el canal unico de alta de
     // cloud. Es quien cifra la contrasena y quien fija las constantes de alta
     // (autenticacion, habilitado, perfiles, dominios, paneles) -- por eso no se
-    // le pasa `habilitado`: al crear siempre nace '1'. El toggle Activo del
+    // le pasa `habilitado`: al crear siempre nace 1. El toggle Activo del
     // formulario recien tiene efecto al editar.
     $actual = authUser();
     $id     = usuarioAlta(db(), [
@@ -234,9 +233,10 @@ function handleUpdate(): void
         ':n'  => $nombre,
         ':c'  => $celular === '' ? null : $celular,
         ':r'  => $rol,
-        // `habilitado` es varchar(1) y login.php acepta ['S','1','Y']: se escribe
-        // '1', que es la convencion de la tabla.
-        ':a'  => $activo ? '1' : '0',
+        // `habilitado` es tinyint(1) NOT NULL con dos valores: 1 y 0. Se
+        // escribe el entero, nunca el booleano de PHP (PDO lo bindearia como
+        // cadena vacia). Ver lib/habilitado.php.
+        ':a'  => valorHabilitado($activo),
         ':id' => $id,
     ];
 

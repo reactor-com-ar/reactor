@@ -98,6 +98,113 @@ Al tocar cualquier archivo bajo `panel/assets/css/` o `panel/assets/js/` hay
 que incrementar `panel/version.txt` o el browser sirve caché vieja
 (los assets se cargan con `?v=<contenido de version.txt>`).
 
+## La bandera `habilitado` (obligatorio — regla de todo el repo)
+
+`habilitado` tiene **dos valores y nada más**: `1` habilitado, `0`
+deshabilitado. Vale para *toda* columna con ese nombre — `perfiles`,
+`usuarios`, `dominios`, `dispositivos`, `canales`, `botones`, `controles`,
+`paneles`... — y para las tres apps que comparten la base. La regla completa
+está en el [CLAUDE.md raíz](../CLAUDE.md); acá van las consecuencias para el
+panel.
+
+- **El criterio único vive en [lib/habilitado.php](lib/habilitado.php)**:
+  constantes `HABILITADO` / `DESHABILITADO` y las funciones `esHabilitado()`
+  (leer) y `valorHabilitado()` (escribir). Llega a todo endpoint por
+  `api/bootstrap.php` → `lib/acceso.php`; las páginas públicas lo requieren por
+  su cuenta (`lib/recuperacion.php`, `lib/usuarios_alta.php`).
+- **No comparar contra strings ni bindear booleanos.** Antes cada módulo se
+  defendía con su propio criterio —`in_array($h, ['S','1','Y'])` en el login,
+  `COALESCE($h, '') <> '1'` en el listado de perfiles, `$h IS NULL OR $h <> 1`
+  en dispositivos— y en los bordes no coincidían: la misma fila se veía
+  habilitada en una pantalla y deshabilitada en otra. Y PDO bindea el `false`
+  de PHP como **cadena vacía**, que contra la columna vieja (`varchar(1)`)
+  quedaba escrita en la base como un tercer valor.
+- **"No habilitado" es `= 0`**, no `<> 1` ni `IS NULL`: la columna es `NOT NULL`
+  desde `20260905_2200_habilitado_tinyint_0_1.sql`. Los `COALESCE` defensivos
+  se sacaron a propósito.
+- **`perfiles.habilitado` y `usuarios.habilitado` ya no se codifican distinto**,
+  pero **siguen significando cosas distintas**: el del perfil es el acceso a
+  *este* dominio y el de la cuenta es la cuenta entera. Ver el módulo Usuarios.
+
+## `perfiles.tipo`: sólo `A` y `O` (obligatorio)
+
+`ENUM('A','O') NOT NULL DEFAULT 'O'` desde
+`20260905_2300_perfiles_tipo_a_o.sql` — `A` Administrador, `O` Operador. Ni
+`NULL` ni cadena vacía: las 22 filas que estaban así (roles internos de Reactor
+y el perfil centinela `id = 0`) quedaron en `O`, el menos privilegiado, con el
+mismo criterio que `habilitado`.
+
+- **Se escribe con `PERFIL_TIPO_ADMINISTRADOR` / `PERFIL_TIPO_OPERADOR`** de
+  [lib/acceso.php](lib/acceso.php). Hoy el único que la escribe es
+  `invitacion/aceptar.php`.
+- **No confundirla con el gate de acceso**, que es `perfiles.rol` — ver la
+  sección siguiente. Las dos columnas siguen desalineadas a propósito y la
+  migración **no** las alineó: derivar `tipo` de `rol` le daría acceso de
+  administrador en el sistema legacy a 48 cuentas que hoy no lo tienen, y eso
+  es repartir permisos, no normalizar un tipo.
+
+## Acceso: sólo Administradores (obligatorio)
+
+**Al panel entra únicamente una cuenta con perfil de Administrador en el
+dominio activo.** El Operador queda afuera, y no es un caso de borde: es el rol
+más común por lejos (medido en dev: 1.470 perfiles habilitados de Operador
+contra 383 de Administrador), así que la regla recorta el panel de ~2.065
+cuentas habilitadas a ~368. La regla vive entera en
+[lib/acceso.php](lib/acceso.php) y todo lo demás la consume desde ahí.
+
+- **El criterio es `perfiles.rol`, NO `perfiles.tipo`.** El legacy gatea por
+  `tipo = 'A'` y las dos columnas están desalineadas en los datos: 39 perfiles
+  con rol Administrador llevan `tipo = 'O'` y 8 con rol Operador llevan
+  `tipo = 'A'`. Gatear por `tipo` dejaría afuera a 39 administradores reales y
+  adentro a 8 operadores.
+- **La lista de roles que habilitan el panel es `PANEL_ROLES_ADMIN`**, hoy
+  `[101]` (Administrador). Quedan afuera `Técnico` y los roles internos de
+  Reactor (`Desarrollador`, `Director Técnico`, `Director Comercial`,
+  `Contador`, `Técnico Instalador`) — son ~20 perfiles y varias de esas
+  personas además tienen un perfil de Administrador, con el que sí entran. Si
+  alguno tiene que poder entrar por su propio rol, se agrega su id a esa
+  constante y **no hay nada más que tocar**.
+- **Se mira el perfil ACTIVO, no "algún perfil de la cuenta"**, y se exigen las
+  cuatro condiciones juntas: que el perfil sea de esta cuenta, que esté
+  habilitado, que su rol esté en la lista y que su `dominio` sea el de la
+  sesión. La última no es redundante: hay 13 cuentas cuyo `usuarios.perfil`
+  apunta a un perfil de administrador de un dominio **distinto** del de
+  `usuarios.dominio`, y sin comparar el dominio entrarían a un dominio donde no
+  son administradoras.
+- **El gate se resuelve contra la base en cada request, nunca contra un claim
+  del JWT.** El token dura 12 h y lo puede haber emitido `cloud/` (que no aplica
+  esta regla y comparte la cookie), así que revocar un perfil —bajarle el rol o
+  ponerlo en `habilitado = 0`— tiene efecto en el request siguiente y no al
+  vencer el token.
+- **Dónde se aplica**: `api/bootstrap.php` (todo endpoint que no declare
+  `PANEL_API_PUBLIC`), `index.php` (el shell), `login.php` y `api/login.php`.
+  El gate de rol va en el bootstrap y **no** endpoint por endpoint para que un
+  módulo nuevo nazca cerrado: olvidarse de la línea lo deja protegido, no
+  abierto.
+- **El login elige el perfil de arranque.** `usuarios.perfil` es el último que
+  la persona usó *en cualquiera* de los sistemas que comparten `usuarios`, así
+  que puede ser un Operador o un perfil de otro dominio: hoy 247 de las 368
+  cuentas administradoras están así. Si el perfil que trae no habilita el panel,
+  `api/login.php` toma el primero de `perfilesAdministrador()` y lo asienta con
+  `panelPerfilActivoAsentar()` — el mismo helper del cambio de dominio. **Sin
+  esto la sesión nace denegada y el login rebota para siempre.**
+- **El rechazo se ve, no se traga.** `api/login.php` corta con 403 *después* de
+  validar la contraseña, para que el mensaje distinga "no sos vos" de "no tenés
+  permiso". Para una pantalla, `requireAdministrador()` redirige a
+  `/login?motivo=rol` y `login.php` muestra el aviso en la tarjeta (`.inv-note`,
+  CSS §19). **`login.php` sólo salta a `index.php` si la sesión vigente además
+  es de administrador** — sin esa condición, index redirige a login y login a
+  index, en un rebote infinito.
+- **La API devuelve 403 con `motivo: 'rol'`**, no un 403 pelado. Es lo que le
+  permite a `app.js` distinguir este caso —la sesión ya no sirve, hay que volver
+  al login— de los 403 de negocio que sí son un error de la pantalla ("El
+  usuario está deshabilitado", "Ese perfil no está disponible para tu cuenta").
+  Al recibirlo, `api()` navega a `login?motivo=rol` en vez de mostrar un toast.
+- **Consecuencia sobre las invitaciones**: como el alta de usuarios del panel
+  *es* una invitación, el perfil que se otorga al aceptar tiene que ser de
+  Administrador o la persona rebota en su primer ingreso. Ver
+  `perfilAsegurado()` más abajo.
+
 ## Contexto de sesión y filtrado por dominio (obligatorio)
 
 Al iniciar sesión (`api/login.php`) se capturan de la cuenta los datos de
@@ -139,7 +246,7 @@ Reglas que la función garantiza, y que por eso no hay que repetir en los llamad
   | columna | valor |
   |---|---|
   | `autenticacion` | `'F'` |
-  | `habilitado` | `'1'` |
+  | `habilitado` | `1` (`HABILITADO`) |
   | `perfiles` | `0` |
   | `dominios` | `''` |
   | `paneles` | `''` |
@@ -150,7 +257,7 @@ Reglas que la función garantiza, y que por eso no hay que repetir en los llamad
   que se les pase. `roles` arranca en `''` salvo que el llamador mande otro valor.
 - Resto de los defaults: `uuid` aleatorio y `registrado = NOW()`.
 - **Consecuencia:** el campo *habilitado* del formulario no tiene efecto al crear
-  (siempre nace `'1'`); recién se respeta al editar.
+  (siempre nace `1`); recién se respeta al editar.
 - Cuando el perfil se asigna **después** del alta (caso invitación: `perfiles.usuario`
   exige que el usuario ya exista), se usa `usuarioPerfilActivo()`. Toca sólo
   `perfil`; `perfiles` se queda en 0. No hacer el `UPDATE` a mano.
@@ -682,15 +789,14 @@ entidad que el registro referencia. Reglas que no se deducen del esquema:
 
 - **Las fichas las arma `api/actividad.php?id=N` con los mismos `LEFT JOIN`
   del registro, y ésa es la decisión de fondo.** Lo natural sería pedirlas a
-  `api/usuarios.php?id=N` y `api/dispositivos.php?id=N`, que ya tienen la
-  ficha curada — pero los dos filtran por **`dominio`, que en esas tablas es
-  el dominio ACTUAL**: `usuarios.dominio` es el dominio *activo* de la cuenta
-  (cambia cada vez que la persona usa *Cambiar dominio*) y
-  `dispositivos.dominio` es el dueño *de turno* (liberar mueve el equipo al
-  dominio 1). Un registro de hace seis meses puede apuntar a un usuario que
-  desde entonces se pasó a otro dominio o a un equipo que se liberó, y esas
-  dos consultas devolverían **404 sobre actividad perfectamente válida**. El
-  control de acceso ya lo dio `r.dominio = :dom` en el registro.
+  los endpoints de cada módulo, que ya tienen la ficha curada — pero ninguno
+  sirve: `api/usuarios.php?id=N` **ya no recibe un id de usuario sino de
+  perfil** (el módulo administra `perfiles`, ver más abajo), y
+  `api/dispositivos.php?id=N` filtra por **`dominio`, que en esa tabla es el
+  dueño *de turno*** (liberar mueve el equipo al dominio 1). Un registro de
+  hace seis meses puede apuntar a un equipo que se liberó, y esa consulta
+  devolvería **404 sobre actividad perfectamente válida**. El control de acceso
+  ya lo dio `r.dominio = :dom` en el registro.
 - **El corte de "no hay ficha" mira `u.id` / `d.id`, no `r.usuario` /
   `r.dispositivo`**: esas columnas arrastran el centinela `0` del sistema
   histórico además de `NULL` (ver `project_perfiles_centinela_cero`), y con
@@ -829,11 +935,34 @@ mismas tablas. Reglas que no se deducen del esquema:
   formulario de aceptación pide nombre y apellido por separado porque es lo
   que la persona espera completar, pero se guardan concatenados en `nombre`.
   No se modificó el esquema por esto.
-- **El perfil nuevo va con `rol` y `panel` en `NULL`, no en `0`.** El legacy
-  (`cPerfil::nuevo()`) escribe `0`, que con las FK declaradas en
-  `db/schema.sql` ya no es un valor válido. `perfiles.habilitado` es
-  `'1'`/`'0'`, mientras que `usuarios.habilitado` es `'S'`/`'N'` — no
-  confundirlos.
+- **El perfil que se otorga es de ADMINISTRADOR** (`rol = 101`,
+  `tipo = PERFIL_TIPO_ADMINISTRADOR`,
+  nombre `Administrador en <dominio>`), no de Operador como en el legacy. El
+  legacy (`cPerfil::registrar()`) crea Operador porque invita a `reactor-app`,
+  la app del usuario final; esta pantalla la abre un enlace de
+  `panel.reactor.com.ar`, y **al panel sólo entra un administrador**. Con un
+  perfil de Operador la persona completaría el formulario, recibiría sus
+  credenciales y rebotaría en el primer ingreso — y como el alta del módulo
+  Usuarios *es* esta invitación, sería el único camino de alta del panel y no
+  serviría para nada. El rol sale de `panelRolAdminPorDefecto()`
+  ([lib/acceso.php](lib/acceso.php)): si la lista de roles con acceso cambia,
+  la invitación la sigue sola.
+- **`perfilAsegurado()` busca un perfil de administrador, no "cualquier perfil
+  del dominio".** Si la persona ya tenía uno de Operador ahí (porque usa
+  `reactor-app`), ese no habilita el panel: se le **agrega** uno nuevo en vez de
+  reescribirle el que ya tiene. Una cuenta con varios perfiles en el mismo
+  dominio es normal en estos datos, y mutar el `rol` de una fila existente sería
+  cambiarle el acceso a otro sistema desde acá.
+- **`tipo` acompaña al rol.** Son dos columnas para lo mismo y el legacy lee
+  `tipo`; dejarlas en desacuerdo es exactamente como nacieron los 58 perfiles
+  inconsistentes que hoy tiene la base (48 con rol Administrador y `tipo = 'O'`,
+  10 al revés). Al **crear** hay que ponerlas de acuerdo; a las que ya están
+  torcidas **no se las toca** — ver "`perfiles.tipo`: sólo `A` y `O`".
+- **`panel` va en `NULL`, no en `0`.** El legacy (`cPerfil::nuevo()`) escribe
+  `0`, que con las FK declaradas en `db/schema.sql` ya no es un valor válido.
+  `perfiles.habilitado` se escribe con `HABILITADO` (el entero 1), igual que
+  `usuarios.habilitado`: las dos columnas tienen el mismo par de valores
+  (ver "La bandera `habilitado`" más abajo).
 - **La contraseña inicial se genera y se muestra en pantalla, además de
   mandarse por correo.** No hay pantalla de "definir contraseña" y la columna
   guarda la contraseña de forma reversible (cifrado histórico), así que es el
@@ -904,6 +1033,83 @@ respecto de lo que devuelve `api/invitaciones.php`:
   filtrar por estado y copiar ya viven en el menú contextual de la fila, que
   es desde donde se abre el modal. Mismo recorte que Actividad y Usuarios.
 
+### Usuarios → la fila es un PERFIL, no una cuenta
+
+**El módulo lista `perfiles`, no `usuarios`** (05/09/2026). Lo que muestra es
+quién tiene acceso a este dominio, y eso vive en `perfiles`, no en
+`usuarios.dominio`.
+
+- **`usuarios.dominio` es el dominio ACTIVO de la cuenta** —el último que la
+  persona usó, en *cualquiera* de los sistemas que comparten la tabla— y no la
+  lista de dominios a los que puede entrar. Es la misma columna que reescribe
+  *Cambiar dominio* (`panelPerfilActivoAsentar()`). Filtrar `usuarios` por ella
+  escondía a todo el que estuviera trabajando en otro lado: medido en dev,
+  `Patio San Ignacio` tiene **152 perfiles y sólo 15 cuentas con ese dominio
+  activo** — 137 accesos invisibles —, y `Consorcio Palermo` 126 contra 60. Es
+  el mismo razonamiento ya escrito para *Cambiar dominio* ("`usuarios.dominio`
+  es sólo el dominio activo y no es la lista de dominios permitidos"), aplicado
+  al listado.
+- **El `Estado` de la fila es `perfiles.habilitado`, no `usuarios.habilitado`.**
+  Son dos cosas distintas y en los datos están desalineadas: 154 perfiles
+  deshabilitados pertenecen a cuentas habilitadas y 18 al revés. El de la cuenta
+  viaja igual (`usuario_habilitado`) y se muestra en el modal de Consultar, como
+  tarjeta aparte: una cuenta deshabilitada no entra ni con el perfil habilitado,
+  y un perfil deshabilitado sólo cierra **este** dominio.
+- **El estado se escribe y se compara con `HABILITADO` / `DESHABILITADO`** de
+  [lib/habilitado.php](lib/habilitado.php) (los enteros 1 y 0), nunca con un
+  literal ni con un booleano de PHP — ver "La bandera `habilitado`" más abajo.
+- **Una persona puede aparecer varias veces**: son 8 los pares
+  `(usuario, dominio)` con más de un perfil. La fila se identifica por el
+  **`Código` = id del perfil**, no por el usuario.
+- **La columna es `Rol`, no `Perfil`.** El rol ("Operador") describe la fila;
+  `perfiles.nombre` ("Operador en OSSE San Juan") repite el dominio que ya
+  filtra toda la pantalla — el mismo criterio de `perfilesAdministrador()`. El
+  nombre del perfil sigue estando en el buscador y en el modal de Consultar.
+- **Hay filas sin rol y filas sin cuenta, y se muestran igual.** 145 perfiles
+  tienen `rol` NULL (27 en un solo dominio) y unos pocos tienen `usuario` NULL o
+  con el centinela `0`. Los JOIN con `usuarios` y `roles` son **LEFT** a
+  propósito: con INNER esas filas desaparecían del listado, y una fila que no le
+  sirve a nadie y además no se puede ver es una que nadie puede limpiar.
+  **No usar `perfiles.tipo` para rellenar el rol que falta** — las dos columnas
+  están desalineadas (ver "Acceso: sólo Administradores").
+- **El filtro de rol se arma con los roles PRESENTES en el dominio**
+  (`rolesDelDominio()`), no con la tabla `roles` entera: un rol sin ninguna fila
+  acá sólo puede dar un listado vacío.
+
+### Usuarios → las tres acciones trabajan sobre el perfil
+
+`Habilitar` / `Deshabilitar` / `Eliminar` operan sobre el **acceso**, nunca
+sobre la cuenta. Reglas que no se deducen del esquema:
+
+- **Eliminar borra el perfil y deja la cuenta intacta**: la persona pierde el
+  acceso a *este* dominio y conserva usuario, contraseña y los accesos que tenga
+  en otros. El texto de la confirmación lo dice explícitamente, porque la fila
+  muestra los datos personales y "Eliminar" se lee como "borrar a la persona".
+- **Antes del `DELETE` hay que borrar las filas de `sesiones` de ese perfil.**
+  `fk_sesiones_perfil` es `ON DELETE RESTRICT` y **1.917 de los 2.227 perfiles
+  de dev tienen alguna**, así que sin ese paso la baja fallaba con 1451 en el
+  86% de las filas. Una sesión del sistema histórico que apunta a un perfil que
+  ya no existe no se puede retomar: borrarlas es cerrar el acceso que se acaba
+  de quitar. Las dos escrituras van en una transacción.
+- **`usuarios.perfil` NO se toca**: su FK es `ON DELETE SET NULL` y la base lo
+  resuelve sola. Si el perfil borrado era el activo de esa cuenta, el login
+  elige otro (`api/login.php` → `perfilesAdministrador()`).
+- **Sobre el perfil de la propia sesión sólo queda `Consultar`.**
+  Deshabilitarlo o borrarlo cierra el panel en el request siguiente —el gate se
+  resuelve contra la base en cada request, no contra el token—, así que el
+  backend corta con 409 y el menú de la fila directamente no ofrece las
+  acciones (`es_propio`, que lo calcula el backend). Como efecto lateral el
+  dominio nunca se queda sin administrador: el de la sesión siempre sobrevive.
+- **El `PUT` manda sólo `{id, habilitado}`** y toca sólo esa columna. La
+  versión que reescribía la fila entera de `usuarios` obligaba a un `GET`
+  previo para no borrar `roles` al guardar; acá no hay ningún otro campo que el
+  guardado pueda pisar.
+- **No hay `POST` ni edición.** `handleCreate()` y el `PUT` de fila completa se
+  eliminaron del endpoint junto con `formUsuario()` del front: un alta de
+  `usuarios` dentro del endpoint que administra `perfiles` sólo podía
+  confundir. El alta sigue siendo la invitación (abajo) y los datos de la
+  persona los administra su propia cuenta.
+
 ### Usuarios → el alta es una invitación, y no hay edición
 
 El módulo se recortó a **consultar, habilitar/deshabilitar y eliminar**
@@ -917,36 +1123,42 @@ El módulo se recortó a **consultar, habilitar/deshabilitar y eliminar**
   agrega el perfil de este dominio y le deja intactos la contraseña y el
   dominio activo. Por eso el alta no necesita backend propio — el circuito de
   invitaciones ya resuelve los dos casos.
-- **No queda ningún camino a `formUsuario()`.** Se le sacó `Editar` al menú
-  contextual de la fila y también el botón primario del modal de Consultar, y
-  el alta pasó a ser la invitación: la función quedó **sin call sites**, y con
-  ella el `POST` / `PUT` de `api/usuarios.php`, que siguen en el endpoint pero
-  no los usa ninguna pantalla — salvo el `PUT`, que dispara `toggleUsuario()`.
-- **`handleUpdate()` reescribe la fila entera**: el payload tiene que mandar
-  `roles` y `habilitado` tomados del registro que trae el `GET`, o el guardado
-  borra los roles y deshabilita la cuenta. `toggleUsuario()` ya lo hace así y
-  `formUsuario()` también — tenerlo presente si alguna vez se repone la
-  edición.
+- **Invitar desde el panel es dar de alta a un administrador.** El perfil que
+  se otorga al aceptar es de rol Administrador, porque es el único que habilita
+  el panel (ver "Acceso: sólo Administradores"). No hay forma de invitar a
+  alguien "sólo para mirar": el panel no tiene niveles de permiso internos.
+- **Ya no hay formulario de edición.** Se le sacó `Editar` al menú contextual de
+  la fila y también el botón primario del modal de Consultar, el alta pasó a ser
+  la invitación y `formUsuario()` quedó sin call sites; al mudar el módulo a
+  `perfiles` (05/09/2026) se borró junto con el `POST` / `PUT` de fila completa
+  del endpoint. **Si alguna vez se repone la edición, no es de esta pantalla**:
+  los datos de la persona son de su cuenta y el perfil (nombre, rol, tipo) lo
+  administra Reactor.
 - **Menú contextual de la fila**: `Consultar` → `Habilitar` / `Deshabilitar` →
   separador → `Eliminar`. Se aparta del orden del skill `abm_design`, que
-  intercala `Editar` antes de la baja.
+  intercala `Editar` antes de la baja. Sobre el perfil de la propia sesión queda
+  sólo `Consultar` (ver arriba).
 - **El modal de Consultar usa `wide: 'xl'`** (`.modal-xl`, 1040px = el doble
   del ancho base), no el `modal-wide` de 880px de los dumps y las tablas.
 - **El pie de Consultar es sólo `Cerrar`**: sin botón ☰ de "Más acciones"
   —copiar usuario / correo y habilitar-deshabilitar viven en el menú de la
   fila— y sin acción primaria `Editar`.
-- **La ficha no muestra `id`, `autenticacion`, `roles`, `panel` ni `dominio`.**
-  El id ya encabeza el modal (`Consultar usuario #N`); `autenticacion`, `roles`
-  y `panel` son internos del sistema histórico; y `dominio` sólo puede tener un
-  valor, porque el panel filtra todo por el dominio de la sesión — el mismo
-  criterio con el que se excluyó de Dispositivos → General.
-- **Abre con `Identificador` (el `uuid`) y cierra con `Estado`.** El uuid ocupa
-  la ranura donde estaba `Código`, con ese rótulo y no "UUID". Son 10 tarjetas,
-  **todas `half`**: cinco renglones que cierran de a dos. `Nombre` dejó de ser
-  `full` al sacar `dominio` — con 10 campos la fila entera desbalanceaba la
-  grilla, y a 1040px de modal media tarjeta le sobra ancho. **Agregar o quitar
-  un campo deja la cuenta impar** y estira la última a todo el ancho, que se
-  lee como un destaque deliberado (mismo criterio que Dispositivos → General).
+- **La ficha no muestra `id`, `autenticacion`, `roles`, `panel`, `dominio` ni
+  `perfiles.tipo`.** El id ya encabeza el modal (`Consultar perfil #N`);
+  `autenticacion`, `roles` y `panel` son internos del sistema histórico;
+  `dominio` sólo puede tener un valor, porque el panel filtra todo por el
+  dominio de la sesión —el mismo criterio con el que se excluyó de
+  Dispositivos → General—; y `tipo` es la columna desalineada con `rol`, que
+  mostrarla sólo invita a leerla como el rol verdadero.
+- **Abre por el acceso (`Perfil` + `Rol`) y cierra por los dos estados**
+  (`Estado del perfil` + `Estado de la cuenta`), que van juntos al final porque
+  es donde se leen comparados: son independientes y ninguno de los dos alcanza
+  por sí solo para saber si la persona entra. En el medio van los datos de
+  contacto, `Identificador` (el `uuid` de la **cuenta**, con ese rótulo y no
+  "UUID") y las fechas. Son 12 tarjetas, **todas `half`**: seis renglones que
+  cierran de a dos. **Agregar o quitar un campo deja la cuenta impar** y estira
+  la última a todo el ancho, que se lee como un destaque deliberado (mismo
+  criterio que Dispositivos → General).
 
 ### Módulos de ficha única
 
@@ -995,13 +1207,24 @@ Porta `reactor-panel/sesion/cambiar.php` + `cPerfil::cargar()` del legacy
 (`reactor-api/framework/subframework.php`). `GET` lista, `POST {perfil}`
 cambia. Reglas que no se deducen del esquema:
 
-- **La disponibilidad la define `perfiles`, no `usuarios.dominio`**: la
-  cuenta puede pasar a un dominio si existe una fila habilitada
-  `perfiles(usuario, dominio)`. `usuarios.dominio` es sólo el dominio
-  **activo** — el que viaja en el JWT y por el que filtra todo el panel — y
-  puede no tener perfil propio (el usuario 3 está en `OSSE San Juan` sin
-  fila en `perfiles`), así que se lista igual, primero y **no elegible**: sin
-  perfil no hay nada que asentar en la cuenta.
+- **La disponibilidad la define `perfiles`, y sólo los de rol Administrador**:
+  la cuenta puede pasar a un dominio si existe una fila habilitada
+  `perfiles(usuario, dominio)` con `rol` en `PANEL_ROLES_ADMIN`. Es la misma
+  regla con la que entra al panel (ver "Acceso: sólo Administradores"), porque
+  el selector no puede ofrecer un destino que después el gate va a rechazar:
+  un dominio donde la cuenta es Operadora simplemente no aparece. La consulta
+  es `perfilesAdministrador()` de [lib/acceso.php](lib/acceso.php), la misma
+  que usa el login para elegir con qué perfil arranca la sesión.
+  `usuarios.dominio` es sólo el dominio **activo** — el que viaja en el JWT y
+  por el que filtra todo el panel — y no es la lista de dominios permitidos.
+- **Ya no se lista el dominio activo sin perfil propio.** Existía porque
+  `usuarios.dominio` lo puede asignar el back office interno sin crear fila en
+  `perfiles` (el usuario 3 está así en `OSSE San Juan`), y se mostraba —
+  primero y no elegible— para que la sesión en curso no faltara de la lista.
+  Con el gate de rol esa sesión ya no puede existir: sin perfil de
+  Administrador en el dominio activo, `requireAdministrador()` no la deja
+  llegar al endpoint. **Todas las filas son elegibles**, así que el front
+  perdió la rama del `<div>` no clickeable.
 - **Una fila por perfil, no por dominio**: lo que se elige es un perfil. La
   misma cuenta puede tener varios en el mismo dominio con distinto rol (el
   usuario 3 tiene cuatro en `Reactor`), y `usuarios.perfil` guarda cuál se
@@ -1016,20 +1239,22 @@ cambia. Reglas que no se deducen del esquema:
   revalida la cuenta como el login (`usuarios.habilitado`), firma un token
   nuevo sobre la misma cookie y el front recarga. No hay sesión PHP que
   reescribir, a diferencia del legacy.
-- **El filtro por `p.usuario` en el `POST` es el control de acceso**: sin él,
-  un id de perfil a mano mueve la sesión a cualquier dominio del sistema.
-- **`perfiles.habilitado` es `'1'` / `'0'`**, no `'S'` / `'N'` como
-  `usuarios.habilitado`. Un perfil deshabilitado es un acceso revocado y no
-  se lista.
+- **Los filtros por `p.usuario` y `p.rol` en el `POST` son el control de
+  acceso**: sin el primero, un id de perfil a mano mueve la sesión a cualquier
+  dominio del sistema; sin el segundo, la mueve a un dominio donde la cuenta es
+  Operadora. Esconder el perfil de la lista **no alcanza**: los dos filtros son
+  el límite entre esto y una escalada.
+- **`perfiles.habilitado` es `1` / `0`**, igual que `usuarios.habilitado`. Un
+  perfil deshabilitado es un acceso revocado y no se lista.
 - **El dominio deshabilitado se lista y se puede elegir**, con badge: el
   legacy no mira `dominios.habilitado` y hoy 95 de 148 dominios están en 0,
   así que bloquearlos le sacaría al usuario accesos que viene usando.
-- **No se filtra por `perfiles.tipo`** aunque el legacy sí (`tipo="A"`, con
-  el mensaje "Requiere rol de administrador"): `tipo` y `rol` están
-  desalineados en los datos (el perfil 456 es `tipo='O'` con `rol=101`
-  Administrador) y este panel no gatea el login por tipo en ningún otro
-  lado. Si alguna vez hace falta restringirlo, el criterio confiable es
-  `rol`, no `tipo`.
+- **Se filtra por `perfiles.rol`, NO por `perfiles.tipo`** — aunque el legacy
+  use `tipo="A"` con el mensaje "Requiere rol de administrador". Las dos
+  columnas están desalineadas en los datos (el perfil 456 es `tipo='O'` con
+  `rol=101` Administrador): 39 perfiles de rol Administrador llevan `tipo='O'`
+  y 8 de rol Operador llevan `tipo='A'`, así que gatear por `tipo` dejaría
+  afuera a 39 administradores reales y adentro a 8 operadores.
 - El rol (`roles.nombre`, "Administrador") es la etiqueta de la fila, no
   `perfiles.nombre` ("Administrador en Reactor"), que repite el nombre del
   dominio que ya encabeza la tarjeta.

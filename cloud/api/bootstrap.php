@@ -7,6 +7,7 @@ date_default_timezone_set('America/Argentina/Buenos_Aires');
 // Secretos compartidos del repo: define APP_ENV + DB_* + APP_KEY_CLOUD como constantes.
 require_once dirname(__DIR__, 2) . '/env.php';
 require_once dirname(__DIR__) . '/lib/auth_check.php';
+require_once dirname(__DIR__) . '/lib/habilitado.php';
 
 if (APP_ENV !== 'production') {
     ini_set('display_errors', '1');

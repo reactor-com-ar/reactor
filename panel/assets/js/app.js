@@ -34,6 +34,15 @@
         }
         let body = null;
         try { body = await res.json(); } catch (_) { body = null; }
+        // 403 con `motivo: 'rol'` = la sesion perdio el perfil de Administrador
+        // (se lo revocaron con la sesion abierta). No es un error de la
+        // pantalla que lo pidio, asi que no va como toast: se vuelve al login,
+        // que explica por que no se puede entrar. Los demas 403 SI son de
+        // negocio ("El usuario esta deshabilitado") y siguen su camino normal.
+        if (res.status === 403 && body && body.motivo === 'rol') {
+            window.location.href = 'login?motivo=rol';
+            throw new Error(body.error || 'Acceso denegado');
+        }
         if (!res.ok || !body || body.ok === false) {
             const msg = (body && body.error) ? body.error : `Error HTTP ${res.status}`;
             throw new Error(msg);
@@ -170,7 +179,13 @@
      * dominio como titulo y el rol abajo. Al elegir uno, el POST asienta la
      * seleccion en `usuarios` y reemite el JWT: la sesion arranca de nuevo en
      * ese dominio sin pedir credenciales, y el reload muestra el panel ya
-     * filtrado. Porta reactor-panel/sesion/cambiar.php del legacy. */
+     * filtrado. Porta reactor-panel/sesion/cambiar.php del legacy.
+     *
+     * SOLO VIENEN LOS DOMINIOS DONDE LA CUENTA ES ADMINISTRADORA: es la misma
+     * regla con la que se entra al panel, aplicada en el backend. Un dominio
+     * donde la persona es Operadora no aparece — y si igual se manda su id, el
+     * POST lo rechaza. Por eso todas las filas son elegibles: ya no existe el
+     * caso "dominio activo sin perfil". */
     const btnDominio = document.getElementById('btn-dominio');
     if (btnDominio) {
         btnDominio.addEventListener('click', async (e) => {
@@ -192,8 +207,8 @@
         const items = d.perfiles || [];
         if (items.length === 0) {
             return `<div class="alert alert-info">
-                Tu cuenta no tiene ningún dominio disponible. Pedile a un administrador
-                que te asigne uno.
+                Tu cuenta no tiene perfil de Administrador en ningún dominio. Pedile a
+                un administrador que te asigne uno.
             </div>`;
         }
 
@@ -202,26 +217,20 @@
             if (x.actual)      tags.push('<span class="badge badge-success">Actual</span>');
             if (!x.habilitado) tags.push('<span class="badge badge-danger">Deshabilitado</span>');
 
-            // Sin perfil = dominio activo sin fila en `perfiles` (lo asigna el
-            // back office interno). No hay nada que asentar en la cuenta, asi
-            // que la fila se muestra pero no es elegible.
-            const meta  = x.rol ? escapeHtml(x.rol) : 'Sin perfil asignado — no se puede seleccionar';
-            const clase = `dominio-item${x.actual ? ' is-actual' : ''}`;
-            const body  = `<span class="dominio-item-icon"><i class="fa-solid fa-building"></i></span>
+            return `<button type="button" class="dominio-item${x.actual ? ' is-actual' : ''}"
+                            data-perfil="${x.perfil}">
+                <span class="dominio-item-icon"><i class="fa-solid fa-building"></i></span>
                 <span class="dominio-item-body">
                     <span class="dominio-item-nombre">${escapeHtml(x.nombre || `#${x.dominio}`)}</span>
-                    <span class="dominio-item-meta">${meta}</span>
+                    <span class="dominio-item-meta">${escapeHtml(x.rol)}</span>
                 </span>
-                <span class="dominio-item-tags">${tags.join('')}</span>`;
-
-            return x.perfil
-                ? `<button type="button" class="${clase}" data-perfil="${x.perfil}">${body}</button>`
-                : `<div class="${clase}">${body}</div>`;
+                <span class="dominio-item-tags">${tags.join('')}</span>
+            </button>`;
         }).join('');
 
         return `<p class="modal-note">
-            Elegí con qué perfil querés seguir trabajando. El dominio del perfil
-            elegido es el que filtra toda la información del panel.
+            Estos son los dominios donde tu cuenta tiene perfil de Administrador.
+            El del perfil que elijas es el que filtra toda la información del panel.
         </p>
         <div class="dominio-list">${filas}</div>`;
     }
@@ -531,25 +540,33 @@
 
     /* =========================================================
      * Modulo ABM: Usuarios  (convenciones de la skill abm_design)
+     *
+     * CADA FILA ES UN PERFIL, NO UNA CUENTA. Lo que lista el modulo es quien
+     * tiene acceso a este dominio, y eso vive en `perfiles`: `usuarios.dominio`
+     * es solo el dominio ACTIVO de la cuenta (el ultimo que la persona uso), no
+     * la lista de dominios a los que puede entrar. Por lo mismo el `Estado` de
+     * la fila es `perfiles.habilitado` y no `usuarios.habilitado` — el de la
+     * cuenta se ve en el modal de Consultar, como dato aparte.
+     *
      * El listado siempre sale acotado al dominio de la sesion: el filtro
      * lo aplica el backend (api/usuarios.php -> requireDominioId()), aca
      * solo se muestra de que dominio se trata.
      * ======================================================= */
 
-    const USUARIOS_DEFAULTS = { codigo: '', perfil: 0, estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
+    const USUARIOS_DEFAULTS = { codigo: '', rol: 0, estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
 
     const usuarios = {
         q: '',
         ...USUARIOS_DEFAULTS,
         filas: [],
-        perfiles: [],
+        roles: [],
         resumen: null,
     };
 
     function usuariosFiltrosActivos() {
         let n = 0;
         if (String(usuarios.codigo) !== USUARIOS_DEFAULTS.codigo) n++;
-        if (usuarios.perfil !== USUARIOS_DEFAULTS.perfil)         n++;
+        if (usuarios.rol    !== USUARIOS_DEFAULTS.rol)            n++;
         if (usuarios.estado !== USUARIOS_DEFAULTS.estado)         n++;
         if (usuarios.limite !== USUARIOS_DEFAULTS.limite)         n++;
         if (usuarios.orden  !== USUARIOS_DEFAULTS.orden)          n++;
@@ -567,10 +584,10 @@
                 <div class="module-help" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin-bottom:16px;box-shadow:var(--shadow);display:flex;gap:14px;align-items:center">
                     <div class="module-help-icon"><i class="fa-solid fa-users"></i></div>
                     <div style="font-size:.88rem;color:var(--muted);line-height:1.45">
-                        Los usuarios son las personas con acceso al sistema, con sus credenciales,
-                        datos de contacto y el perfil que define qué pueden hacer.
-                        Se listan únicamente los del dominio <strong>${dominio}</strong>, que es el
-                        asociado a tu cuenta.
+                        Cada fila es un <strong>perfil</strong>: el acceso de una persona al dominio
+                        <strong>${dominio}</strong>, con el rol que define qué puede hacer. Una misma
+                        persona puede tener más de un perfil, y el estado que se muestra es el del
+                        perfil — no el de su cuenta.
                     </div>
                 </div>
 
@@ -581,7 +598,7 @@
                         <div class="search-wrap">
                             <i class="fa-solid fa-magnifying-glass search-icon"></i>
                             <input type="search" id="us-quick" class="search-input"
-                                   placeholder="Buscar usuario, nombre, correo o celular…">
+                                   placeholder="Buscar usuario, nombre, correo, celular o perfil…">
                             <button type="button" class="search-clear" id="us-quick-clear"
                                     style="display:none" title="Limpiar búsqueda">×</button>
                         </div>
@@ -607,7 +624,7 @@
                                 <th>Nombre</th>
                                 <th>Correo</th>
                                 <th>Celular</th>
-                                <th>Perfil</th>
+                                <th>Rol</th>
                                 <th>Estado</th>
                                 <th>Último ingreso</th>
                                 <th class="action-col">Acciones</th>
@@ -653,7 +670,7 @@
         const qs = new URLSearchParams({
             q:      usuarios.q,
             codigo: usuarios.codigo || '',
-            perfil: usuarios.perfil || '',
+            rol:    usuarios.rol || '',
             estado: usuarios.estado,
             limite: usuarios.limite,
             orden:  usuarios.orden,
@@ -662,9 +679,9 @@
 
         try {
             const data = await api(`api/usuarios?${qs}`);
-            usuarios.filas    = data.usuarios || [];
-            usuarios.perfiles = data.perfiles || [];
-            usuarios.resumen  = data.resumen  || null;
+            usuarios.filas   = data.perfiles || [];
+            usuarios.roles   = data.roles    || [];
+            usuarios.resumen = data.resumen  || null;
         } catch (err) {
             tbody.innerHTML = `<tr><td colspan="9" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
@@ -674,7 +691,7 @@
         pintarBadgeFiltrosUsuarios();
 
         if (usuarios.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="table-empty">No hay usuarios que coincidan con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="table-empty">No hay perfiles que coincidan con la búsqueda.</td></tr>';
             return;
         }
 
@@ -702,7 +719,7 @@
         const r  = usuarios.resumen;
         if (!el || !r) return;
         el.innerHTML = `
-            <div class="stat-card"><span class="stat-label">Total del dominio</span><span class="stat-value">${r.total}</span></div>
+            <div class="stat-card"><span class="stat-label">Perfiles del dominio</span><span class="stat-value">${r.total}</span></div>
             <div class="stat-card"><span class="stat-label">Habilitados</span><span class="stat-value green">${r.habilitados}</span></div>
             <div class="stat-card"><span class="stat-label">Deshabilitados</span><span class="stat-value muted">${r.deshabilitados}</span></div>
             <div class="stat-card"><span class="stat-label">Mostrados</span><span class="stat-value">${r.mostrados}</span></div>
@@ -719,6 +736,8 @@
         btn.classList.toggle('active', n > 0);
     }
 
+    // `u.habilitado` es el del PERFIL (la fila). El de la cuenta viaja en
+    // `u.usuario_habilitado` y se muestra recien en el modal de Consultar.
     function filaUsuario(u) {
         const estado = u.habilitado
             ? '<span class="badge badge-success">Habilitado</span>'
@@ -726,11 +745,11 @@
         return `
             <tr data-id="${u.id}" class="row-clickable">
                 <td class="td-id">#${u.id}</td>
-                <td>${escapeHtml(u.usuario)}</td>
-                <td class="td-nombre">${escapeHtml(u.nombre)}</td>
+                <td>${u.usuario ? escapeHtml(u.usuario) : DASH}</td>
+                <td class="td-nombre">${u.nombre ? escapeHtml(u.nombre) : DASH}</td>
                 <td>${u.correo  ? escapeHtml(u.correo)  : DASH}</td>
                 <td>${u.celular ? escapeHtml(u.celular) : DASH}</td>
-                <td>${u.perfil_nombre ? escapeHtml(u.perfil_nombre) : DASH}</td>
+                <td>${u.rol_nombre ? escapeHtml(u.rol_nombre) : DASH}</td>
                 <td>${estado}</td>
                 <td>${escapeHtml(formatDate(u.ingresado) || '') || DASH}</td>
                 <td class="action-col">
@@ -746,9 +765,18 @@
 
     // Menu contextual de fila: Consultar -> Habilitar/Deshabilitar ->
     // separador -> Eliminar (destructiva, al final). Sin `Editar` —a
-    // diferencia del orden del skill abm_design—: se edita desde el boton
-    // primario del modal de Consultar.
+    // diferencia del orden del skill abm_design—: el modulo no edita.
+    // Las tres acciones trabajan sobre el PERFIL de la fila, no sobre la cuenta.
+    //
+    // Sobre el perfil de la propia sesion queda solo `Consultar`: deshabilitarlo
+    // o borrarlo cierra el panel en el request siguiente, asi que el backend lo
+    // rechaza con 409 y ofrecerlo seria ofrecer un error.
     function menuUsuario(u) {
+        if (u.es_propio) {
+            return [
+                { label: 'Consultar', icon: 'fa-eye', onSelect: () => verUsuario(u.id) },
+            ];
+        }
         return [
             { label: 'Consultar', icon: 'fa-eye',    onSelect: () => verUsuario(u.id) },
             {
@@ -765,38 +793,42 @@
     async function verUsuario(id) {
         let u;
         try {
-            u = (await api(`api/usuarios?id=${id}`)).usuario;
+            u = (await api(`api/usuarios?id=${id}`)).perfil;
         } catch (err) {
             toast(err.message, { error: true });
             return;
         }
 
-        const estado = u.habilitado
-            ? '<span class="badge badge-success">Habilitado</span>'
-            : '<span class="badge badge-danger">Deshabilitado</span>';
+        const badge = (ok, si, no) => ok
+            ? `<span class="badge badge-success">${si}</span>`
+            : `<span class="badge badge-danger">${no}</span>`;
 
-        /* 10 tarjetas: `Identificador` (el uuid) arranca la ficha en el lugar
-           que ocupaba `Codigo` —el id ya encabeza el modal— y `Estado` cierra
-           al final. Todas van a media tarjeta, asi que los cinco renglones
+        /* 12 tarjetas: la ficha abre por el acceso (`Perfil` + `Rol`, que es lo
+           que la fila representa) y cierra por los dos estados, que son
+           independientes entre si — una cuenta deshabilitada no entra ni con el
+           perfil habilitado, y al reves el perfil deshabilitado solo cierra
+           ESTE dominio. Todas van a media tarjeta, asi que los seis renglones
            cierran de a dos; agregar o quitar un campo deja la cuenta impar y
            estira la ultima a todo el ancho. */
         const body = `<div class="view-grid">${[
-            viewCard('Identificador',     u.uuid ? `<code>${escapeHtml(u.uuid)}</code>` : ''),
-            viewCard('Usuario',           escapeHtml(u.usuario)),
-            viewCard('Nombre',            escapeHtml(u.nombre)),
-            viewCard('Correo',            u.correo  ? escapeHtml(u.correo)  : ''),
-            viewCard('Celular',           u.celular ? escapeHtml(u.celular) : ''),
-            viewCard('Perfil',            u.perfil_nombre ? escapeHtml(u.perfil_nombre) : (u.perfil ? `<code>#${u.perfil}</code>` : '')),
-            viewCard('Último ingreso',    escapeHtml(formatDate(u.ingresado) || '')),
-            viewCard('Registrado',        escapeHtml(formatDate(u.registrado) || '')),
-            viewCard('Registrado por',    u.registrante_nombre ? escapeHtml(u.registrante_nombre) : ''),
-            viewCard('Estado',            estado),
+            viewCard('Perfil',             u.perfil_nombre ? escapeHtml(u.perfil_nombre) : ''),
+            viewCard('Rol',                u.rol_nombre ? escapeHtml(u.rol_nombre) : (u.rol ? `<code>#${u.rol}</code>` : '')),
+            viewCard('Usuario',            u.usuario ? escapeHtml(u.usuario) : ''),
+            viewCard('Nombre',             u.nombre  ? escapeHtml(u.nombre)  : ''),
+            viewCard('Correo',             u.correo  ? escapeHtml(u.correo)  : ''),
+            viewCard('Celular',            u.celular ? escapeHtml(u.celular) : ''),
+            viewCard('Identificador',      u.usuario_uuid ? `<code>${escapeHtml(u.usuario_uuid)}</code>` : ''),
+            viewCard('Último ingreso',     escapeHtml(formatDate(u.ingresado) || '')),
+            viewCard('Registrado',         escapeHtml(formatDate(u.registrado) || '')),
+            viewCard('Registrado por',     u.registrante_nombre ? escapeHtml(u.registrante_nombre) : ''),
+            viewCard('Estado del perfil',  badge(u.habilitado, 'Habilitado', 'Deshabilitado')),
+            viewCard('Estado de la cuenta', badge(u.usuario_habilitado, 'Habilitada', 'Deshabilitada')),
         ].join('')}</div>`;
 
         // Pie con `Cerrar` solo: sin boton ☰ de "Mas acciones" y sin accion
-        // primaria `Editar`. Las acciones del usuario viven en el menu
+        // primaria `Editar`. Las acciones del perfil viven en el menu
         // contextual de la fila del listado.
-        openModal(`Consultar usuario <span class="muted">#${u.id}</span>`, body, { wide: 'xl' });
+        openModal(`Consultar perfil <span class="muted">#${u.id}</span>`, body, { wide: 'xl' });
     }
 
     function copiar(texto) {
@@ -805,139 +837,43 @@
             .catch(() => toast('No se pudo copiar', { error: true }));
     }
 
-    /* ---------- Alta / Edición ---------- */
-    async function formUsuario(id) {
-        const esEdicion = id != null;
-        let u = { usuario: '', nombre: '', correo: '', celular: '', roles: '', perfil: null, habilitado: true };
-
-        if (esEdicion) {
-            try {
-                u = (await api(`api/usuarios?id=${id}`)).usuario;
-            } catch (err) {
-                toast(err.message, { error: true });
-                return;
-            }
-        }
-
-        const opciones = ['<option value="">— Sin perfil —</option>'].concat(
-            usuarios.perfiles.map((p) =>
-                `<option value="${p.id}"${p.id === u.perfil ? ' selected' : ''}>${escapeHtml(p.nombre)}</option>`)
-        ).join('');
-
-        const body = `
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="uf-usuario">Usuario *</label>
-                    <input type="text" id="uf-usuario" maxlength="100" value="${escapeHtml(u.usuario)}">
-                </div>
-                <div class="form-group">
-                    <label for="uf-nombre">Nombre *</label>
-                    <input type="text" id="uf-nombre" maxlength="100" value="${escapeHtml(u.nombre)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="uf-correo">Correo</label>
-                    <input type="email" id="uf-correo" maxlength="100" value="${escapeHtml(u.correo)}">
-                </div>
-                <div class="form-group">
-                    <label for="uf-celular">Celular</label>
-                    <input type="tel" id="uf-celular" maxlength="15" value="${escapeHtml(u.celular)}">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="uf-perfil">Perfil</label>
-                    <select id="uf-perfil">${opciones}</select>
-                </div>
-                <div class="form-group">
-                    <label for="uf-contrasena">Contraseña ${esEdicion ? '' : '*'}</label>
-                    <input type="password" id="uf-contrasena" maxlength="32" autocomplete="new-password"
-                           placeholder="${esEdicion ? 'Dejar vacío para no cambiarla' : 'Mínimo 4 caracteres'}">
-                </div>
-            </div>
-            <div class="field-error" id="uf-error" style="display:none"></div>
-        `;
-
-        const m = openModal(
-            esEdicion ? `Editar usuario <span class="muted">#${u.id}</span>` : 'Nuevo usuario',
-            body,
-            {
-                closeLabel:  'Cancelar',
-                primaryHtml: `<button class="btn btn-primary" data-act="guardar">${esEdicion ? 'Guardar' : 'Crear usuario'}</button>`,
-            }
-        );
-
-        const err = m.backdrop.querySelector('#uf-error');
-        const btn = m.backdrop.querySelector('[data-act="guardar"]');
-
-        btn.addEventListener('click', async () => {
-            // El PUT reescribe la fila entera, asi que `roles` y `habilitado`
-            // —que ya no estan en el formulario— viajan desde el registro
-            // cargado; si no, el guardado los borraria. En el alta salen de
-            // los defaults de `u` (sin roles, habilitado). El estado se
-            // cambia desde Habilitar / Deshabilitar del menu de la fila.
-            const payload = {
-                usuario:    m.backdrop.querySelector('#uf-usuario').value.trim(),
-                nombre:     m.backdrop.querySelector('#uf-nombre').value.trim(),
-                correo:     m.backdrop.querySelector('#uf-correo').value.trim(),
-                celular:    m.backdrop.querySelector('#uf-celular').value.trim(),
-                roles:      u.roles || '',
-                perfil:     +(m.backdrop.querySelector('#uf-perfil').value || 0),
-                contrasena: m.backdrop.querySelector('#uf-contrasena').value,
-                habilitado: !!u.habilitado,
-            };
-            if (esEdicion) payload.id = u.id;
-
-            btn.disabled = true;
-            try {
-                await api('api/usuarios', {
-                    method:  esEdicion ? 'PUT' : 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify(payload),
-                });
-                m.close();
-                toast(esEdicion ? 'Usuario actualizado' : 'Usuario creado');
-                cargarUsuarios();
-            } catch (e2) {
-                err.textContent   = e2.message;
-                err.style.display = '';
-                btn.disabled = false;
-            }
-        });
-    }
-
+    /* ---------- Habilitar / Deshabilitar ----------
+     * El PUT manda SOLO `{id, habilitado}` y toca solo `perfiles.habilitado`.
+     * No hace falta traerse el registro antes —como sí hacía la version que
+     * reescribia la fila entera de `usuarios`—: no hay ningun otro campo que
+     * el guardado pueda borrar. */
     async function toggleUsuario(u) {
         try {
-            const full = (await api(`api/usuarios?id=${u.id}`)).usuario;
             await api('api/usuarios', {
                 method:  'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id:         full.id,
-                    usuario:    full.usuario,
-                    nombre:     full.nombre,
-                    correo:     full.correo,
-                    celular:    full.celular,
-                    roles:      full.roles,
-                    perfil:     full.perfil || 0,
-                    habilitado: !full.habilitado,
-                }),
+                body:    JSON.stringify({ id: u.id, habilitado: !u.habilitado }),
             });
-            toast(full.habilitado ? 'Usuario deshabilitado' : 'Usuario habilitado');
+            toast(u.habilitado ? 'Perfil deshabilitado' : 'Perfil habilitado');
             cargarUsuarios();
         } catch (err) {
             toast(err.message, { error: true });
         }
     }
 
+    /* ---------- Eliminar ----------
+     * Borra el PERFIL, no la cuenta: la persona pierde el acceso a este
+     * dominio y conserva usuario, contraseña y los accesos que tenga en otros
+     * dominios. El texto lo dice explicitamente porque la fila muestra sus
+     * datos personales y "Eliminar" se lee como "borrar a la persona". */
     function eliminarUsuario(u) {
+        const quien = u.usuario
+            ? `<strong>${escapeHtml(u.usuario)}</strong>${u.nombre ? ` (${escapeHtml(u.nombre)})` : ''}`
+            : `el perfil <strong>#${u.id}</strong>`;
         confirmarBaja(
-            `¿Eliminar al usuario <strong>${escapeHtml(u.usuario)}</strong> (${escapeHtml(u.nombre)})? Esta acción no se puede deshacer.`,
+            `¿Quitarle a ${quien} el acceso a este dominio? Se elimina el perfil
+             <strong>${escapeHtml(u.rol_nombre || u.perfil_nombre || `#${u.id}`)}</strong>;
+             la cuenta y sus accesos a otros dominios no se tocan.
+             Esta acción no se puede deshacer.`,
             async () => {
                 try {
                     await api(`api/usuarios?id=${u.id}`, { method: 'DELETE' });
-                    toast('Usuario eliminado');
+                    toast('Perfil eliminado');
                     cargarUsuarios();
                 } catch (err) {
                     toast(err.message, { error: true });
@@ -953,9 +889,12 @@
         const snapshot = { ...usuarios };
         let aplicado   = false;
 
-        const perfilOpts = ['<option value="0">Todos</option>'].concat(
-            usuarios.perfiles.map((p) =>
-                `<option value="${p.id}"${p.id === usuarios.perfil ? ' selected' : ''}>${escapeHtml(p.nombre)}</option>`)
+        // El catalogo son los roles PRESENTES en el dominio (los sirve el
+        // backend), no la tabla `roles` entera: un rol sin ninguna fila aca
+        // solo puede dar un listado vacio.
+        const rolOpts = ['<option value="0">Todos</option>'].concat(
+            usuarios.roles.map((r) =>
+                `<option value="${r.id}"${r.id === usuarios.rol ? ' selected' : ''}>${escapeHtml(r.nombre)}</option>`)
         ).join('');
 
         const chip = (val, label) =>
@@ -965,15 +904,15 @@
             <div class="filters-grid">
                 <div class="form-group">
                     <label for="uf-f-codigo">Código</label>
-                    <input type="number" min="1" id="uf-f-codigo" placeholder="ID del usuario" value="${escapeHtml(usuarios.codigo)}">
+                    <input type="number" min="1" id="uf-f-codigo" placeholder="ID del perfil" value="${escapeHtml(usuarios.codigo)}">
                 </div>
                 <div class="form-group">
-                    <label for="uf-f-perfil">Perfil</label>
-                    <select id="uf-f-perfil">${perfilOpts}</select>
+                    <label for="uf-f-rol">Rol</label>
+                    <select id="uf-f-rol">${rolOpts}</select>
                 </div>
             </div>
             <div class="form-group">
-                <label>Estado del registro</label>
+                <label>Estado del perfil</label>
                 <div style="display:flex;gap:6px;flex-wrap:wrap" id="uf-f-estado">
                     ${chip('todos', 'Todos')}
                     ${chip('habilitados', 'Habilitados')}
@@ -992,6 +931,7 @@
                         <option value="usuario">Usuario</option>
                         <option value="nombre">Nombre</option>
                         <option value="correo">Correo</option>
+                        <option value="rol">Rol</option>
                         <option value="registrado">Registrado</option>
                         <option value="ingresado">Último ingreso</option>
                     </select>
@@ -1025,7 +965,7 @@
         const aplicarEnVivo = () => { pintarBadgeFiltrosUsuarios(); cargarUsuarios(); };
 
         $('#uf-f-codigo').addEventListener('input',  (e) => { usuarios.codigo = e.target.value.trim(); aplicarEnVivo(); });
-        $('#uf-f-perfil').addEventListener('change', (e) => { usuarios.perfil = +e.target.value || 0;  aplicarEnVivo(); });
+        $('#uf-f-rol').addEventListener('change',    (e) => { usuarios.rol    = +e.target.value || 0;  aplicarEnVivo(); });
         $('#uf-f-limite').addEventListener('change', (e) => { usuarios.limite = +e.target.value || 100; aplicarEnVivo(); });
         $('#uf-f-orden').addEventListener('change',  (e) => { usuarios.orden  = e.target.value; aplicarEnVivo(); });
         $('#uf-f-dir').addEventListener('change',    (e) => { usuarios.dir    = e.target.value; aplicarEnVivo(); });
@@ -1042,7 +982,7 @@
         $('[data-act="limpiar"]').addEventListener('click', () => {
             Object.assign(usuarios, USUARIOS_DEFAULTS);
             $('#uf-f-codigo').value = '';
-            $('#uf-f-perfil').value = '0';
+            $('#uf-f-rol').value    = '0';
             $('#uf-f-limite').value = USUARIOS_DEFAULTS.limite;
             $('#uf-f-orden').value  = USUARIOS_DEFAULTS.orden;
             $('#uf-f-dir').value    = USUARIOS_DEFAULTS.dir;

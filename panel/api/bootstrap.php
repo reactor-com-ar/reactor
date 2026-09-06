@@ -9,6 +9,7 @@ require_once dirname(__DIR__, 2) . '/env.php';
 require_once dirname(__DIR__) . '/lib/auth_check.php';
 require_once dirname(__DIR__) . '/lib/db.php';
 require_once dirname(__DIR__) . '/lib/sesion.php';
+require_once dirname(__DIR__) . '/lib/acceso.php';
 
 if (APP_ENV !== 'production') {
     ini_set('display_errors', '1');
@@ -21,11 +22,15 @@ if (APP_ENV !== 'production') {
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-// Por defecto todo endpoint que incluya bootstrap.php exige JWT valido.
-// Los endpoints publicos (login, logout) definen PANEL_API_PUBLIC antes
-// del require para optar fuera.
+// Por defecto todo endpoint que incluya bootstrap.php exige JWT valido Y
+// perfil de Administrador en el dominio activo (lib/acceso.php). El gate de
+// rol va aca y no endpoint por endpoint para que un modulo nuevo nazca cerrado:
+// olvidarse de la linea deja el endpoint protegido, no abierto.
+// Los endpoints publicos (login, logout, version) definen PANEL_API_PUBLIC
+// antes del require para optar fuera de los dos.
 if (!defined('PANEL_API_PUBLIC')) {
     requireAuth();
+    requireAdministrador();
 }
 
 // db() vive en lib/db.php: la comparten los endpoints, index.php y lib/sesion.php.

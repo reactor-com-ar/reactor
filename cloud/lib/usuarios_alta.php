@@ -18,7 +18,7 @@ declare(strict_types=1);
  *   Todo usuario nace con estos valores, sin importar lo que mande el llamador:
  *
  *       autenticacion = 'F'
- *       habilitado    = '1'
+ *       habilitado    = 1
  *       perfiles      = 0
  *       dominios      = ''
  *       paneles       = ''
@@ -39,6 +39,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__) . '/api/legacy_crypto.php';
+require_once __DIR__ . '/habilitado.php';
 
 /** Valores de inicializacion de las columnas plurales (ver cabecera). */
 const USUARIO_PERFILES_INICIAL = 0;
@@ -64,11 +65,11 @@ const USUARIO_AUTENTICACION_INICIAL = 'F';
 /**
  * Estado con el que nace todo usuario: habilitado.
  *
- * '1' es la convencion real de la tabla (2064 filas contra una sola 'S') y esta
- * en la lista que acepta `api/login.php` (['S','1','Y']), asi que el usuario
- * recien creado puede entrar.
+ * Se escribe el ENTERO 1, que es el unico valor de `usuarios.habilitado` que
+ * significa habilitado -- la columna es tinyint(1) NOT NULL y su otro valor
+ * posible es 0 (ver lib/habilitado.php).
  */
-const USUARIO_HABILITADO_INICIAL = '1';
+const USUARIO_HABILITADO_INICIAL = HABILITADO;
 
 /**
  * Da de alta un usuario y devuelve su id.

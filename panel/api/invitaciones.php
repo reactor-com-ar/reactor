@@ -238,7 +238,7 @@ function handleCreate(): void
     $ya = db()->prepare(
         "SELECT u.id
          FROM usuarios u
-         JOIN perfiles p ON p.usuario = u.id AND p.dominio = :dom AND p.habilitado = '1'
+         JOIN perfiles p ON p.usuario = u.id AND p.dominio = :dom AND p.habilitado = 1
          WHERE LOWER(u.correo) = :correo
          LIMIT 1"
     );

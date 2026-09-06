@@ -19,8 +19,12 @@ declare(strict_types=1);
  * `usuarios.perfil` guarda cual se eligio, asi que la fila tiene que
  * identificar al perfil sin ambiguedad. Es como lista el legacy.
  *
- * QUIEN DEFINE LA DISPONIBILIDAD: `perfiles`. Una cuenta puede pasar a un
- * dominio si existe una fila habilitada `perfiles(usuario, dominio)`.
+ * QUIEN DEFINE LA DISPONIBILIDAD: `perfiles`, y SOLO los de rol Administrador.
+ * Una cuenta puede pasar a un dominio si existe una fila habilitada
+ * `perfiles(usuario, dominio)` con `rol` en PANEL_ROLES_ADMIN — la misma regla
+ * con la que entra al panel, porque el selector no puede ofrecer un destino que
+ * despues el gate de lib/acceso.php va a rechazar. Un dominio donde la cuenta
+ * es Operadora simplemente no aparece.
  * `usuarios.dominio` NO es la lista de dominios permitidos: es el dominio
  * ACTIVO, el que viaja en el JWT y por el que filtra todo el panel.
  *
@@ -38,8 +42,9 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
-/** Valor de `perfiles.habilitado` para un acceso vigente (varchar(1), no 'S'/'N'). */
-const PERFIL_HABILITADO = '1';
+// HABILITADO y PANEL_ROLES_ADMIN viven en lib/, y ya llegan
+// por bootstrap.php: la regla de quien puede entrar y la de que se lista tienen
+// que salir del mismo lugar o se desincronizan.
 
 $auth      = authUser();
 $usuarioId = (int) ($auth['id'] ?? 0);
@@ -68,59 +73,24 @@ function listarPerfiles(int $usuarioId): void
     $dominioActual = sessionDominioId();
     $perfilActual  = isset($ctx['perfil']) ? (int) $ctx['perfil'] : 0;
 
-    // Un perfil deshabilitado es un acceso revocado y no se lista. El DOMINIO
-    // deshabilitado si se lista y se puede elegir -- como en el legacy, que no
-    // mira `dominios.habilitado`: hoy 95 de 148 dominios estan en 0 y bloquearlos
-    // le sacaria al usuario accesos que viene usando. Va con badge, no oculto.
-    $stmt = db()->prepare(
-        'SELECT p.id AS perfil_id, p.nombre AS perfil_nombre,
-                d.id AS dominio_id, d.nombre AS dominio_nombre, d.habilitado,
-                r.nombre AS rol_nombre
-         FROM perfiles p
-         INNER JOIN dominios d ON d.id = p.dominio
-         LEFT JOIN  roles    r ON r.id = p.rol
-         WHERE p.usuario = :u AND p.habilitado = :hab
-         ORDER BY d.nombre ASC, p.id ASC'
+    // Un perfil deshabilitado es un acceso revocado y uno que no es de
+    // Administrador no habilita el panel: ninguno de los dos se lista. El
+    // DOMINIO deshabilitado si se lista y se puede elegir -- como en el legacy,
+    // que no mira `dominios.habilitado`: hoy 95 de 148 dominios estan en 0 y
+    // bloquearlos le sacaria al usuario accesos que viene usando. Va con badge,
+    // no oculto. La consulta es perfilesAdministrador() de lib/acceso.php, la
+    // misma que usa el login para elegir con que perfil arranca la sesion.
+    $perfiles = array_map(
+        static fn (array $p): array => $p + ['actual' => $p['perfil'] === $perfilActual],
+        perfilesAdministrador($usuarioId)
     );
-    $stmt->execute([':u' => $usuarioId, ':hab' => PERFIL_HABILITADO]);
 
-    $perfiles  = [];
-    $enDominio = [];
-    foreach ($stmt->fetchAll() as $r) {
-        $enDominio[(int) $r['dominio_id']] = true;
-
-        $perfiles[] = [
-            'perfil'     => (int) $r['perfil_id'],
-            'dominio'    => (int) $r['dominio_id'],
-            'nombre'     => trim((string) ($r['dominio_nombre'] ?? '')),
-            // El rol ("Administrador") describe mejor la fila que
-            // `perfiles.nombre` ("Administrador en Reactor"), que repite el
-            // nombre del dominio que ya encabeza la tarjeta.
-            'rol'        => trim((string) ($r['rol_nombre'] ?? '')) ?: trim((string) ($r['perfil_nombre'] ?? '')),
-            'habilitado' => normalizarHabilitado($r['habilitado']),
-            'actual'     => (int) $r['perfil_id'] === $perfilActual,
-        ];
-    }
-
-    // El dominio activo sin perfil propio existe: `usuarios.dominio` lo asigna
-    // el back office interno y no exige fila en `perfiles` (el usuario 3 esta
-    // en `OSSE San Juan` sin perfil). Se lista igual -- primero, porque queda
-    // fuera del orden alfabetico -- para que la sesion en curso no falte, pero
-    // sin `perfil` no es elegible: no hay nada que asentar en la cuenta.
-    if ($dominioActual !== null && !isset($enDominio[$dominioActual])) {
-        $stmt = db()->prepare('SELECT id, nombre, habilitado FROM dominios WHERE id = :id LIMIT 1');
-        $stmt->execute([':id' => $dominioActual]);
-        if ($row = $stmt->fetch()) {
-            array_unshift($perfiles, [
-                'perfil'     => null,
-                'dominio'    => (int) $row['id'],
-                'nombre'     => trim((string) ($row['nombre'] ?? '')),
-                'rol'        => '',
-                'habilitado' => normalizarHabilitado($row['habilitado']),
-                'actual'     => false,
-            ]);
-        }
-    }
+    // Ya no se lista el dominio activo sin perfil propio. Existia porque
+    // `usuarios.dominio` lo puede asignar el back office interno sin crear fila
+    // en `perfiles` (el usuario 3 esta asi en `OSSE San Juan`), y se mostraba
+    // para que la sesion en curso no faltara de la lista. Con el gate de rol esa
+    // sesion ya no puede existir: sin perfil de Administrador en el dominio
+    // activo, requireAdministrador() no la deja llegar hasta aca.
 
     json_ok([
         'dominio_actual' => $dominioActual,
@@ -146,21 +116,27 @@ function cambiarDominio(int $usuarioId): void
         json_error('Perfil invalido', 422);
     }
 
-    // El perfil TIENE que ser del usuario logueado y estar habilitado: sin el
-    // filtro por `p.usuario`, un id a mano mueve la sesion a cualquier dominio
-    // del sistema. Es el unico control que separa esto de una escalada.
+    // El perfil TIENE que ser del usuario logueado, estar habilitado y ser de
+    // rol Administrador. Sin el filtro por `p.usuario`, un id a mano mueve la
+    // sesion a cualquier dominio del sistema; sin el filtro por `p.rol`, mueve
+    // la sesion a un dominio donde la cuenta es Operadora — que es justo lo que
+    // el selector deja de ofrecer, y esconderlo de la lista no alcanza como
+    // control. Los dos filtros son el limite entre esto y una escalada.
     $stmt = db()->prepare(
         'SELECT p.id, p.dominio
          FROM perfiles p
          INNER JOIN dominios d ON d.id = p.dominio
-         WHERE p.id = :p AND p.usuario = :u AND p.habilitado = :hab
+         WHERE p.id = :p
+           AND p.usuario = :u
+           AND p.habilitado = :hab
+           AND p.rol IN (' . panelRolesAdminSql() . ')
          LIMIT 1'
     );
-    $stmt->execute([':p' => $perfilId, ':u' => $usuarioId, ':hab' => PERFIL_HABILITADO]);
+    $stmt->execute([':p' => $perfilId, ':u' => $usuarioId, ':hab' => HABILITADO]);
     $perfil = $stmt->fetch();
 
     if (!$perfil) {
-        json_error('Ese perfil no esta disponible para tu cuenta', 403);
+        json_error('Ese perfil no está disponible para tu cuenta: al panel solo se entra con perfil de Administrador.', 403);
     }
 
     // Se reemite el token, asi que se revalida la cuenta como en el login: si
@@ -173,18 +149,14 @@ function cambiarDominio(int $usuarioId): void
     if (!$cuenta) {
         json_error('El usuario ya no existe', 404);
     }
-    if (!in_array(strtoupper(trim((string) ($cuenta['habilitado'] ?? ''))), ['S', '1', 'Y'], true)) {
+    if (!esHabilitado($cuenta['habilitado'] ?? 0)) {
         json_error('El usuario esta deshabilitado', 403);
     }
 
     // Asienta la seleccion en la cuenta (cPerfil::cargar() del legacy escribe
     // `usuarios.perfil`; `usuarios.dominio` lo agrega el panel, ver cabecera).
-    $upd = db()->prepare('UPDATE usuarios SET perfil = :p, dominio = :d WHERE id = :u');
-    $upd->execute([
-        ':p' => (int) $perfil['id'],
-        ':d' => (int) $perfil['dominio'],
-        ':u' => $usuarioId,
-    ]);
+    // Es el mismo helper con el que el login elige el perfil de arranque.
+    panelPerfilActivoAsentar($usuarioId, (int) $perfil['id'], (int) $perfil['dominio']);
 
     // "Reiniciar la sesion sin pedir credenciales" = reemitir el JWT con los
     // claims de alcance nuevos, sobre la misma cookie. sessionCuentaDesdeDb()
@@ -206,18 +178,4 @@ function cambiarDominio(int $usuarioId): void
     jwt_cookie_set(jwt_sign($payload, JWT_TTL));
 
     json_ok(['usuario' => $payload]);
-}
-
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
-/**
- * `dominios.habilitado` es smallint y admite NULL: se normaliza a 1/0 para que
- * el front no tenga que distinguir NULL de 0 (ambos son "no"), igual que
- * dominio.php.
- */
-function normalizarHabilitado(mixed $valor): int
-{
-    return ((int) ($valor ?? 0)) === 1 ? 1 : 0;
 }

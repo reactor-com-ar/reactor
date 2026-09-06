@@ -4,12 +4,20 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/env.php';
 require_once __DIR__ . '/lib/auth_check.php';
 require_once __DIR__ . '/lib/sesion.php';
+require_once __DIR__ . '/lib/acceso.php';
 
 $currentUser = authUser();
 if ($currentUser === null) {
     header('Location: login');
     exit;
 }
+
+// GATE DE ROL: el shell tambien se cierra, no solo la API. Una sesion sin
+// perfil de Administrador en el dominio activo vuelve al login con el aviso
+// (`?motivo=rol`) en vez de cargar una SPA que despues iba a fallar endpoint
+// por endpoint. Es tambien el corte para un token emitido por cloud/, que no
+// aplica esta regla y comparte la cookie con el panel. Ver lib/acceso.php.
+requireAdministrador();
 
 // Datos de alcance de la sesion (dominio, perfil). Se inyectan en la pagina
 // para que el front los tenga en el arranque, sin un request extra.

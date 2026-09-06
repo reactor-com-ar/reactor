@@ -42,8 +42,6 @@ try {
         json_error('El usuario ya no existe', 404);
     }
 
-    $habilitado = strtoupper(trim((string) ($row['habilitado'] ?? '')));
-
     json_ok([
         'id'             => (int) $row['id'],
         'uuid'           => (string) ($row['uuid'] ?? ''),
@@ -51,7 +49,7 @@ try {
         'usuario'        => (string) ($row['usuario'] ?? ''),
         'correo'         => (string) ($row['correo'] ?? ''),
         'celular'        => (string) ($row['celular'] ?? ''),
-        'habilitado'     => in_array($habilitado, ['S', '1', 'Y'], true),
+        'habilitado'     => esHabilitado($row['habilitado'] ?? 0),
         'dominio_id'     => $row['dominio_id'] !== null ? (int) $row['dominio_id'] : null,
         'dominio_nombre' => (string) ($row['dominio_nombre'] ?? ''),
         'perfil_id'      => $row['perfil_id'] !== null ? (int) $row['perfil_id'] : null,

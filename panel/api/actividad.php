@@ -225,13 +225,13 @@ function handleGet(int $id): void
     $registro = mapRegistro($row);
 
     // Fichas de las pestañas Usuario / Dispositivo del modal de Consulta.
-    // Salen de los mismos LEFT JOIN del registro y NO de api/usuarios.php
-    // ni api/dispositivos.php: esos dos filtran por `dominio`, que en las
-    // dos tablas es el dominio ACTUAL (el activo de la cuenta, el dueño de
-    // turno del equipo). Un registro viejo puede apuntar a un usuario que
-    // desde entonces cambió de dominio o a un equipo que se liberó, y esas
-    // consultas devolverian 404 sobre actividad perfectamente valida. El
-    // control de acceso ya lo dio `r.dominio = :dom`.
+    // Salen de los mismos LEFT JOIN del registro y NO de api/usuarios.php ni
+    // api/dispositivos.php: el primero ya no recibe un id de usuario sino de
+    // PERFIL (ese modulo administra `perfiles`), y el segundo filtra por
+    // `dominio`, que en `dispositivos` es el dueño de turno. Un registro viejo
+    // puede apuntar a un equipo que se libero, y esa consulta devolveria 404
+    // sobre actividad perfectamente valida. El control de acceso ya lo dio
+    // `r.dominio = :dom`.
     $registro['usuario_ficha']     = fichaUsuario($row);
     $registro['dispositivo_ficha'] = fichaDispositivo($row);
 
@@ -249,8 +249,6 @@ function fichaUsuario(array $r): ?array
     if (($r['uf_id'] ?? null) === null) {
         return null;
     }
-    $hab = strtoupper(trim((string) ($r['uf_habilitado'] ?? '')));
-
     return [
         'id'         => (int)    $r['uf_id'],
         'uuid'       => (string) ($r['uf_uuid']        ?? ''),
@@ -260,8 +258,9 @@ function fichaUsuario(array $r): ?array
         'celular'    => (string) ($r['uf_celular']     ?? ''),
         'ingresado'  => (string) ($r['uf_ingresado']   ?? ''),
         'registrado' => (string) ($r['uf_registrado']  ?? ''),
-        // 'S' / 'N' en `usuarios`, no el smallint de `dispositivos`.
-        'habilitado' => in_array($hab, ['S', '1', 'Y'], true),
+        // Mismo tinyint(1) 0/1 que `dispositivos.habilitado`: desde
+        // 20260905_2200 no hay una codificacion por tabla.
+        'habilitado' => esHabilitado($r['uf_habilitado'] ?? 0),
     ];
 }
 
@@ -281,7 +280,7 @@ function fichaDispositivo(array $r): ?array
         'latido'        => (string) ($r['df_latido']          ?? ''),
         'modelo'        => $r['df_modelo'] !== null ? (int) $r['df_modelo'] : null,
         'modelo_nombre' => (string) ($r['df_modelo_nombre']   ?? ''),
-        'habilitado'    => (int) ($r['df_habilitado'] ?? 0) === 1,
+        'habilitado'    => esHabilitado($r['df_habilitado'] ?? 0),
         'enlace'        => (int) ($r['df_enlace']     ?? 0) === 1,
     ];
 }

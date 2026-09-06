@@ -107,7 +107,8 @@ function handleList(): void
     if ($estado === 'habilitados') {
         $where[] = 'd.habilitado = 1';
     } elseif ($estado === 'deshabilitados') {
-        $where[] = '(d.habilitado IS NULL OR d.habilitado <> 1)';
+        // La columna es NOT NULL: "no habilitado" es exactamente 0.
+        $where[] = 'd.habilitado = 0';
     }
     if ($q !== '') {
         // Un placeholder por columna: con EMULATE_PREPARES=false, PDO no admite
@@ -435,7 +436,7 @@ function mapDispositivo(array $r): array
         'ip'            => $texto('ip'),
         'senal'         => $texto('senal'),
         'firmware'      => $texto('firmware'),
-        'habilitado'    => (int) ($r['habilitado'] ?? 0) === 1,
+        'habilitado'    => esHabilitado($r['habilitado'] ?? 0),
         'enlace'        => (int) ($r['enlace']     ?? 0) === 1,
         'monitoreo'     => (int) ($r['monitoreo']  ?? 0) === 1,
         'latido'        => $texto('latido'),
@@ -585,7 +586,7 @@ function validar(array $in, int $dominio, ?int $idActual): array
         ':coordenadas'        => $coordenadas === '' ? null : $coordenadas,
         ':indicadores'        => $indicadores === '' ? null : $indicadores,
         ':monitoreoCorreos'   => $correos     === '' ? null : $correos,
-        ':habilitado'         => !empty($in['habilitado']) ? 1 : 0,
+        ':habilitado'         => valorHabilitado($in['habilitado'] ?? null),
         ':monitoreo'          => !empty($in['monitoreo'])  ? 1 : 0,
         ':senalesLimite'      => enteroPositivo($in, 'senalesLimite'),
         ':monitoreoIntervalo' => enteroPositivo($in, 'monitoreoIntervalo'),

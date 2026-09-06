@@ -42,11 +42,43 @@
 --   convencion general y eliminar las filas centinela.
 --
 --   El usuario centinela NO puede iniciar sesion: `usuario` = NULL (el login
---   filtra por esa columna y NULL nunca matchea), `habilitado` = 'N' y
+--   filtra por esa columna y NULL nunca matchea), `habilitado` = 0 y
 --   `contrasena` vacia.
 --
 --   PENDIENTE: los listados que hacen SELECT sin filtrar muestran esas filas.
 --   Agregar `WHERE id <> 0` en `panel/api/usuarios.php` y equivalentes.
+--
+--
+-- LA COLUMNA `habilitado`: DOS VALORES Y NINGUNO MAS
+--
+--   Toda columna llamada `habilitado` es `tinyint(1) NOT NULL DEFAULT '0'` y
+--   solo admite 1 (habilitado) y 0 (deshabilitado). No hay NULL, no hay 'S'/'N'
+--   y no hay cadena vacia. Antes convivian tres tipos (varchar(1), smallint y
+--   tinyint) y cada modulo se defendia con su propio criterio de lectura, asi
+--   que una misma fila podia verse habilitada en una pantalla y deshabilitada
+--   en otra. Lo unifico 20260905_2200_habilitado_tinyint_0_1.sql, que ademas es
+--   generica: descubre las columnas de information_schema en vez de listarlas.
+--
+--   Una columna `habilitado` NUEVA se crea ya con ese tipo. Del lado del codigo
+--   el criterio unico vive en `panel/lib/habilitado.php` y sus copias de
+--   `cloud/lib/` y `app/lib/` (HABILITADO / DESHABILITADO, esHabilitado(),
+--   valorHabilitado()): no volver a comparar contra strings.
+--
+--
+-- `perfiles`.`tipo`: DOS VALORES Y NINGUNO MAS
+--
+--   `ENUM('A','O') NOT NULL DEFAULT 'O'` -- 'A' Administrador, 'O' Operador --
+--   desde 20260905_2300_perfiles_tipo_a_o.sql. Antes era varchar(1) NULL y 22
+--   filas estaban en NULL o en '': todas de roles internos de Reactor (Tecnico,
+--   Director Tecnico, Desarrollador, Contador, ...) mas el perfil centinela
+--   id = 0. Se normalizaron a 'O', el menos privilegiado, con el mismo criterio
+--   que `habilitado`.
+--
+--   NO ES EL GATE DE ACCESO y NO esta alineada con `rol`: 48 perfiles con rol
+--   Administrador llevan `tipo = 'O'` y 10 con rol Operador llevan `tipo = 'A'`.
+--   La migracion NO tocó esos 58 -- derivar `tipo` de `rol` seria repartir
+--   permisos, no normalizar un tipo. El panel gatea por `rol`
+--   (`panel/lib/acceso.php`); el sistema legacy, fuera de este repo, lee `tipo`.
 --
 --
 -- Toda tabla y columna nueva debe crearse en InnoDB / utf8mb4_unicode_ci.
@@ -83,7 +115,7 @@ CREATE TABLE `accesos___` (
   `tipo` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `descripcion` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -312,7 +344,7 @@ CREATE TABLE `articulos` (
   `venta` decimal(10,2) DEFAULT NULL,
   `web` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `visibilidad` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` tinyint(1) DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_articulos_categoria` (`categoria`),
   CONSTRAINT `fk_articulos_categoria` FOREIGN KEY (`categoria`) REFERENCES `articuloscategorias` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
@@ -356,7 +388,7 @@ CREATE TABLE `articulos___` (
   `componente` tinyint(1) DEFAULT NULL,
   `compuesto` tinyint(1) DEFAULT NULL,
   `visibilidad` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` tinyint(1) DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -499,7 +531,7 @@ CREATE TABLE `botones` (
   `icono` int DEFAULT NULL,
   `ancho` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `orden` smallint DEFAULT NULL,
-  `habilitado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `request` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `fk_botones_dominio` (`dominio`),
@@ -554,7 +586,7 @@ CREATE TABLE `canales` (
   `usado` datetime DEFAULT NULL,
   `registrosGuardar` smallint DEFAULT NULL,
   `registrosLimite` int DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `configuracion` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `opciones` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `reacciones` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
@@ -589,7 +621,7 @@ CREATE TABLE `canales___` (
   `usado` datetime DEFAULT NULL,
   `registrosGuardar` smallint DEFAULT NULL,
   `registrosLimite` int DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `configuracion` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `opciones` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
   `reacciones` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
@@ -963,7 +995,7 @@ CREATE TABLE `contratos` (
   `tolerancia` date DEFAULT NULL,
   `remitir` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `remitido` datetime DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_contratos_cliente` (`cliente`),
   KEY `fk_contratos_dominio` (`dominio`),
@@ -992,7 +1024,7 @@ CREATE TABLE `controles` (
   `nombre` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `color` int DEFAULT NULL,
   `orden` int DEFAULT NULL,
-  `habilitado` varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `parametros` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_controles_dominio` (`dominio`),
@@ -1038,7 +1070,7 @@ CREATE TABLE `dashboards` (
   `id` int NOT NULL AUTO_INCREMENT,
   `dominio` int DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_dashboards_dominio` (`dominio`),
   CONSTRAINT `fk_dashboards_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
@@ -1087,7 +1119,7 @@ CREATE TABLE `dispositivos` (
   `identidad` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `llave` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `chip` int DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `senalesLimite` int DEFAULT NULL,
   `fabricacion` datetime DEFAULT NULL,
   `adoptado` smallint DEFAULT NULL,
@@ -1150,7 +1182,7 @@ CREATE TABLE `dispositivos___` (
   `identidad` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `llave` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `chip` int DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `senalesLimite` int DEFAULT NULL,
   `fabricacion` datetime DEFAULT NULL,
   `adoptado` smallint DEFAULT NULL,
@@ -1303,7 +1335,7 @@ CREATE TABLE `dominios` (
   `usos` int DEFAULT NULL,
   `paneles` int DEFAULT NULL,
   `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_dominios_agente` (`agente`),
   KEY `fk_dominios_cliente` (`cliente`),
@@ -1348,7 +1380,7 @@ CREATE TABLE `dominiosmedios` (
   `uso` datetime DEFAULT NULL,
   `baja` datetime DEFAULT NULL,
   `validado` smallint DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_dominiosmedios_dominio` (`dominio`),
   CONSTRAINT `fk_dominiosmedios_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
@@ -1422,7 +1454,7 @@ CREATE TABLE `empleados___` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `usuario` int DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -1469,7 +1501,7 @@ CREATE TABLE `enlaces___` (
   `generador` int DEFAULT NULL,
   `generado` datetime DEFAULT NULL,
   `utilizado` datetime DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -2194,7 +2226,7 @@ CREATE TABLE `paneles` (
   `uuid` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `dominio` int DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_paneles_dominio` (`dominio`),
   CONSTRAINT `fk_paneles_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
@@ -2230,13 +2262,13 @@ CREATE TABLE `perfiles` (
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `usuario` int DEFAULT NULL,
   `dominio` int DEFAULT NULL,
-  `tipo` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `tipo` enum('A','O') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'O',
   `roles` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `rol` int DEFAULT NULL,
   `paneles` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'paneles habilitados',
   `panel` int DEFAULT NULL COMMENT 'id del ultimo panel',
   `permisos` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_perfiles_usuario` (`usuario`),
   KEY `fk_perfiles_dominio` (`dominio`),
@@ -2305,7 +2337,7 @@ CREATE TABLE `planes` (
   `tipo` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `descripcion` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `articulo` int DEFAULT NULL,
   `usuarios` int DEFAULT NULL,
   `dispositivos` int DEFAULT NULL,
@@ -2497,7 +2529,7 @@ CREATE TABLE `roles` (
   `sistema` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `nivel` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `menus` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `accesos` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `permisos` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -2714,7 +2746,7 @@ CREATE TABLE `temporizadores` (
   `primera` datetime DEFAULT NULL,
   `ultima` datetime DEFAULT NULL,
   `ejecuciones` int DEFAULT NULL,
-  `habilitado` smallint DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -2796,7 +2828,7 @@ CREATE TABLE `usuarios` (
   `clave` varchar(6) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `correo` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `celular` varchar(15) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   `registrante` int DEFAULT NULL,
   `registrado` datetime DEFAULT NULL,
   `ingresado` datetime DEFAULT NULL,
@@ -2830,7 +2862,7 @@ CREATE TABLE `usuariosgrupos` (
   `id` int NOT NULL AUTO_INCREMENT,
   `dominio` int DEFAULT NULL,
   `nombre` varchar(250) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `habilitado` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_usuariosgrupos_dominio` (`dominio`),
   CONSTRAINT `fk_usuariosgrupos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT

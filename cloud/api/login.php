@@ -41,8 +41,8 @@ try {
         json_error('Usuario o contrasena incorrectos', 401);
     }
 
-    $habilitado = strtoupper(trim((string) ($row['habilitado'] ?? '')));
-    if (!in_array($habilitado, ['S', '1', 'Y'], true)) {
+    // `usuarios.habilitado` es tinyint(1) NOT NULL: entra solo con 1.
+    if (!esHabilitado($row['habilitado'])) {
         json_error('El usuario esta deshabilitado', 403);
     }
 

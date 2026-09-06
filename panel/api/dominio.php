@@ -104,9 +104,8 @@ function mapDominio(array $r): array
         'numero'           => trim((string) ($r['numero'] ?? '')),
         'situacion'        => $situacion,
         'situacion_texto'  => situaciones()[$situacion] ?? '',
-        // `habilitado` es smallint y admite NULL: se normaliza a 1/0 para que
-        // el front no tenga que distinguir NULL de 0 (ambos son "no").
-        'habilitado'       => ((int) ($r['habilitado'] ?? 0)) === 1 ? 1 : 0,
+        // `dominios.habilitado` es tinyint(1) NOT NULL: ya es 0 o 1.
+        'habilitado'       => (int) $r['habilitado'],
     ];
 }
 

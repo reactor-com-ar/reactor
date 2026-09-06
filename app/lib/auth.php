@@ -41,6 +41,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/jwt.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/habilitado.php';
 
 /** Cookie del token propio de la app. */
 const APP_COOKIE = 'reactor_app_token';
@@ -169,10 +170,11 @@ function appAdoptarSesionLegacy(): ?array
 /**
  * Lee el usuario de la base y devuelve null si no existe o está deshabilitado.
  *
- * `habilitado` no tiene una convención única en la tabla: '1' en 2064 filas,
- * '0' en 17, y una 'S' y una 'N' sueltas. El legacy solo bloqueaba con '0';
- * acá también se bloquea 'N', que significa lo mismo y de otro modo dejaría
- * entrar a un usuario que el operador dio de baja.
+ * `usuarios.habilitado` es `tinyint(1) NOT NULL` con DOS valores: 1 habilita y
+ * 0 no. Antes la columna mezclaba '1'/'0' con una 'S' y una 'N' sueltas y acá
+ * se filtraba por lista negra ("bloqueo '0' y 'N'"), lo que dejaba entrar a
+ * cualquier valor inesperado. Ahora el criterio es la lista blanca de
+ * lib/habilitado.php: entra 1 y nada más.
  */
 function appUsuarioVigente(int $id): ?array
 {
@@ -188,8 +190,7 @@ function appUsuarioVigente(int $id): ?array
         return null;
     }
 
-    $habilitado = strtoupper(trim((string) ($row['habilitado'] ?? '')));
-    if ($habilitado === '0' || $habilitado === 'N') {
+    if (!esHabilitado($row['habilitado'] ?? 0)) {
         return null;
     }
 

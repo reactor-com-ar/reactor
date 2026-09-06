@@ -50,8 +50,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         if (!$row) {
             $error = 'Usuario no registrado.';
         } else {
-            $habilitado = strtoupper(trim((string) ($row['habilitado'] ?? '')));
-            if ($habilitado === '0' || $habilitado === 'N') {
+            // Lista blanca: entra 1 y nada más (lib/habilitado.php).
+            if (!esHabilitado($row['habilitado'] ?? 0)) {
                 $error = 'Usuario deshabilitado.';
             } else {
                 appLoginPendienteAbrir((int) $row['id'], $ingresado);

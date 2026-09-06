@@ -19,6 +19,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/habilitado.php';
 
 /** Color del display cuando el control no define uno (`colores` id 100). */
 const APP_COLOR_PREDETERMINADO = '#EBC300';
@@ -83,7 +84,7 @@ function appControlesDelPanel(int $panel, int $dominio): array
 
         // Los tres estados del legacy, en el mismo orden de precedencia:
         // deshabilitado gana sobre desconectado, y desconectado sobre online.
-        $habilitado = (string) ($r['d_habilitado'] ?? '') === '1';
+        $habilitado = esHabilitado($r['d_habilitado'] ?? 0);
         $online     = $habilitado && (string) ($r['enlace'] ?? '') === '1';
 
         if (!$habilitado) {
@@ -136,7 +137,7 @@ function appBotonesDeControles(array $controles): array
         'SELECT b.id, b.uuid, b.control, b.texto, b.accion, i.codigo AS icono
          FROM botones b
          LEFT JOIN iconos i ON i.id = b.icono
-         WHERE b.control IN (' . $marcas . ') AND b.habilitado = \'1\'
+         WHERE b.control IN (' . $marcas . ') AND b.habilitado = 1
          ORDER BY b.control, b.orden, b.id'
     );
     $stmt->execute($controles);

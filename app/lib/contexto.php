@@ -16,6 +16,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/habilitado.php';
 
 /**
  * @return array{perfil:int, dominio:int, nombre:string, panel:int, rol:string}
@@ -42,7 +43,7 @@ function appDominioActivo(array $usuario): array
     // 1) El perfil recordado en `usuarios.perfil`.
     $perfil = (int) ($usuario['perfil'] ?? 0);
     if ($perfil > 0) {
-        $stmt = db()->prepare($sel . ' WHERE p.id = :p AND p.habilitado = \'1\' LIMIT 1');
+        $stmt = db()->prepare($sel . ' WHERE p.id = :p AND p.habilitado = 1 LIMIT 1');
         $stmt->execute([':p' => $perfil]);
         $row = $stmt->fetch();
         if ($row) {
@@ -52,7 +53,7 @@ function appDominioActivo(array $usuario): array
 
     // 2) Primer perfil habilitado del usuario (mismo orden que el legacy).
     $stmt = db()->prepare(
-        $sel . ' WHERE p.usuario = :u AND p.habilitado = \'1\' ORDER BY p.nombre, p.id LIMIT 1'
+        $sel . ' WHERE p.usuario = :u AND p.habilitado = 1 ORDER BY p.nombre, p.id LIMIT 1'
     );
     $stmt->execute([':u' => (int) $usuario['id']]);
     $row = $stmt->fetch();
@@ -82,8 +83,13 @@ function appContextoDesdeFila(array $row): array
  * La fuente buena es `perfiles.rol` -> `roles.nombre` (1589 perfiles Operador,
  * 469 Administrador, y algunos Técnico / Contador / etc.). Pero 145 perfiles
  * tienen `rol` en NULL, así que se cae a `perfiles.tipo`, que codifica lo mismo
- * en una letra ('A' = 444 filas, 'O' = 1761). Si tampoco hay tipo, queda vacío
- * y la vista muestra un guión.
+ * en una letra: `ENUM('A','O') NOT NULL DEFAULT 'O'` desde
+ * 20260905_2300_perfiles_tipo_a_o.sql (444 filas 'A', 1.783 'O').
+ *
+ * Como la columna ya no admite NULL ni cadena vacía, el fallback SIEMPRE da un
+ * nombre y la vista dejó de poder mostrar un guión en esa celda. El `default`
+ * queda igual porque `match` sin él lanza `UnhandledMatchError`: es la red que
+ * cubre una fila leída antes de aplicar la migración, no un caso esperado.
  */
 function appRolDelPerfil(array $row): string
 {
@@ -154,7 +160,7 @@ function appPanelesDelDominio(int $dominio, int $panelRecordado): array
     $stmt = db()->prepare(
         'SELECT id, nombre
          FROM paneles
-         WHERE dominio = :d AND habilitado = \'1\'
+         WHERE dominio = :d AND habilitado = 1
          ORDER BY nombre'
     );
     $stmt->execute([':d' => $dominio]);
@@ -282,7 +288,7 @@ function appPerfilHabilitado(int $perfil, int $usuario): ?array
          FROM perfiles p
          LEFT JOIN dominios d ON d.id = p.dominio
          LEFT JOIN roles    r ON r.id = p.rol
-         WHERE p.id = :p AND p.usuario = :u AND p.habilitado = \'1\'
+         WHERE p.id = :p AND p.usuario = :u AND p.habilitado = 1
          LIMIT 1'
     );
     $stmt->execute([':p' => $perfil, ':u' => $usuario]);

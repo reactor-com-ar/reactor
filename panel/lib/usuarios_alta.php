@@ -5,21 +5,27 @@ declare(strict_types=1);
 /**
  * Canal unico de alta de usuarios del panel.
  *
- * Todo INSERT sobre `usuarios` del panel pasa por aca. Hoy lo usan:
+ * Todo INSERT sobre `usuarios` del panel pasa por aca. Hoy lo usa uno solo:
  *
- *   - panel/api/usuarios.php      -> handleCreate()  (alta manual del BackOffice)
- *   - panel/invitacion/aceptar.php                   (alta al aceptar una invitacion)
+ *   - panel/invitacion/aceptar.php  (alta al aceptar una invitacion)
  *
- * El objetivo es que no haya variaciones: los dos caminos escriben las mismas
+ * Era el canal compartido con `api/usuarios.php` -> handleCreate(), el alta
+ * manual del BackOffice, que dejo de existir: el modulo Usuarios administra
+ * PERFILES (quien tiene acceso al dominio) y no cuentas, y su unica alta es la
+ * invitacion. La funcion se conserva igual —con un solo llamador— porque es
+ * donde vive la forma fija del alta y porque cualquier camino nuevo tiene que
+ * entrar por aca y no armarse su propio INSERT.
+ *
+ * El objetivo es que no haya variaciones: todo camino escribe las mismas
  * columnas, con el mismo cifrado y con los mismos valores por defecto. Si hace
- * falta una columna nueva en el alta, se agrega aca y la reciben los dos.
+ * falta una columna nueva en el alta, se agrega aca y la reciben todos.
  *
  * FORMA FIJA DEL ALTA
  *
  *   Todo usuario nace con estos valores, sin importar lo que mande el llamador:
  *
  *       autenticacion = 'F'
- *       habilitado    = '1'
+ *       habilitado    = 1
  *       perfiles      = 0
  *       dominios      = ''
  *       paneles       = ''
@@ -31,6 +37,8 @@ declare(strict_types=1);
  *
  *   `roles` arranca en '' salvo que el llamador mande otro valor.
  */
+
+require_once __DIR__ . '/habilitado.php';
 
 /** Valores de inicializacion de las columnas plurales (ver cabecera). */
 const USUARIO_PERFILES_INICIAL = 0;
@@ -56,11 +64,11 @@ const USUARIO_AUTENTICACION_INICIAL = 'F';
 /**
  * Estado con el que nace todo usuario: habilitado.
  *
- * '1' es la convencion real de la tabla (2064 filas contra una sola 'S') y esta
- * en la lista que acepta `cloud/api/login.php` (['S','1','Y']), asi que el
- * usuario recien creado puede entrar.
+ * Se escribe el ENTERO 1, que es el unico valor de `usuarios.habilitado` que
+ * significa habilitado -- la columna es tinyint(1) NOT NULL y su otro valor
+ * posible es 0 (ver lib/habilitado.php).
  */
-const USUARIO_HABILITADO_INICIAL = '1';
+const USUARIO_HABILITADO_INICIAL = HABILITADO;
 
 require_once dirname(__DIR__) . '/api/legacy_crypto.php';
 

@@ -98,7 +98,7 @@ try {
          FROM botones b
          LEFT JOIN canales      c ON c.id = b.canal
          LEFT JOIN dispositivos d ON d.id = c.dispositivo
-         WHERE b.id = :b AND b.habilitado = \'1\' AND d.dominio = :dom
+         WHERE b.id = :b AND b.habilitado = 1 AND d.dominio = :dom
          LIMIT 1'
     );
     $stmt->execute([':b' => $botonId, ':dom' => $ctx['dominio']]);
@@ -109,10 +109,10 @@ try {
     }
 
     // Las mismas dos guardas que `cCanal::encender()`.
-    if ((int) $boton['canal_habilitado'] !== 1) {
+    if (!esHabilitado($boton['canal_habilitado'] ?? 0)) {
         responder(409, ['ok' => false, 'error' => 'El canal está deshabilitado.']);
     }
-    if ((string) $boton['dispositivo_habilitado'] !== '1') {
+    if (!esHabilitado($boton['dispositivo_habilitado'] ?? 0)) {
         responder(409, ['ok' => false, 'error' => 'El equipo está deshabilitado.']);
     }
 

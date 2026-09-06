@@ -25,6 +25,7 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__, 2) . '/env.php';
+require_once __DIR__ . '/habilitado.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/databox.php';
 require_once __DIR__ . '/base_url.php';
@@ -49,9 +50,6 @@ const RECUPERACION_CUPO_ORIGEN = 10;
  */
 const RECUPERACION_CONTRASENA_MIN = 6;
 const RECUPERACION_CONTRASENA_MAX = 36;
-
-/** Valores de `usuarios.habilitado` que dejan entrar, igual que api/login.php. */
-const RECUPERACION_HABILITADOS = ['S', '1', 'Y'];
 
 /* ------------------------------------------------------------------ */
 /* Token                                                               */
@@ -137,11 +135,15 @@ function recuperacionUsuarioPorIdentificador(string $identificador): ?array
     return $stmt->fetch() ?: null;
 }
 
-/** Misma regla que api/login.php: sin esto no hay nada que recuperar. */
+/**
+ * Misma regla que api/login.php: sin esto no hay nada que recuperar.
+ *
+ * `usuarios.habilitado` es tinyint(1) NOT NULL con 1 / 0 y nada mas, asi que
+ * alcanza con el criterio unico de lib/habilitado.php.
+ */
 function recuperacionCuentaActiva(array $usuario): bool
 {
-    $habilitado = strtoupper(trim((string) ($usuario['habilitado'] ?? '')));
-    return in_array($habilitado, RECUPERACION_HABILITADOS, true);
+    return esHabilitado($usuario['habilitado'] ?? 0);
 }
 
 /**

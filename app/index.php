@@ -96,7 +96,7 @@ $entornoSesion = [
     'Usuario'                     => (string) ($usuario['usuario'] ?? ''),
     'Nombre (usuarioNombre)'      => (string) ($usuario['nombre'] ?? ''),
     'Correo'                      => (string) ($usuario['correo'] ?? ''),
-    'Habilitado'                  => ((string) ($usuario['habilitado'] ?? '') === '1') ? 'Si' : 'No',
+    'Habilitado'                  => esHabilitado($usuario['habilitado'] ?? 0) ? 'Si' : 'No',
     'Perfil (sesionPerfil)'       => (string) $contexto['perfil'],
     'Dominio (sesionDominio)'     => (string) $contexto['dominio'],
     'Nombre del dominio'          => $dominioNombre,

@@ -22,6 +22,10 @@ declare(strict_types=1);
  *   - No tiene cuenta: se crea `usuarios` + `perfiles` y se le entrega una
  *     contrasena generada.
  *
+ * EL PERFIL QUE SE OTORGA ES DE ADMINISTRADOR, no de Operador como en el legacy:
+ * la invitacion se emite desde el panel y enlaza al panel, y al panel solo entra
+ * un administrador. Ver perfilAsegurado() al pie.
+ *
  * A DIFERENCIA DEL LEGACY, el camino "ya tiene cuenta" TAMBIEN cierra la
  * invitacion (estado 3). El legacy da el acceso pero deja la fila en
  * pendiente para siempre, y esas pendientes eternas son las que ensucian el
@@ -31,6 +35,9 @@ declare(strict_types=1);
 require __DIR__ . '/_layout.php';
 require_once dirname(__DIR__) . '/api/legacy_crypto.php';
 require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
+// El rol con el que nace el perfil sale de la misma constante que decide quien
+// entra al panel: si esa lista cambia, la invitacion la sigue sola.
+require_once dirname(__DIR__) . '/lib/acceso.php';
 
 $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uuid   = (string) ($_POST['uid'] ?? $_GET['uid'] ?? '');
@@ -254,34 +261,59 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
 }
 
 /**
- * Perfil del usuario en el dominio, creandolo si no lo tenia.
- * Espeja cPerfil::registrar() del legacy: tipo 'O' (Operador) y habilitado.
- * `rol` y `panel` quedan en NULL y no en 0 — con las FK declaradas, el 0 del
- * sistema viejo ya no es un valor valido (ver db/schema.sql).
+ * Perfil de ADMINISTRADOR del usuario en el dominio, creandolo si no lo tenia.
+ *
+ * EL PERFIL ES DE ADMINISTRADOR PORQUE LA INVITACION ES AL PANEL. El legacy
+ * (cPerfil::registrar()) crea Operador porque invita a reactor-app, la app del
+ * usuario final; esta pantalla la abre un enlace de panel.reactor.com.ar, y al
+ * panel solo entra un administrador (lib/acceso.php). Con un perfil de Operador
+ * la persona completaria el formulario, recibiria sus credenciales y rebotaria
+ * en el primer ingreso — el alta del modulo Usuarios ES esta invitacion, asi
+ * que seria el unico camino de alta del panel y no serviria para nada.
+ *
+ * SE BUSCA UN PERFIL DE ADMINISTRADOR, NO "cualquier perfil del dominio". Si la
+ * persona ya tenia uno de Operador ahi (porque usa reactor-app), ese no habilita
+ * el panel: se le agrega uno nuevo en vez de reescribirle el que ya tiene. Una
+ * cuenta con varios perfiles en el mismo dominio es normal en estos datos y
+ * mutar el rol de una fila existente seria cambiarle el acceso a otro sistema
+ * desde aca.
+ *
+ * `panel` queda en NULL y no en 0 — con las FK declaradas, el 0 del sistema
+ * viejo ya no es un valor valido (ver db/schema.sql). `tipo` acompaña al rol
+ * ('A'): son dos columnas para lo mismo y el legacy lee `tipo`, asi que
+ * dejarlas en desacuerdo es como nacen los 47 perfiles habilitados que hoy
+ * tiene la base con las dos columnas en desacuerdo.
  */
 function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $dominioNombre): int
 {
     $busca = $pdo->prepare(
-        'SELECT id FROM perfiles WHERE usuario = :u AND dominio = :d ORDER BY id LIMIT 1'
+        'SELECT id FROM perfiles
+          WHERE usuario = :u AND dominio = :d
+            AND habilitado = :hab
+            AND rol IN (' . panelRolesAdminSql() . ')
+          ORDER BY id LIMIT 1'
     );
-    $busca->execute([':u' => $usuarioId, ':d' => $dominioId]);
+    $busca->execute([':u' => $usuarioId, ':d' => $dominioId, ':hab' => HABILITADO]);
     $id = (int) ($busca->fetchColumn() ?: 0);
     if ($id > 0) {
         return $id;
     }
 
     $alta = $pdo->prepare(
-        'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo, habilitado)
-         VALUES (:uuid, :nombre, :usuario, :dominio, :tipo, :habilitado)'
+        'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo, rol, habilitado)
+         VALUES (:uuid, :nombre, :usuario, :dominio, :tipo, :rol, :habilitado)'
     );
     $alta->execute([
         ':uuid'       => bin2hex(random_bytes(8)),
-        ':nombre'     => mb_substr('Operador en ' . $dominioNombre, 0, 255),
+        ':nombre'     => mb_substr('Administrador en ' . $dominioNombre, 0, 255),
         ':usuario'    => $usuarioId,
         ':dominio'    => $dominioId,
-        ':tipo'       => 'O',
-        // perfiles.habilitado es '1'/'0', no 'S'/'N' como usuarios.habilitado.
-        ':habilitado' => '1',
+        // `perfiles`.`tipo` es ENUM('A','O') NOT NULL: dos letras y nada mas.
+        ':tipo'       => PERFIL_TIPO_ADMINISTRADOR,
+        ':rol'        => panelRolAdminPorDefecto(),
+        // El perfil nace habilitado. La columna es tinyint(1) NOT NULL y su
+        // unico otro valor es 0 (lib/habilitado.php).
+        ':habilitado' => HABILITADO,
     ]);
 
     return (int) $pdo->lastInsertId();

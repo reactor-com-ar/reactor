@@ -3,12 +3,25 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/env.php';
 require_once __DIR__ . '/lib/auth_check.php';
+require_once __DIR__ . '/lib/sesion.php';
+require_once __DIR__ . '/lib/acceso.php';
 
-// Si ya esta logueado, ir directo a la SPA.
-if (authUser() !== null) {
+// Si ya esta logueado Y su sesion habilita el panel, ir directo a la SPA.
+//
+// La segunda condicion es la que evita el rebote: sin ella, una sesion sin
+// perfil de Administrador entra aca, la mandamos a index.php, index.php la
+// devuelve al login y asi para siempre. Con ella se queda en el formulario y
+// puede ingresar con otra cuenta.
+if (authUser() !== null && sessionEsAdministrador()) {
     header('Location: index');
     exit;
 }
+
+// Aviso del rechazo por rol. Lo pone requireAdministrador() al redirigir desde
+// index.php, y app.js al recibir un 403 con `motivo: 'rol'` (perfil revocado
+// con la sesion abierta). Es un aviso, no un error del formulario: la
+// contrasena que la persona esta por tipear no tiene nada que ver.
+$avisoRol = (($_GET['motivo'] ?? '') === 'rol');
 
 $appName     = 'Reactor Panel';
 $versionFile = __DIR__ . '/version.txt';
@@ -50,6 +63,16 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
         </div>
         <h1 class="login-title" id="login-title"><?= htmlspecialchars($appName) ?></h1>
         <p class="login-subtitle">Ingres&aacute; con tu usuario para continuar.</p>
+
+        <?php if ($avisoRol): ?>
+            <!-- `.inv-note` es la caja de aviso de la tarjeta roja (CSS §19):
+                 nace en las paginas publicas pero esta calibrada para vivir
+                 dentro de .login-card, que es esta misma tarjeta. -->
+            <div class="inv-note inv-note-bad">
+                <?= htmlspecialchars(PANEL_MENSAJE_SIN_ROL) ?>
+                Ingres&aacute; con una cuenta que tenga ese perfil.
+            </div>
+        <?php endif; ?>
 
         <form id="login-form" class="login-form" autocomplete="on" novalidate>
             <div class="form-group">

@@ -56,7 +56,15 @@ const REFERENCIAS = [
     'adopcion'    => 'adopciones',
 ];
 
-/** Columnas smallint que en la practica son booleanas. */
+/**
+ * Columnas booleanas de `dispositivos`.
+ *
+ * `habilitado` es `tinyint(1) NOT NULL` con dos valores (1/0) desde
+ * 20260905_2200; las otras tres siguen siendo smallint NULL del esquema
+ * historico. Por eso el mapeo del grupo es el criterio mas restrictivo -- "1 es
+ * si, cualquier otra cosa es no" --, que para `habilitado` coincide con
+ * lib/habilitado.php y para las demas normaliza el NULL.
+ */
 const BANDERAS = ['habilitado', 'adoptado', 'enlace', 'monitoreo'];
 
 /** Columnas int no negativas (contadores y limites). */
@@ -94,7 +102,7 @@ function handleList(): void
     //   uid          -> uuid
     //   tipo         -> modelos.nombre          (lo mas parecido a un "tipo")
     //   ubicacion    -> coordenadas
-    //   estado       -> derivado de habilitado/enlace (smallint):
+    //   estado       -> derivado de habilitado (tinyint 1/0) y enlace:
     //                      habilitado <> 1            -> 'error'
     //                      habilitado = 1 AND enlace=1 -> 'online'
     //                      resto                      -> 'offline'

@@ -38,7 +38,9 @@ try {
  *
  * `vigente` es varchar(1) en el esquema histórico y en los datos reales toma
  * '1' (en curso) / '0' (liberada): se normaliza al booleano `activa` con el
- * mismo criterio que usuarios.habilitado (S / 1 / Y).
+ * mismo criterio que `habilitado` (lib/habilitado.php). Ojo: `vigente` NO se
+ * migró a tinyint — sigue siendo varchar(1) y con el centinela `liberado`
+ * '1500-01-01', así que acá el criterio se aplica a mano.
  */
 function handleList(): void
 {

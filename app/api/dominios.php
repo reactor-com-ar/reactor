@@ -81,7 +81,7 @@ try {
         'SELECT p.id AS perfil, p.dominio, d.nombre
          FROM perfiles p
          LEFT JOIN dominios d ON d.id = p.dominio
-         WHERE p.usuario = :u AND p.habilitado = \'1\'
+         WHERE p.usuario = :u AND p.habilitado = 1
          ORDER BY p.nombre, p.id'
     );
     $stmt->execute([':u' => (int) $sesion['id']]);

@@ -57,7 +57,6 @@ function handleList(): void
     $stmt->execute($params);
 
     $perfiles = array_map(static function (array $r): array {
-        $hab = strtoupper((string) ($r['usuario_habilitado'] ?? ''));
         $rol = (string) ($r['rol'] ?? '');
         $r['usuario_id']     = (int) $r['usuario_id'];
         $r['dominio_id']     = (int) $r['dominio_id'];
@@ -66,7 +65,7 @@ function handleList(): void
         $r['usuario_nombre'] = (string) ($r['usuario_nombre'] ?? '');
         $r['usuario_email']  = (string) ($r['usuario_email']  ?? '');
         $r['dominio_nombre'] = (string) ($r['dominio_nombre'] ?? '');
-        $r['usuario_activo'] = in_array($hab, ['S', '1', 'Y'], true);
+        $r['usuario_activo'] = esHabilitado($r['usuario_habilitado'] ?? 0);
         unset($r['usuario_habilitado']);
         return $r;
     }, $stmt->fetchAll());

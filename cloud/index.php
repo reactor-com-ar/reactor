@@ -102,6 +102,12 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     <a href="#/dominios" data-route="dominios" class="nav-item nav-sub-item">
                         <i class="fa-solid fa-flag nav-icon"></i> Dominios
                     </a>
+                    <a href="#/users" data-route="users" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-users nav-icon"></i> Usuarios
+                    </a>
+                    <a href="#/profiles" data-route="profiles" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-id-card nav-icon"></i> Perfiles
+                    </a>
                 </div>
             </div>
 
@@ -142,22 +148,6 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     </a>
                     <a href="#/adopciones" data-route="adopciones" class="nav-item nav-sub-item">
                         <i class="fa-solid fa-handshake nav-icon"></i> Adopciones
-                    </a>
-                </div>
-            </div>
-
-            <div class="nav-group-wrap" data-group="seguridad">
-                <button type="button" class="nav-item nav-group-toggle">
-                    <i class="fa-solid fa-shield-halved nav-icon"></i>
-                    <span class="nav-group-label">Seguridad</span>
-                    <span class="nav-group-arrow">+</span>
-                </button>
-                <div class="nav-sub">
-                    <a href="#/users" data-route="users" class="nav-item nav-sub-item">
-                        <i class="fa-solid fa-users nav-icon"></i> Usuarios
-                    </a>
-                    <a href="#/profiles" data-route="profiles" class="nav-item nav-sub-item">
-                        <i class="fa-solid fa-id-card nav-icon"></i> Perfiles
                     </a>
                 </div>
             </div>

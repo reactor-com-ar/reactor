@@ -14,9 +14,19 @@
     const sidebarOverlay   = document.getElementById('sidebar-overlay');
     const toastEl          = document.getElementById('toast');
 
-    let pendingDispositivosDominioFilter = null;
+    // Filtro por dominio que un módulo deja preparado para otro antes de
+    // navegar ("Listar → Chips" desde Consultar dominio). Se consume una sola
+    // vez y sólo en la ruta para la que se pidió: si el usuario se desvía a
+    // otra pantalla, el pedido se descarta en vez de filtrar el listado
+    // equivocado más tarde.
+    let pendingDominioFilter = null;   // { route: 'chips', id: 12 }
     let pendingSignalsDeviceFilter = null;
-    let pendingPerfilesUsuarioFilter = null;
+
+    // Equivalente de pendingDominioFilter para el usuario. Lleva además el
+    // `campo` porque el mismo usuario entra por columnas distintas según el
+    // módulo destino: `usuario` en Perfiles, `adoptador` o `liberador` en
+    // Adopciones.
+    let pendingUsuarioFilter = null;   // { route: 'adopciones', campo: 'adoptador', id: 7 }
 
     // Cleanup de la vista activa (timers, listeners globales). navigate() lo invoca
     // antes de renderizar la nueva vista; cada render que necesite cleanup lo asigna
@@ -34,8 +44,8 @@
         registros: { title: 'Historial de registros', render: renderRegistros, group: 'registros'  },
         alerts:    { title: 'Alertas',              render: renderStub,      group: 'registros'  },
         adopciones: { title: 'Adopciones',          render: renderAdopciones, group: 'registros' },
-        users:     { title: 'Usuarios',      render: renderUsers,     group: 'seguridad'  },
-        profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'seguridad'  },
+        users:     { title: 'Usuarios',      render: renderUsers,     group: 'propiedad'  },
+        profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'propiedad'  },
         tools:     { title: 'Herramientas',  render: renderTools,     group: 'administracion' },
     };
 
@@ -68,6 +78,37 @@
 
     window.addEventListener('hashchange', navigate);
     document.addEventListener('DOMContentLoaded', navigate);
+
+    // Deja pedido el filtro por dominio y salta al listado destino. Si la ruta
+    // ya es la actual, `hashchange` no dispara: se navega igual y se fuerza el
+    // render para que el filtro se aplique.
+    function pedirFiltroDominio(route, id) {
+        pendingDominioFilter = { route, id };
+        if (currentRoute() === route) navigate();
+        else window.location.hash = '#/' + route;
+    }
+
+    // Devuelve el id de dominio pedido para esta ruta (o '' si no hay). Consume
+    // el pedido siempre, así no sobrevive a una navegación que lo ignoró.
+    function tomarFiltroDominio(route) {
+        const pedido = pendingDominioFilter;
+        pendingDominioFilter = null;
+        return pedido && pedido.route === route ? String(pedido.id) : '';
+    }
+
+    // Mismo par que el de dominio, para el usuario. `campo` es la clave del
+    // state del módulo destino que hay que llenar.
+    function pedirFiltroUsuario(route, campo, id) {
+        pendingUsuarioFilter = { route, campo, id };
+        if (currentRoute() === route) navigate();
+        else window.location.hash = '#/' + route;
+    }
+
+    function tomarFiltroUsuario(route) {
+        const pedido = pendingUsuarioFilter;
+        pendingUsuarioFilter = null;
+        return pedido && pedido.route === route ? pedido : null;
+    }
 
     /* ---------- Sidebar groups ---------- */
     navGroupToggles.forEach(btn => {
@@ -264,6 +305,27 @@
 
     function closeRowMenu() {
         document.querySelectorAll('.row-menu').forEach(m => m.remove());
+    }
+
+    // Botón desplegable de la barra de acciones del modal (DESIGN.md §21-bis).
+    // Dibuja sólo el trigger: los items los abre openRowMenu() al click, así el
+    // menú flota sobre el modal en vez de quedar recortado por su `overflow-y`.
+    function menubarMenu(key, label, icon) {
+        return `<button class="btn btn-sm btn-primary" data-menu="${escape(key)}">
+            <i class="fa-solid ${icon}"></i> ${escape(label)}
+            <i class="fa-solid fa-caret-down menubar-caret"></i>
+        </button>`;
+    }
+
+    // Cablea un trigger de menubarMenu(). `itemsFn` arma los items en el momento
+    // del click (mismo formato que openRowMenu: { act, label, icon, danger?, onSelect }).
+    function wireMenubarMenu(scope, key, itemsFn) {
+        const btn = scope.querySelector(`[data-menu="${key}"]`);
+        if (!btn) return;
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            openRowMenu(itemsFn(), e.currentTarget);
+        });
     }
 
     document.addEventListener('click', e => {
@@ -834,10 +896,8 @@
             const dominios     = domData.dominios;
 
             const state = dispositivosDefaults();
-            if (pendingDispositivosDominioFilter != null) {
-                state.dominio = String(pendingDispositivosDominioFilter);
-                pendingDispositivosDominioFilter = null;
-            }
+            const domPedido = tomarFiltroDominio('dispositivos');
+            if (domPedido) state.dominio = domPedido;
 
             root.innerHTML = `
                 ${moduleHeader('Dispositivos', 'Inventario de dispositivos conectados a la plataforma, su dominio asignado y su última actividad.')}
@@ -1532,6 +1592,8 @@
             const chips    = data.chips;
 
             const state = chipsDefaults();
+            const domPedido = tomarFiltroDominio('chips');
+            if (domPedido) state.dominio = domPedido;
 
             root.innerHTML = `
                 ${moduleHeader('Chips', 'Líneas SIM disponibles para los dispositivos: estado, dominio asignado y datos del operador.')}
@@ -2395,9 +2457,11 @@
 
     /* ---------- Views: Dominios ---------- */
     const ORDEN_DOMINIOS = [
-        { value: 'id',         label: 'Código'      },
-        { value: 'nombre',     label: 'Nombre'      },
-        { value: 'created_at', label: 'Creado'      },
+        { value: 'id',                 label: 'Código'       },
+        { value: 'nombre',             label: 'Nombre'       },
+        { value: 'usuarios_count',     label: 'Usuarios'     },
+        { value: 'dispositivos_count', label: 'Dispositivos' },
+        { value: 'chips_count',        label: 'Chips'        },
     ];
 
     function dominiosDefaults() {
@@ -2417,7 +2481,7 @@
                 ${moduleHeader('Dominios', 'Espacios lógicos que agrupan dispositivos, chips y perfiles de acceso.')}
                 ${abmToolbar({
                     idPrefix:         'dom',
-                    quickPlaceholder: 'Buscar nombre o descripción…',
+                    quickPlaceholder: 'Buscar nombre, número o identificador…',
                     newLabel:         'Nuevo dominio',
                 })}
                 <div class="table-card" id="dom-table"></div>
@@ -2438,9 +2502,9 @@
             <tr class="row-clickable" data-id="${d.id}">
                 <td><span class="td-id">#${d.id}</span></td>
                 <td class="td-nombre">${escape(d.nombre)}</td>
-                <td>${escape(d.descripcion ?? '—')}</td>
+                <td><span class="badge badge-info">${d.usuarios_count}</span></td>
                 <td><span class="badge badge-info">${d.dispositivos_count}</span></td>
-                <td>${formatDate(d.created_at)}</td>
+                <td><span class="badge badge-info">${d.chips_count}</span></td>
                 ${actionCells()}
             </tr>
         `).join('');
@@ -2451,9 +2515,9 @@
                     <tr>
                         <th>Código</th>
                         <th>Nombre</th>
-                        <th>Descripción</th>
+                        <th>Usuarios</th>
                         <th>Dispositivos</th>
-                        <th>Creado</th>
+                        <th>Chips</th>
                         ${actionHeaderCells()}
                     </tr>
                 </thead>
@@ -2475,7 +2539,9 @@
 
             let filtered = allDominios.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
-                if (q && !(d.nombre + ' ' + (d.descripcion || '')).toLowerCase().includes(q)) return false;
+                // Se busca sobre lo que la ficha muestra: nombre, número e
+                // identificador. `descripcion` no existe en la tabla.
+                if (q && !(d.nombre + ' ' + (d.numero || '') + ' ' + (d.uuid || '')).toLowerCase().includes(q)) return false;
                 return true;
             });
 
@@ -2497,7 +2563,7 @@
                 delete: true, onDelete: () => confirmDeleteDomain(dom),
                 extra: [
                     { act: 'go-devices', label: 'Ver dispositivos asociados', icon: 'fa-satellite-dish',
-                      onSelect: () => { pendingDispositivosDominioFilter = dom.id; window.location.hash = '#/dispositivos'; } },
+                      onSelect: () => pedirFiltroDominio('dispositivos', dom.id) },
                     { act: 'copy-id',    label: 'Copiar ID',     icon: 'fa-hashtag',     onSelect: () => copyToClipboard(String(dom.id)) },
                     { act: 'copy-name',  label: 'Copiar nombre', icon: 'fa-regular fa-copy', onSelect: () => copyToClipboard(dom.nombre) },
                 ],
@@ -2545,7 +2611,7 @@
                     <input type="number" id="dom-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
                 </div>
                 <div class="form-group">
-                    <label for="dom-fm-texto">Buscar (nombre / descripción)</label>
+                    <label for="dom-fm-texto">Buscar (nombre / número / identificador)</label>
                     <input type="search" id="dom-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
                 </div>
                 <div class="form-group">
@@ -2594,9 +2660,17 @@
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true">
-                <div class="modal-header">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title">${isEdit ? 'Editar dominio' : 'Nuevo dominio'}</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
@@ -2608,10 +2682,6 @@
                         <label for="dom-desc">Descripción</label>
                         <textarea id="dom-desc" maxlength="255" placeholder="Opcional">${escape(dom?.descripcion ?? '')}</textarea>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-ghost" data-act="close">Cancelar</button>
-                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear dominio'}</button>
                 </div>
             </div>
         `;
@@ -2666,53 +2736,62 @@
         });
     }
 
+    // Badge de `dominios`.`situacion`: el codigo corto (1/2/3) lo traduce el
+    // backend contra `combos`; acá sólo se elige el tono.
+    function badgeSituacion(codigo, texto) {
+        const cls = { '1': 'badge-success', '2': 'badge-warn', '3': 'badge-danger' }[String(codigo)] || 'badge-info';
+        return `<span class="badge ${cls}">${escape(texto || codigo || '—')}</span>`;
+    }
+
+    // Valor de una FK del sistema histórico: nombre + id, o "—" si no está
+    // asignada (el backend ya normalizó a null el 0 centinela).
+    function refValue(id, nombre) {
+        if (id == null) return `<span class="muted">Sin asignar</span>`;
+        return nombre ? `${escape(nombre)} <code>#${id}</code>` : `<code>#${id}</code>`;
+    }
+
     function openDomainViewModal(dom) {
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
-        const descValue = dom.descripcion
-            ? escape(dom.descripcion)
-            : `<span class="muted">Sin descripción</span>`;
+        const textoOno = (v, texto, si, no) =>
+            `<span class="badge ${String(v) === '1' ? 'badge-success' : 'badge-warn'}">${escape(texto || (String(v) === '1' ? si : no))}</span>`;
         backdrop.innerHTML = `
             <div class="modal modal-wide" role="dialog" aria-modal="true">
-                <div class="modal-header">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title">Consultar dominio</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
-                <div class="modal-body">
-                    ${viewGrid([
-                        viewCardHalf('Código',                 `<code>#${dom.id}</code>`),
-                        viewCardHalf('Nombre',                 escape(dom.nombre)),
-                        viewCardHalf('Dispositivos asociados', `<span class="badge badge-info">${dom.dispositivos_count}</span>`),
-                        viewCardHalf('Creado',                 escape(formatDate(dom.created_at))),
-                        viewCardHalf('Última actualización',   escape(formatDate(dom.updated_at))),
-                        viewCardFull('Descripción',            descValue),
-                    ])}
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del dominio">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('listar',   'Listar',   'fa-list')}
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
                 </div>
-                <div class="modal-footer">
-                    <div class="action-menu action-menu-up" id="dom-view-menu" style="margin-right:auto">
-                        <button class="btn btn-secondary" data-act="menu-toggle">
-                            <i class="fa-solid fa-ellipsis"></i> Acciones
-                        </button>
-                        <div class="action-menu-dropdown" role="menu">
-                            <button class="action-menu-item" data-act="edit" role="menuitem">
-                                <i class="fa-solid fa-pencil"></i> Editar dominio
-                            </button>
-                            <button class="action-menu-item" data-act="go-devices" role="menuitem">
-                                <i class="fa-solid fa-satellite-dish"></i> Ver dispositivos asociados
-                            </button>
-                            <button class="action-menu-item" data-act="copy-id" role="menuitem">
-                                <i class="fa-solid fa-hashtag"></i> Copiar ID
-                            </button>
-                            <button class="action-menu-item" data-act="copy-name" role="menuitem">
-                                <i class="fa-regular fa-copy"></i> Copiar nombre
-                            </button>
-                            <div class="action-menu-divider"></div>
-                            <button class="action-menu-item danger" data-act="delete" role="menuitem">
-                                <i class="fa-solid fa-trash"></i> Eliminar dominio
-                            </button>
-                        </div>
-                    </div>
-                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                <div class="modal-body">
+                    ${/* Los 15 campos de la fila. La grilla es flex con
+                        flex-grow, así que una tarjeta impar suelta se estira a
+                        todo el ancho y se lee como un destaque deliberado: por
+                        eso Identificador va `full` en la ranura 3 (impar) y
+                        deja 14 tarjetas `half` en siete renglones parejos.
+                        Agregar o quitar un campo obliga a rehacer esa cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código',            `<code>#${dom.id}</code>`),
+                        viewCardHalf('Nombre',            escape(dom.nombre)),
+                        viewCardFull('Identificador',     dom.uuid ? `<code>${escape(dom.uuid)}</code>` : `<span class="muted">Sin identificador</span>`),
+                        viewCardHalf('Número',            dom.numero ? `<code>${escape(dom.numero)}</code>` : `<span class="muted">Sin número</span>`),
+                        viewCardHalf('Agente',            refValue(dom.agente,   dom.agente_nombre)),
+                        viewCardHalf('Cliente',           refValue(dom.cliente,  dom.cliente_nombre)),
+                        viewCardHalf('Contrato',          refValue(dom.contrato, '')),
+                        viewCardHalf('Situación',         badgeSituacion(dom.situacion, dom.situacion_texto)),
+                        viewCardHalf('Autoadministrado',  textoOno(dom.autoadministrado, dom.autoadministrado_texto, 'Sí', 'No')),
+                        viewCardHalf('Habilitado',        textoOno(dom.habilitado, '', 'Habilitado', 'Deshabilitado')),
+                        viewCardHalf('Usuarios',          `<span class="badge badge-info">${dom.usuarios_count}</span>`),
+                        viewCardHalf('Dispositivos',      `<span class="badge badge-info">${dom.dispositivos_count}</span>`),
+                        viewCardHalf('Chips',             `<span class="badge badge-info">${dom.chips_count}</span>`),
+                        viewCardHalf('Usos',              `<span class="badge badge-info">${dom.usos_count}</span>`),
+                        viewCardHalf('Paneles',           `<span class="badge badge-info">${dom.paneles_count}</span>`),
+                    ])}
                 </div>
             </div>
         `;
@@ -2727,38 +2806,38 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        const menu       = backdrop.querySelector('#dom-view-menu');
-        const menuToggle = menu.querySelector('[data-act="menu-toggle"]');
+        const menubar = backdrop.querySelector('.modal-menubar');
 
-        menuToggle.addEventListener('click', e => {
-            e.stopPropagation();
-            menu.classList.toggle('open');
-        });
-        backdrop.addEventListener('click', e => {
-            if (!menu.contains(e.target)) menu.classList.remove('open');
-        });
+        // "Listar": salta al módulo destino ya filtrado por este dominio. Los
+        // seis listados son los que tienen filtro por dominio propio; el resto
+        // no entra al menú porque no habría con qué acotarlos.
+        const irAListado = route => {
+            close();
+            pedirFiltroDominio(route, dom.id);
+        };
 
-        menu.querySelectorAll('.action-menu-item').forEach(item => {
-            item.addEventListener('click', () => {
-                menu.classList.remove('open');
-                const act = item.dataset.act;
-                if (act === 'edit') {
-                    close();
-                    openDomainModal(dom);
-                } else if (act === 'go-devices') {
-                    close();
-                    pendingDispositivosDominioFilter = dom.id;
-                    window.location.hash = '#/dispositivos';
-                } else if (act === 'copy-id') {
-                    copyToClipboard(String(dom.id));
-                } else if (act === 'copy-name') {
-                    copyToClipboard(dom.nombre);
-                } else if (act === 'delete') {
-                    close();
-                    confirmDeleteDomain(dom);
-                }
-            });
-        });
+        wireMenubarMenu(menubar, 'listar', () => [
+            { act: 'dispositivos', label: 'Dispositivos', icon: 'fa-microchip',      onSelect: () => irAListado('dispositivos') },
+            { act: 'chips',        label: 'Chips',        icon: 'fa-sim-card',       onSelect: () => irAListado('chips') },
+            { act: 'perfiles',     label: 'Perfiles',     icon: 'fa-id-card',        onSelect: () => irAListado('profiles') },
+            { divider: true },
+            { act: 'signals',      label: 'Señales',      icon: 'fa-signal-stream',  onSelect: () => irAListado('signals') },
+            { act: 'registros',    label: 'Registros',    icon: 'fa-scroll',         onSelect: () => irAListado('registros') },
+            { act: 'adopciones',   label: 'Adopciones',   icon: 'fa-handshake',      onSelect: () => irAListado('adopciones') },
+        ]);
+
+        wireMenubarMenu(menubar, 'acciones', () => [
+            { act: 'edit', label: 'Editar dominio', icon: 'fa-pencil',
+              onSelect: () => { close(); openDomainModal(dom); } },
+            { divider: true },
+            { act: 'copy-id',   label: 'Copiar ID',     icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(dom.id)) },
+            { act: 'copy-name', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+              onSelect: () => copyToClipboard(dom.nombre) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar dominio', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); confirmDeleteDomain(dom); } },
+        ]);
     }
 
     function confirmDeleteDomain(dom) {
@@ -2954,7 +3033,7 @@
                 delete: true, onDelete: () => confirmDeleteUser(u),
                 extraAfterView: [
                     { act: 'go-profiles', label: 'Listar perfiles', icon: 'fa-id-badge',
-                      onSelect: () => { pendingPerfilesUsuarioFilter = u.id; window.location.hash = '#/profiles'; } },
+                      onSelect: () => pedirFiltroUsuario('profiles', 'usuario', u.id) },
                 ],
             });
         }
@@ -3074,9 +3153,16 @@
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
             <div class="modal modal-wide" role="dialog" aria-modal="true">
-                <div class="modal-header">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title">Consultar usuario</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del usuario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('listar',   'Listar',   'fa-list')}
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
                 </div>
                 <div class="modal-body">
                     <div class="modal-tabs" role="tablist">
@@ -3102,9 +3188,6 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
-                </div>
             </div>
         `;
         document.body.appendChild(backdrop);
@@ -3115,6 +3198,39 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const menubar = backdrop.querySelector('.modal-menubar');
+
+        // "Listar": los tres listados que tienen filtro propio por usuario.
+        // Perfiles entra por `usuario`; Adopciones, por `adoptador` o por
+        // `liberador` — son dos preguntas distintas sobre la misma persona.
+        const irAListado = (route, campo) => {
+            close();
+            pedirFiltroUsuario(route, campo, usr.id);
+        };
+
+        wireMenubarMenu(menubar, 'listar', () => [
+            { act: 'perfiles',   label: 'Perfiles',              icon: 'fa-id-card',
+              onSelect: () => irAListado('profiles', 'usuario') },
+            { divider: true },
+            { act: 'adoptadas',  label: 'Adopciones que hizo',   icon: 'fa-handshake',
+              onSelect: () => irAListado('adopciones', 'adoptador') },
+            { act: 'liberadas',  label: 'Adopciones que liberó', icon: 'fa-handshake-slash',
+              onSelect: () => irAListado('adopciones', 'liberador') },
+        ]);
+
+        wireMenubarMenu(menubar, 'acciones', () => [
+            { act: 'edit', label: 'Editar usuario', icon: 'fa-pencil',
+              onSelect: () => { close(); openUserModal(usr); } },
+            { divider: true },
+            { act: 'copy-email', label: 'Copiar email', icon: 'fa-regular fa-copy',
+              onSelect: () => copyToClipboard(usr.email) },
+            { act: 'copy-id',    label: 'Copiar ID',    icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(usr.id)) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar usuario', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); confirmDeleteUser(usr); } },
+        ]);
 
         const tabs    = backdrop.querySelectorAll('.modal-tab');
         const panels  = backdrop.querySelectorAll('.modal-tabpanel');
@@ -3187,9 +3303,17 @@
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true">
-                <div class="modal-header">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title">${isEdit ? 'Editar usuario' : 'Nuevo usuario'}</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
                 </div>
                 <div class="modal-body">
                     <div class="form-row">
@@ -3240,10 +3364,6 @@
                         </div>
                         <div class="field-error" id="usr-pass-err" style="display:none"></div>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
-                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear usuario'}</button>
                 </div>
             </div>
         `;
@@ -3519,12 +3639,11 @@
             const dominios  = domData.dominios;
             const state     = perfilesDefaults();
 
-            // "Listar perfiles" desde el menú contextual de Usuarios deja el id
-            // del usuario acá antes de navegar a #/perfiles.
-            if (pendingPerfilesUsuarioFilter != null) {
-                state.usuario = String(pendingPerfilesUsuarioFilter);
-                pendingPerfilesUsuarioFilter = null;
-            }
+            // "Listar → Perfiles" desde Usuarios deja el id acá antes de navegar.
+            const usrPedido = tomarFiltroUsuario('profiles');
+            if (usrPedido) state[usrPedido.campo] = String(usrPedido.id);
+            const domPedido = tomarFiltroDominio('profiles');
+            if (domPedido) state.dominio = domPedido;
 
             root.innerHTML = `
                 ${moduleHeader('Perfiles', 'Relación entre usuarios y dominios: qué rol tiene cada usuario sobre cada dominio.')}
@@ -3962,6 +4081,8 @@
 
             const state = signalsDefaults();
             if (initialDevice) state.dispositivo = String(initialDevice);
+            const domPedido = tomarFiltroDominio('signals');
+            if (domPedido) state.dominio = domPedido;
 
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
@@ -4365,7 +4486,7 @@
                 extra: [
                     ...(s.dispositivo
                         ? [{ act: 'go-device', label: 'Ver dispositivo', icon: 'fa-satellite-dish',
-                            onSelect: () => { pendingDispositivosDominioFilter = null; window.location.hash = '#/dispositivos'; } }]
+                            onSelect: () => { window.location.hash = '#/dispositivos'; } }]
                         : []),
                     ...(s.topic
                         ? [{ act: 'copy-topic',   label: 'Copiar topic',   icon: 'fa-regular fa-copy', onSelect: () => copyToClipboard(s.topic) }]
@@ -4646,6 +4767,8 @@
     async function renderRegistros(root) {
         try {
             const state = registrosDefaults();
+            const domPedido = tomarFiltroDominio('registros');
+            if (domPedido) state.dominio = domPedido;
 
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
@@ -5087,9 +5210,19 @@
     async function renderAdopciones(root) {
         try {
             const state = adopcionesDefaults();
+            const domPedido = tomarFiltroDominio('adopciones');
+            if (domPedido) state.dominio = domPedido;
+            // "Listar → Adopciones" desde Consultar usuario, que puede pedir
+            // por `adoptador` o por `liberador`.
+            const usrPedido = tomarFiltroUsuario('adopciones');
+            if (usrPedido) state[usrPedido.campo] = String(usrPedido.id);
 
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
+            // El backend sabe filtrar por dominio: si venimos filtrados desde
+            // Consultar dominio, la ventana se pide ya acotada en vez de
+            // recortar client-side las últimas 100 adopciones de todos.
+            if (state.dominio) qs.set('dominio', state.dominio);
 
             const [data, devData, domData, userData] = await Promise.all([
                 api('adopciones?' + qs.toString()),

@@ -286,6 +286,8 @@ El `.user-dropdown`, en cambio, se despliega *bajo* el topbar sobre el área gri
 
 **Regla:** una sola acción primaria por pantalla o modal. El resto son `secondary` o `ghost`. `danger` solo para destruir / eliminar.
 
+**Única excepción:** la barra de acciones del modal (§21-bis), donde todos los botones menos `Cerrar` van en `btn-primary` — ahí el rojo separa la salida del resto, no marca jerarquía.
+
 ## 7. Inputs, selects, textareas
 
 ```css
@@ -913,6 +915,21 @@ valor de `vh` que los empareje. Mismo criterio en `panel/` y en `app/`.
 **Variantes:**
 - `.modal-wide`: aumenta el `max-width` a 760px. Usar **solo** cuando el contenido sea un editor monoespaciado (JSON, logs, payloads) que necesita ancho real para no envolver — ver §23. Los formularios normales se quedan en el ancho base de 520px.
 - `.modal-subtitle`: chip secundario al lado del título (mismo bloque `.modal-title`) para identificar el recurso editado, por ejemplo `Configuración JSON · Nombre · <code>UID</code>`. No reemplaza al título, lo complementa.
+- `.modal-header-primary`: pinta la barra de título en `var(--primary)`, el mismo rojo del chrome (sidebar + topbar). Va **junto a** `.modal-header`, no en su lugar.
+
+```css
+.modal-header-primary { background: var(--primary); border-bottom: none; color: #fff;
+                        border-radius: 14px 14px 0 0; padding: 10px 24px; }
+.modal-header-primary .modal-title       { color: #fff; }
+.modal-header-primary .modal-subtitle    { color: rgba(255,255,255,.75); }
+.modal-header-primary .btn-icon-sm       { color: #fff; }
+.modal-header-primary .btn-icon-sm:hover { background: rgba(255,255,255,.18); color: #fff; }
+```
+
+  - **Sobre el rojo los hijos usan `#fff` y opacidades de blanco**, nunca `--text` / `--muted` / `--border`: esos tokens están calibrados contra el gris del modal y sobre el rojo se ensucian. Misma regla que el chrome (§4 y §5).
+  - **El `border-bottom` se saca y el radio superior se repite en el header**: con el fondo pintado, la línea divisoria sobra y la esquina redondeada ahora la dibuja el header, no el `.modal`.
+  - **Es más baja que el header normal**: `padding: 10px 24px` contra los `20px 24px 16px` del base, para que junto a la barra de acciones de §21-bis se lean como una sola cabecera en vez de dos bloques apilados. Ojo: **no comparte el valor con esa barra** — la de acciones va en `14px` porque lleva botones; acá es texto y con `10px` alcanza.
+  - **Va siempre junto a la barra de acciones de §21-bis**, nunca solo: el bloque rojo (título) y la barra gris (acciones) forman una sola cabecera, y el rojo sin la barra debajo queda como un adorno suelto. Lo llevan los modales de un mismo módulo **de a pares** —Consultar y Alta/Edición— para que consultar y editar no se vean como dos pantallas de sistemas distintos. Un `confirmDialog` **no** lo lleva: es una alerta, no una ficha, y **tampoco lo lleva el modal de borrado con desglose de impacto** (§15.1) — es la misma alerta con más letra chica, y su botón rojo se queda abajo a propósito, lejos de la salida. Uso actual: Dominios (Consultar + Alta / Edición) y Usuarios (Consultar + Alta / Edición).
 
 ## 15. Confirm dialog (alerta de confirmación)
 
@@ -1108,6 +1125,107 @@ Patrón para agrupar acciones secundarias en modales de consulta ("ver detalle")
 - Cerrar al click fuera del menú y al hacer click en cualquier `.action-menu-item`.
 - Acciones destructivas con la clase `danger`, separadas del resto por `.action-menu-divider`.
 - Un solo dropdown abierto a la vez.
+- **Alternativa sin desplegar:** cuando las acciones del modal son pocas y todas caben a la vista, usar la barra de acciones de §21-bis en lugar de este dropdown. Los dos patrones no conviven en el mismo modal.
+
+## 21-bis. Barra de acciones del modal (menubar)
+
+Variante de §21 para modales de consulta: en vez de un único dropdown
+"Acciones" escondido en el footer, el modal lleva una **barra horizontal de
+botones pegada debajo del header**. El modal entonces **no lleva footer** —
+`Cerrar` es el primer botón de la barra, a la izquierda, y el `×` del header
+sigue estando.
+
+La barra va **debajo de una barra de título en primario** (`.modal-header-primary`, §14): el bloque rojo y la barra gris se leen como una sola cabecera de ficha.
+
+La barra mezcla **dos tipos de botón**, y esa mezcla es el punto del patrón:
+
+| tipo | para qué | forma |
+|---|---|---|
+| **directo** | una sola acción, se ejecuta en el click | `btn btn-sm` sin caret |
+| **desplegable** | un grupo de acciones de la misma familia | `btn btn-sm btn-primary` + `<i class="fa-caret-down menubar-caret">` |
+
+```html
+<div class="modal modal-wide">
+  <div class="modal-header modal-header-primary">
+    <div class="modal-title">Consultar dominio</div>
+    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+  </div>
+  <div class="modal-menubar" role="toolbar" aria-label="Acciones del dominio">
+    <button class="btn btn-sm btn-ghost" data-act="close">
+      <i class="fa-solid fa-xmark"></i> Cerrar
+    </button>
+    <button class="btn btn-sm btn-primary" data-menu="listar">
+      <i class="fa-solid fa-list"></i> Listar
+      <i class="fa-solid fa-caret-down menubar-caret"></i>
+    </button>
+    <button class="btn btn-sm btn-primary" data-menu="acciones">
+      <i class="fa-solid fa-bolt"></i> Acciones
+      <i class="fa-solid fa-caret-down menubar-caret"></i>
+    </button>
+  </div>
+  <div class="modal-body">…</div>
+</div>
+```
+
+```css
+.modal-menubar     { padding: 14px 24px; border-bottom: 1px solid var(--border);
+                     background: color-mix(in srgb, var(--surface) 40%, var(--bg));
+                     display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.modal-menubar .btn { white-space: nowrap; }
+.modal-menubar .btn-ghost       { background: var(--surface); color: var(--text); }
+.modal-menubar .btn-ghost:hover { background: var(--row-hover); color: var(--text); }
+.modal-menubar-end  { margin-left: auto; }
+.menubar-caret      { font-size: .7em; opacity: .65; margin-left: 2px; }
+```
+
+**Los desplegables no usan el dropdown absoluto de §21**: lo abre
+`openRowMenu(items, botón)`, el mismo menú flotante del listado. Es
+`position: fixed` con clampeo a viewport, así que **no lo recorta el
+`overflow-y: auto` del modal** — un `.action-menu-dropdown` absoluto sí queda
+cortado cuando el menú es más largo que lo que resta de modal. De paso hereda
+gratis el cierre por click afuera / `Esc` / scroll y el estilo de
+`.action-menu-item` (divisores y `danger` incluidos).
+
+Helpers en `app.js`: `menubarMenu(key, label, icon)` dibuja el trigger y
+`wireMenubarMenu(scope, key, itemsFn)` lo cablea. `itemsFn` arma los items en
+el momento del click con el mismo formato que el menú de fila
+(`{ act, label, icon, danger?, onSelect }`, `{ divider: true }`).
+
+**Reglas:**
+- **Orden fijo:** la salida primero (`btn-ghost`) y después el resto, todos con el mismo `gap`. **Sin línea separadora entre medio**: el contraste entre el ghost y el rojo ya distingue la salida del resto, y una divisoria vertical sólo suma ruido en una barra de dos o tres botones.
+- **La salida siempre es directa** — nunca queda a dos clicks. Se llama `Cerrar` en los modales de consulta y `Cancelar` en los de formulario, que es lo que hacía cada uno en el footer que reemplaza.
+- **En los modales de Alta / Edición la barra reemplaza al footer igual**, con la acción primaria como botón directo: `Cancelar` (`btn-ghost`) + `Guardar` (`btn-primary`, ícono `fa-floppy-disk`). Sin desplegables — un formulario tiene una sola cosa que hacer.
+- **El rótulo del primario es `Guardar` en los dos modos, sin variantes** ("Guardar cambios", "Crear dominio"): el título del modal ya dice si es alta o edición, y el botón sólo tiene que nombrar la acción. Un rótulo que cambia con el modo obliga a leerlo dos veces para confirmar que hace lo mismo de siempre.
+- **Los desplegables se agrupan por familia, no por conveniencia**: `Listar` son navegaciones a otros listados acotados a este registro; `Acciones` es lo que opera sobre el registro. Si un menú junta cosas que no comparten familia, van en dos.
+- Dentro de cada menú vale el orden de §21: **la destructiva al final, precedida por divisor y con `danger: true`**. Nunca como botón directo de la barra — es la acción más cara de deshacer y no va a un click de distancia.
+- **La salida se rellena con `--surface`, el gris del cuerpo del modal** — no se deja transparente. La franja es `--bg`: un `btn-ghost` sin fondo se apoya directo sobre el gris más oscuro y se lee como un hueco al lado de los rojos. El hover sube un escalón (`--row-hover`) en vez de bajar a `--bg`, que es el color de la propia franja y haría desaparecer el botón justo cuando el mouse está encima.
+- **Color: `Cerrar` es el único neutro (`btn-ghost`); todo el resto va en `btn-primary`.** Es una excepción declarada a la regla de §6 ("una sola acción primaria por modal") y sólo vale dentro de `.modal-menubar`: acá el rojo no marca jerarquía entre acciones sino que separa **la salida** de **lo que el modal sabe hacer**. Nada de `btn-secondary` en esta barra, y nada de `btn-danger`: la destructiva vive dentro del menú `Acciones`, no en la barra.
+- Botones en `btn-sm`: la barra es zona densa y no compite con el contenido.
+- **`padding: 14px 24px`, más que los `10px 24px` del header en primario.** La barra lleva botones (`btn-sm`, ~30px de alto) y con 10px quedaban casi tocando el rojo de arriba y la divisoria de abajo; el título es texto y con 10px ya respira. Los dos valores **no se mueven juntos**: el aire vertical de cada franja se calibra contra lo que tiene adentro. La separación *entre* botones sigue siendo el `gap: 8px`, que no cambia.
+- Mismos íconos FontAwesome que el menú contextual de la fila y que el sidebar (los ítems de `Listar` usan el ícono del módulo destino), para que la acción se reconozca igual desde cualquier lado.
+- La barra **envuelve** (`flex-wrap`) en pantallas angostas; no se scrollea horizontalmente ni se colapsa en un solo dropdown.
+- **El fondo es un gris intermedio entre los dos tokens que ya conviven en el modal**: `color-mix(in srgb, var(--surface) 40%, var(--bg))` ≈ `#1e1e1f`. Queda un escalón más claro que `--bg` (`#1a1a1a`) y todavía más oscuro que los dos grises del cuerpo — las tarjetas de consulta (`#202122`) y el fondo del modal / los inputs (`--surface`, `#242526`). Así la franja se despega del header y del body sin sumar otra línea divisoria y sin repetir ningún tono del contenido.
+- **La mezcla es entre dos tokens, nunca contra `#000`.** Un `color-mix(--surface X%, #000)` fija un tono que no existe en el sistema y hay que recalcularlo a mano en cada cambio de tema; mezclando `--surface` con `--bg`, el intermedio sigue solo a la paleta. La escala de grises, de claro a oscuro: `--border` → `--row-hover` → `--surface` → **franja** → `--bg`.
+- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`) y **Usuarios** (`openUserViewModal` + `openUserModal`), todos en `app.js`. Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos.
+
+### 21-bis.1 "Listar": saltar a otro módulo ya filtrado
+
+Los ítems de `Listar` no navegan pelados: dejan pedido un filtro que el módulo
+destino consume al renderizar. En `app.js`, `pedirFiltroDominio(route, id)`
+guarda `{ route, id }` y navega; el renderer del destino abre con
+`tomarFiltroDominio('<route>')` y, si hay pedido, lo vuelca en `state.dominio`
+antes del primer `applyAndRender()`.
+
+Hay un par por entidad: `pedirFiltroUsuario(route, campo, id)` /
+`tomarFiltroUsuario(route)` hace lo mismo para el usuario. **Ése lleva además el
+`campo`**, porque la misma persona entra por columnas distintas según el
+destino: `usuario` en Perfiles, y `adoptador` o `liberador` en Adopciones — son
+dos preguntas distintas sobre el mismo usuario y el menú las ofrece por
+separado.
+
+- **El pedido se consume siempre y sólo aplica si la ruta coincide.** Si el usuario se desvía a otra pantalla, se descarta en vez de filtrar un listado equivocado más tarde.
+- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones; para usuario: Perfiles y Adopciones). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **Si el endpoint sabe filtrar, el filtro va en el fetch inicial**, no sólo client-side: en tablas grandes (`registros`, `senales`, `adopciones`) recortar después de traer la ventana muestra "las N últimas de todos" filtradas, que es casi nada. Adopciones manda `?dominio=`; Señales y Registros no tienen el parámetro en la API y filtran sobre la ventana, igual que su propio modal de Filtros. `adoptador` / `liberador` tampoco existen en la API de Adopciones: ésos filtran client-side, como ya lo hace el modal de Filtros de ese módulo.
 
 ## 22. Lista de datos (vista de consulta)
 

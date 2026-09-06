@@ -188,7 +188,9 @@ body.has-banner .layout {
 .topbar-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    /* Separacion holgada: son tres accesos distintos (panel, dominio, ayuda) y
+       pegados se leian como un solo bloque de iconos. */
+    gap: 14px;
 }
 .topbar-action {
     background: none;
@@ -205,7 +207,6 @@ body.has-banner .layout {
     transition: background .15s;
 }
 .topbar-action:hover { background: rgba(0,0,0,.18); }
-.topbar-action.active { background: rgba(0,0,0,.28); }
 
 /* -------------------- Sidebar (gris oscuro) -------------------- */
 
@@ -546,6 +547,8 @@ body.has-banner .layout {
     .sidebar.oculto { margin-left: 0; }
 
     .topbar { padding: 0 10px; gap: 8px; }
+    /* Menos aire que en desktop, pero los tres iconos siguen separados. */
+    .topbar-actions { gap: 10px; }
     .topbar-action { padding: 6px 7px; font-size: .95rem; }
 
     .content { padding: 16px 12px 32px; }

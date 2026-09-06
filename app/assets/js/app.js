@@ -626,18 +626,11 @@
         });
     }
 
-    // ---------- Topbar actions (selector visual) ----------
-    // `:not([href])` deja afuera la mesa de ayuda: es un enlace externo, no un
-    // estado de la pagina, y no corresponde marcarlo activo ni mostrar toast.
-    // `:not([data-modal])` deja afuera el que abre "Cambiar de Panel": abrir un
-    // modal tampoco es cambiar de seccion, y el toast taparia el propio modal.
-    document.querySelectorAll('.topbar-action:not([href]):not([data-modal])').forEach(function (el) {
-        el.addEventListener('click', function () {
-            document.querySelectorAll('.topbar-action').forEach(function (x) { x.classList.remove('active'); });
-            el.classList.add('active');
-            showToast(el.getAttribute('title') || 'Accion');
-        });
-    });
+    // ---------- Topbar actions ----------
+    // Ya no hay estado "activo" que marcar: las tres acciones que quedan
+    // (Panel, Dominio, Mesa de Ayuda) abren un modal o un enlace externo, y
+    // ninguna representa una seccion de la pagina. Los modales los engancha
+    // el handler de `[data-modal]`; la mesa de ayuda es un `<a>` comun.
 
     // ---------- Click en botones de control ----------
     // ---------- Botones del panel: mandan la orden al equipo ----------

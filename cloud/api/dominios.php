@@ -4,6 +4,21 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+/**
+ * Claves de `combos` con los textos de los codigos cortos de `dominios`.
+ * Son las mismas que usaba comboTraducir() en el legacy, y las mismas que ya
+ * lee panel/api/dominio.php: el codigo tiene que leerse igual en las tres
+ * pantallas.
+ */
+const COMBO_SITUACION        = '$xDominio->situacion';
+const COMBO_AUTOADMINISTRADO = '$xDominio->autoadministrado';
+
+/** Ultimo recurso si `combos` no tiene cargada la clave. */
+const COMBOS_FALLBACK = [
+    COMBO_SITUACION        => ['1' => 'Normal', '2' => 'Limitado', '3' => 'Suspendido'],
+    COMBO_AUTOADMINISTRADO => ['1' => 'Si',     '0' => 'No'],
+];
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
@@ -21,25 +36,82 @@ try {
 
 function handleList(): void
 {
-    // Esquema real (db/schema.sql -> tabla `dominios`): no existen `descripcion`,
-    // `created_at` ni `updated_at`. La FK en `dispositivos` es la columna `dominio`
-    // (no `dominio_id`). Se aliasan los campos faltantes a NULL para no tocar el JS.
+    // Devuelve la fila entera de `dominios` (db/schema.sql), no un recorte: el
+    // modal de Consultar los muestra todos. Ojo con lo que NO existe en el
+    // esquema real, por mas que el modal de Alta/Edicion siga escribiendolos:
+    // no hay `descripcion`, `created_at` ni `updated_at`. Y la FK en
+    // `dispositivos`, `chips`, `perfiles`, `usos` y `paneles` es la columna
+    // `dominio` -- no `dominio_id`.
+    //
+    // Los cinco contadores se CALCULAN, no se leen de las columnas cacheadas
+    // `dominios`.`usuarios` / `.dispositivos` / `.chips` / `.usos` / `.paneles`:
+    // ese cache lo mantiene a mano el sistema legacy y esta desfasado en 23 de
+    // los 148 dominios -- el alta suma y la baja no resta (el dominio 2 declara
+    // 18 usuarios y tiene 13), y en `usos` la diferencia es de otro orden (el
+    // dominio 1 declara 0 y tiene 1.294). Es la misma decision que ya toman
+    // panel/api/dominio.php y panel/api/dashboard.php. El COUNT es barato: las
+    // cinco FKs tienen indice y la consulta entera corre en ~25 ms.
+    //
+    // Subconsultas correlacionadas y no cinco LEFT JOIN: con JOINs las filas se
+    // multiplican entre si (10 dispositivos x 3 chips = 30 filas) y cada COUNT
+    // devolveria el producto en vez de su propio total. Los dos LEFT JOIN que
+    // si estan son 1:1 por PK, asi que no multiplican nada.
+    //
+    // COUNT(DISTINCT p.usuario) porque un usuario puede tener mas de un perfil
+    // en el mismo dominio -- hoy hay 8 pares (usuario, dominio) repetidos, que
+    // sin el DISTINCT se contarian dos veces.
     $stmt = db()->query(
         'SELECT d.id,
+                d.uuid,
                 d.nombre,
-                NULL          AS descripcion,
-                NULL          AS created_at,
-                NULL          AS updated_at,
-                COUNT(dev.id) AS dispositivos_count
+                d.numero,
+                d.agente,
+                ag.nombre AS agente_nombre,
+                d.cliente,
+                cl.nombre AS cliente_nombre,
+                d.contrato,
+                d.autoadministrado,
+                d.situacion,
+                d.habilitado,
+                (SELECT COUNT(DISTINCT p.usuario) FROM perfiles     p   WHERE p.dominio   = d.id) AS usuarios_count,
+                (SELECT COUNT(*)                  FROM dispositivos dev WHERE dev.dominio = d.id) AS dispositivos_count,
+                (SELECT COUNT(*)                  FROM chips        c   WHERE c.dominio   = d.id) AS chips_count,
+                (SELECT COUNT(*)                  FROM usos         u   WHERE u.dominio   = d.id) AS usos_count,
+                (SELECT COUNT(*)                  FROM paneles      pa  WHERE pa.dominio  = d.id) AS paneles_count
          FROM dominios d
-         LEFT JOIN dispositivos dev ON dev.dominio = d.id
-         GROUP BY d.id, d.nombre
+         LEFT JOIN agentes  ag ON ag.id = d.agente
+         LEFT JOIN clientes cl ON cl.id = d.cliente
          ORDER BY d.nombre ASC'
     );
 
     $dominios = array_map(static function (array $r): array {
-        $r['dispositivos_count'] = (int) $r['dispositivos_count'];
-        return $r;
+        $situacion       = trim((string) ($r['situacion'] ?? ''));
+        $autoadministrado = trim((string) ($r['autoadministrado'] ?? ''));
+
+        return [
+            'id'                     => (int) $r['id'],
+            'uuid'                   => trim((string) ($r['uuid'] ?? '')),
+            'nombre'                 => trim((string) ($r['nombre'] ?? '')),
+            'numero'                 => trim((string) ($r['numero'] ?? '')),
+            // El 0 de estas FKs es el centinela "sin asignar" del sistema
+            // historico, no un id: se normaliza a null como el NULL real.
+            'agente'                 => idOrNull($r['agente']),
+            'agente_nombre'          => trim((string) ($r['agente_nombre'] ?? '')),
+            'cliente'                => idOrNull($r['cliente']),
+            'cliente_nombre'         => trim((string) ($r['cliente_nombre'] ?? '')),
+            'contrato'               => idOrNull($r['contrato']),
+            'autoadministrado'       => $autoadministrado,
+            'autoadministrado_texto' => combo(COMBO_AUTOADMINISTRADO)[$autoadministrado] ?? '',
+            'situacion'              => $situacion,
+            'situacion_texto'        => combo(COMBO_SITUACION)[$situacion] ?? '',
+            // `dominios`.`habilitado` es tinyint(1) NOT NULL: ya es 0 o 1.
+            'habilitado'             => esHabilitado($r['habilitado']) ? 1 : 0,
+            'usuarios_count'         => (int) $r['usuarios_count'],
+            'dispositivos_count'     => (int) $r['dispositivos_count'],
+            'chips_count'            => (int) $r['chips_count'],
+            'usos_count'             => (int) $r['usos_count'],
+            'paneles_count'          => (int) $r['paneles_count'],
+        ];
     }, $stmt->fetchAll());
 
     json_ok(['dominios' => $dominios]);
@@ -134,6 +206,44 @@ function handleDelete(): void
     }
 
     json_ok(['id' => $id]);
+}
+
+/**
+ * Tabla plana valor -> texto de un combo del sistema historico.
+ * Se lee una sola vez por request y por clave.
+ */
+function combo(string $clave): array
+{
+    static $cache = [];
+    if (isset($cache[$clave])) {
+        return $cache[$clave];
+    }
+
+    $stmt = db()->prepare('SELECT valor, texto FROM combos WHERE combo = :c ORDER BY orden ASC');
+    $stmt->execute([':c' => $clave]);
+
+    $textos = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $valor = trim((string) ($r['valor'] ?? ''));
+        if ($valor === '') continue;
+        $textos[$valor] = (string) ($r['texto'] ?? '');
+    }
+
+    if ($textos === []) {
+        $textos = COMBOS_FALLBACK[$clave] ?? [];
+    }
+
+    return $cache[$clave] = $textos;
+}
+
+/**
+ * Id de una FK del sistema historico, donde el 0 significa "sin asignar"
+ * igual que el NULL (ver el criterio del `0` centinela en db/schema.sql).
+ */
+function idOrNull(mixed $v): ?int
+{
+    $id = (int) $v;
+    return $id > 0 ? $id : null;
 }
 
 function readJson(): array

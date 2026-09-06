@@ -697,11 +697,65 @@ tbody tr.row-clickable { cursor: pointer; }
 }
 .modal-title    { font-size: 1rem; font-weight: 700; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .modal-subtitle { font-size: .8rem; font-weight: 500; color: var(--muted); }
+
+/* Barra de titulo pintada en primario: identifica la ficha con el mismo rojo
+ * del chrome (sidebar + topbar). Los hijos pasan a blanco y opacidades de
+ * blanco -- NO a --text / --muted / --border, que estan calibrados contra el
+ * gris del modal y sobre el rojo se ensucian. El radio superior lo repite el
+ * header porque es el que ahora pinta esa esquina. */
+.modal-header-primary {
+    background: var(--primary); border-bottom: none; color: #fff;
+    border-radius: 14px 14px 0 0;
+    /* Mas baja que el header normal (20/16) para que las dos franjas se lean
+     * como una sola cabecera en vez de dos bloques apilados. El valor NO
+     * acompana al de `.modal-menubar`: la barra de abajo lleva botones y pide
+     * mas aire, el titulo es texto y con 10px ya respira. */
+    padding: 10px 24px;
+}
+.modal-header-primary .modal-title,
+.modal-header-primary .modal-subtitle    { color: #fff; }
+.modal-header-primary .modal-subtitle    { color: rgba(255,255,255,.75); }
+.modal-header-primary .btn-icon-sm       { color: #fff; }
+.modal-header-primary .btn-icon-sm:hover { background: rgba(255,255,255,.18); color: #fff; }
 .modal-body     { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .modal-footer   {
     padding: 16px 24px; border-top: 1px solid var(--border);
     display: flex; gap: 10px; justify-content: flex-end;
 }
+
+/* Barra de acciones bajo el titulo del modal. Reemplaza al dropdown "Acciones"
+ * del footer en los modales de consulta. Mezcla dos tipos de boton: los de
+ * efecto inmediato (Cerrar) y los desplegables, que abren su menu con
+ * openRowMenu() -- flotante y `position: fixed`, para que el `overflow-y: auto`
+ * del modal no lo recorte, cosa que si pasaria con un dropdown absoluto. */
+.modal-menubar {
+    /* 14px arriba y abajo, no 10: con `btn-sm` (~30px de alto) los botones
+     * quedaban casi tocando el borde rojo de arriba y la divisoria de abajo.
+     * El extra es aire de la franja, no separacion entre botones -- ese es el
+     * `gap`, que no cambia. */
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
+    /* Gris intermedio entre los dos tokens que ya conviven en el modal: --bg
+     * (#1a1a1a) y --surface (#242526). Da ~#1e1e1f, un escalon mas claro que
+     * --bg pero todavia mas oscuro que los dos grises del cuerpo -- las
+     * tarjetas de consulta (#202122) y el fondo del modal / los inputs
+     * (--surface). La mezcla es ENTRE TOKENS, no contra #000: si el tema
+     * cambia, el tono intermedio lo sigue solo. */
+    background: color-mix(in srgb, var(--surface) 40%, var(--bg));
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+/* Cerrar es el unico neutro de la barra; el resto va en primario (§21-bis).
+ * Excepcion declarada a "una sola accion primaria por modal": aca el rojo
+ * separa la salida de lo que el modal sabe hacer, no marca jerarquia. */
+.modal-menubar .btn     { white-space: nowrap; }
+/* La salida (Cerrar / Cancelar) va rellena con el gris del cuerpo del modal
+ * (--surface), no transparente: la franja es --bg, asi que un boton sin fondo
+ * se apoyaba directo sobre el gris mas oscuro y quedaba como un hueco al lado
+ * de los rojos. El hover sube un escalon (--row-hover) en vez de bajar a --bg,
+ * que es justo el color de la franja y lo haria desaparecer al pasar el mouse. */
+.modal-menubar .btn-ghost       { background: var(--surface); color: var(--text); }
+.modal-menubar .btn-ghost:hover { background: var(--row-hover); color: var(--text); }
+.modal-menubar-end      { margin-left: auto; }
+.menubar-caret          { font-size: .7em; opacity: .65; margin-left: 2px; }
 
 /* Variante ancha para editores monoespaciados (JSON, logs, etc.). */
 .modal.modal-wide { max-width: 760px; }

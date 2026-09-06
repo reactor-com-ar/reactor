@@ -191,9 +191,6 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
         <div class="topbar-spacer"></div>
 
         <nav class="topbar-actions">
-            <button type="button" class="topbar-action active" title="Inicio" data-nav="inicio">
-                <i class="fa-solid fa-house"></i>
-            </button>
             <button type="button" class="topbar-action" title="Cambiar de Panel"
                     data-nav="panel" data-modal="modal-panel">
                 <i class="fa-solid fa-pager"></i>

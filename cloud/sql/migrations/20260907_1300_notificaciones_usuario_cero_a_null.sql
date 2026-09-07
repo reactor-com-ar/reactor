@@ -1,0 +1,45 @@
+-- `notificaciones`.`usuario`: el centinela 0 pasa a NULL.
+--
+-- La columna es `int DEFAULT NULL` sin FK, y el productor -- el proceso del
+-- sistema legacy que genera los avisos "Dispositivo X Offline", que esta FUERA
+-- de este repositorio -- escribe 0 cuando la notificacion no va dirigida a
+-- nadie en particular. Medido antes de correr esta migracion:
+--
+--   total de filas                    68.717
+--   con `usuario` = 0                 68.711   (99,99%)
+--   con `usuario` NULL                     0
+--   con `usuario` > 0                      6   (una sola cuenta, sept/2024)
+--
+-- O sea que "sin destinatario" -- que es el caso normal, una notificacion del
+-- dominio para todos los que lo operan -- se estaba escribiendo con el mismo 0
+-- que el resto del esquema ya dejo de usar.
+--
+-- ESTA ES LA CONVENCION GENERAL DEL REPO, la que fijaron `20260814_1100` en
+-- adelante: el 0 de "sin asignar" es un centinela, no una referencia, y va a
+-- NULL. La excepcion son las tres columnas de `20260814_3100`
+-- (`sesiones.usuario`, `sesiones.perfil`, `senales.canal`), donde en vez de
+-- convertir se creo una fila centinela con `id` = 0 porque el productor escribe
+-- 0 en el 99% de los INSERT y declarar la FK habria volteado el login y la
+-- ingesta MQTT. Aca no aplica esa excepcion: esta migracion NO declara ninguna
+-- FK, asi que no hay INSERT que pueda fallar.
+--
+-- POR ESO TAMPOCO SE AGREGA LA FK a `usuarios`(`id`), que seria el paso
+-- siguiente natural: el productor esta fuera de este repo y sigue escribiendo 0,
+-- y con la FK declarada cada aviso nuevo fallaria al insertarse. Se dejaria de
+-- generar notificaciones para ganar una restriccion. Queda para cuando ese
+-- codigo escriba NULL.
+--
+-- Y POR LO MISMO EL LECTOR ACEPTA LOS DOS VALORES. `app/api/notificaciones.php`
+-- trata como "para todo el dominio" tanto el NULL como el 0: esta migracion
+-- normaliza lo que ya existe, pero no puede impedir que manana entre un 0 nuevo.
+-- Si el lector exigiera `IS NULL` a secas, las notificaciones que se generen
+-- despues del deploy desaparecerian del modal.
+--
+-- IDEMPOTENTE: correrla dos veces no cambia nada, la segunda vez no hay ningun
+-- 0 que convertir. No hace falta el patron `SET @s / PREPARE` de las
+-- migraciones que tocan estructura, porque esto es solo datos.
+--
+-- Sin `USE <base>`: la conexion PDO ya selecciona la del entorno (CLAUDE.md).
+
+
+UPDATE `notificaciones` SET `usuario` = NULL WHERE `usuario` = 0;

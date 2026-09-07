@@ -37,3 +37,35 @@ function panelBaseUrl(): string
 
     return ($esHttps ? 'https' : 'http') . '://' . $host;
 }
+
+/**
+ * URL base publica de la APP end-user (`app.reactor.com.ar`), vista desde el
+ * panel.
+ *
+ * El panel necesita construir URLs de OTRO dominio desde que la invitacion da de
+ * alta Operadores (07/09/2026): quien la acepta no entra al BackOffice, asi que
+ * el boton `Ingresar` de la pantalla de bienvenida tiene que mandarlo a la app.
+ *
+ * Es una copia de `baseDeDestino('app')` de cloud/api/enlaces_acceso.php y de
+ * `appBaseUrl()` de app/lib/base_url.php — las tres apps no comparten docroot,
+ * igual que pasa con `habilitado.php`, `permisos.php` y `usuarios_alta.php`.
+ * **En dev se cambia el puerto y no el nombre del host**: los tres proyectos
+ * viven en el mismo host y solo los separa el puerto (8115 el de la app).
+ * `APP_BASE_URL` en el .env pisa las dos ramas.
+ */
+function panelAppBaseUrl(): string
+{
+    if (defined('APP_BASE_URL') && trim((string) APP_BASE_URL) !== '') {
+        return rtrim(trim((string) APP_BASE_URL), '/');
+    }
+    if (APP_ENV === 'production') {
+        return 'https://app.reactor.com.ar';
+    }
+
+    $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+    if ($host === '' || !preg_match('/^[A-Za-z0-9.\-]+(:\d+)?$/', $host)) {
+        $host = 'localhost';
+    }
+
+    return 'http://' . explode(':', $host)[0] . ':8115';
+}

@@ -38,6 +38,10 @@ declare(strict_types=1);
 require __DIR__ . '/_layout.php';
 require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 require_once dirname(__DIR__) . '/lib/perfiles.php';
+// Para dejar la sesion ABIERTA al terminar el alta: `appSesionAbrir()` es el
+// mismo punto que usan el login por contrasena, el de codigo y el canje de un
+// enlace magico. Ver `sesionAbiertaSiCorresponde()` al pie.
+require_once dirname(__DIR__) . '/lib/auth.php';
 
 $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uuid   = (string) ($_POST['uid'] ?? $_GET['uid'] ?? '');
@@ -270,7 +274,56 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
         'nueva'      => $nueva,
         'ya_tenia'   => $perfilPrevio > 0,
         'correo_ok'  => $correoOk,
+        // Deja la sesion abierta cuando corresponde, para que `Ingresar` entre
+        // directo a la app en vez de mandar al login.
+        'sesion'     => sesionAbiertaSiCorresponde($usuarioId, $nueva),
     ];
+}
+
+/**
+ * Abre la sesion de la app para la cuenta recien creada. Devuelve `true` si
+ * quedo abierta.
+ *
+ * SOLO PARA LA CUENTA NUEVA (`$nueva`), Y NO ES UNA LIMITACION TECNICA — es el
+ * punto entero de la funcion. La credencial de esta pantalla es el `uuid` del
+ * enlace, y ese uuid **lo ve el emisor**: el listado de Invitaciones del panel lo
+ * muestra como `Identificador`. Si aceptar abriera sesion tambien cuando la
+ * cuenta YA existia, cualquiera que pueda emitir una invitacion tendria un
+ * secuestro de cuenta servido: invita al correo de una cuenta existente —que
+ * puede ser Administradora de otros dominios—, copia el uuid de su propio
+ * listado, abre el enlace el mismo y entra como esa persona.
+ *
+ * Con la cuenta nueva no hay nada que secuestrar: la contrasena se acaba de
+ * generar y esta impresa en esta misma pantalla, asi que quien tiene el enlace
+ * ya tiene las credenciales completas. La sesion no le da nada que no tuviera.
+ *
+ * A quien ya tenia cuenta se le sigue pidiendo SU contrasena, que es ademas lo
+ * que la pantalla le dice ("Ingresá con las credenciales que ya usabas").
+ *
+ * No se abre dentro de la transaccion: `setcookie()` no se revierte con un
+ * rollback y una cookie de una sesion que no llego a existir es peor que
+ * ninguna. Va despues del commit, antes de imprimir nada.
+ */
+function sesionAbiertaSiCorresponde(int $usuarioId, bool $nueva): bool
+{
+    if (!$nueva) {
+        return false;
+    }
+
+    // `appUsuarioVigente()` revalida `habilitado` contra la base. Nace en 1
+    // (`usuarioAlta()`), asi que esto no deberia fallar nunca — pero si falla,
+    // la pantalla cae sola al boton que manda al login.
+    $usuario = appUsuarioVigente($usuarioId);
+    if ($usuario === null) {
+        return false;
+    }
+
+    // El mismo punto que el login por contrasena: resuelve el ALCANCE de la
+    // sesion (`per` / `dom` / `pan`) y marca `ingresado`. Firmar la cookie a
+    // mano dejaria una sesion sin alcance, distinguible de una normal.
+    appSesionAbrir($usuario);
+
+    return true;
 }
 
 /**
@@ -308,11 +361,17 @@ function contrasenaGenerada(): string
     return $out;
 }
 
-/** @param array{usuario:string,contrasena:?string,nueva:bool,ya_tenia:bool,correo_ok:bool} $r */
+/** @param array{usuario:string,contrasena:?string,nueva:bool,ya_tenia:bool,correo_ok:bool,sesion:bool} $r */
 function pantallaBienvenida(array $r, string $dominioNombre): string
 {
+    // CON LA SESION YA ABIERTA, `Ingresar` va a la app y no al login: mandar al
+    // formulario a alguien que ya tiene la cookie es pedirle una contrasena que
+    // acabamos de generarle. Sin sesion (la cuenta ya existia) va al login, que
+    // es donde tiene que tipear LA SUYA.
+    $destino = $r['sesion'] ? '/' : '/sesion/iniciar';
+
     $ingresar = '<div class="inv-acciones inv-acciones-sola">
-            <a class="sesion-btn" href="' . e(appBaseUrl()) . '/sesion/iniciar">
+            <a class="sesion-btn" href="' . e(appBaseUrl() . $destino) . '">
                 <i class="fa-solid fa-right-to-bracket"></i> Ingresar
             </a>
         </div>';

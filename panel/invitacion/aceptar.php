@@ -22,9 +22,17 @@ declare(strict_types=1);
  *   - No tiene cuenta: se crea `usuarios` + `perfiles` y se le entrega una
  *     contrasena generada.
  *
- * EL PERFIL QUE SE OTORGA ES DE ADMINISTRADOR, no de Operador como en el legacy:
- * la invitacion se emite desde el panel y enlaza al panel, y al panel solo entra
- * un administrador. Ver perfilAsegurado() al pie.
+ * EL PERFIL QUE SE OTORGA ES DE OPERADOR (`tipo = 'O'`), igual que en el legacy
+ * y que en la invitacion de `app`. Hasta el 07/09/2026 era de Administrador,
+ * porque la invitacion se emite desde el panel y al panel solo entra un
+ * administrador; se cambio por decision explicita — **una invitacion da de alta
+ * un Operador, se emita donde se emita**.
+ *
+ * O SEA QUE ESTA INVITACION YA NO DA ACCESO AL BACKOFFICE. Quien la acepta opera
+ * la app; si entra a panel.reactor.com.ar el login lo rebota con `motivo=perfil`,
+ * porque el gate sigue siendo `perfiles`.`tipo` = 'A' (lib/acceso.php). Un
+ * Administrador se otorga hoy sólo desde el alta de `cloud` o editando el perfil
+ * en Usuarios. Ver perfilAsegurado() al pie.
  *
  * A DIFERENCIA DEL LEGACY, el camino "ya tiene cuenta" TAMBIEN cierra la
  * invitacion (estado 3). El legacy da el acceso pero deja la fila en
@@ -38,6 +46,15 @@ require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 // El rol con el que nace el perfil sale de la misma constante que decide quien
 // entra al panel: si esa lista cambia, la invitacion la sigue sola.
 require_once dirname(__DIR__) . '/lib/acceso.php';
+
+/**
+ * Vigencia del enlace que abre la sesion en la app al terminar el alta.
+ *
+ * 15 minutos, los mismos que los enlaces que emite cloud. Es holgado de sobra
+ * para alguien que tiene el boton delante y acota la ventana si la pantalla
+ * queda abierta en una maquina prestada.
+ */
+const ENLACE_APP_MINUTOS = 15;
 
 $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uuid   = (string) ($_POST['uid'] ?? $_GET['uid'] ?? '');
@@ -251,7 +268,14 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
             'destino'      => $correo,
             'destinatario' => $completo,
             'asunto'       => 'Tu acceso a ' . $dominioNombre,
-            'cuerpo'       => invitacionCuerpoCredenciales($dominioNombre, $correo, $contrasena, panelBaseUrl() . '/login.php'),
+            // AL LOGIN DE LA APP, no al del panel: el perfil que se acaba de
+            // crear es de Operador y el panel lo rebota. El correo llega despues
+            // de que la persona cerro esta pantalla, asi que si apuntara al panel
+            // seria la unica pista que le queda y la mandaria al lugar
+            // equivocado. Sin enlace magico a proposito: un correo se reenvia, se
+            // archiva y queda en el servidor — lo que viaja son las credenciales,
+            // que es lo que la persona ya tiene.
+            'cuerpo'       => invitacionCuerpoCredenciales($dominioNombre, $correo, $contrasena, panelAppBaseUrl() . '/sesion/iniciar'),
             'prioridad'    => 4,
             'tags'         => 'invitacion-credenciales',
         ]);
@@ -263,22 +287,116 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
         'contrasena' => $contrasena,
         'nueva'      => $nueva,
         'correo_ok'  => $correoOk,
+        // Enlace de un solo uso que abre la sesion en la APP, o '' si no
+        // corresponde. Ver la funcion.
+        'enlace_app' => enlaceDeAccesoApp($pdo, $usuarioId, (int) $inv['emisor'], $nueva),
     ];
 }
 
 /**
- * Perfil de ADMINISTRADOR del usuario en el dominio, creandolo si no lo tenia.
+ * Enlace magico de un solo uso a la app (`app.reactor.com.ar/acceso?t=...`), o
+ * cadena vacia si no corresponde emitirlo.
  *
- * SE BUSCA UN PERFIL DE ADMINISTRADOR, NO "cualquier perfil del dominio". Si la
- * persona ya tenia uno de Operador ahi (porque usa reactor-app), ese NO habilita
- * el panel — el gate es `perfiles`.`tipo` = 'A' (lib/acceso.php) — asi que se le
- * agrega uno nuevo en vez de reescribirle el que ya tiene. Mutar el `tipo` de
- * una fila existente le cambiaria el acceso en el sistema legacy desde aca.
+ * POR QUE UN ENLACE Y NO UNA COOKIE. Esta pagina corre en `panel.reactor.com.ar`
+ * y la sesion que hay que abrir es la de `app.reactor.com.ar`: son dos hosts
+ * distintos y `setcookie()` no puede cruzar esa frontera. La unica alternativa
+ * seria emitir la cookie sobre `.reactor.com.ar`, que se la entregaria tambien a
+ * `cloud` y al propio panel — un secreto de la app viajando a dos apps que no lo
+ * necesitan. Asi que se reusa el mecanismo que el repo ya tiene para esto:
+ * `enlaces_acceso` con `destino = 'app'`, que canjea `app/acceso.php` abriendo la
+ * sesion con `appSesionAbrir()`. Es el mismo circuito de los enlaces que emite
+ * cloud desde Usuarios.
  *
- * Una cuenta con varios perfiles en el mismo dominio es normal en estos datos.
+ * SOLO PARA LA CUENTA NUEVA, y eso es lo importante. La credencial de esta
+ * pantalla es el `uuid` del enlace de invitacion, y ese uuid **lo ve el emisor**:
+ * el listado de Invitaciones del panel lo muestra como `Identificador`. Si
+ * aceptar emitiera un enlace de sesion tambien cuando la cuenta YA existia,
+ * cualquier administrador tendria un secuestro de cuenta servido: invita al
+ * correo de una cuenta existente —que puede ser Administradora de otros
+ * dominios—, copia el uuid de su propio listado, abre el enlace el mismo y entra
+ * como esa persona. Con la cuenta nueva no hay nada que secuestrar: la
+ * contrasena se acaba de generar y se imprime en esta misma pantalla.
  *
- * `panel` queda en NULL y no en 0 — con las FK declaradas, el 0 del sistema
- * viejo ya no es un valor valido (ver db/schema.sql).
+ * VA DESPUES DEL COMMIT, en su propia escritura: el acceso ya es valido sin el
+ * enlace, asi que si esto falla no se revierte un alta que salio bien — se cae al
+ * boton que manda al login, igual que cuando la cuenta ya existia. Por eso el
+ * `try`.
+ *
+ * `emisor_tabla = 'usuarios'` porque `invitaciones.emisor` es un id de esa tabla.
+ * Los enlaces de cloud dicen `'controladores'` desde el 07/09/2026 — para eso
+ * existe la columna.
+ */
+function enlaceDeAccesoApp(PDO $pdo, int $usuarioId, int $emisorId, bool $nueva): string
+{
+    if (!$nueva || $usuarioId <= 0) {
+        return '';
+    }
+
+    // 32 bytes de CSPRNG en base64url. En la base se guarda el SHA-256, nunca el
+    // token: quien lea `enlaces_acceso` no puede armar un enlace valido. Mismo
+    // criterio que cloud/api/enlaces_acceso.php y que `recuperaciones`.
+    $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+
+    try {
+        $pdo->prepare(
+            'INSERT INTO enlaces_acceso
+                (usuario, destino, token, emisor, emisor_tabla, emitido, expira, origen)
+             VALUES
+                (:u, :dst, :t, :em, :et, NOW(), DATE_ADD(NOW(), INTERVAL :min MINUTE), :ip)'
+        )->execute([
+            ':u'   => $usuarioId,
+            ':dst' => 'app',
+            ':t'   => hash('sha256', $token),
+            ':em'  => $emisorId ?: null,
+            ':et'  => 'usuarios',
+            ':min' => ENLACE_APP_MINUTOS,
+            // `REMOTE_ADDR` y no `X-Forwarded-For`: ese header lo pone el cliente.
+            ':ip'  => substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45) ?: null,
+        ]);
+    } catch (Throwable $_) {
+        return '';
+    }
+
+    return panelAppBaseUrl() . '/acceso?t=' . rawurlencode($token);
+}
+
+/**
+ * Perfil de OPERADOR del usuario en el dominio, creandolo si no tenia ninguno.
+ *
+ * ESTA INVITACION DEJO DE DAR DE ALTA ADMINISTRADORES el 07/09/2026. Hasta esa
+ * fecha creaba `tipo = 'A'` y buscaba un perfil de Administrador para reutilizar,
+ * con este argumento: el gate del panel es `perfiles`.`tipo` = 'A'
+ * (lib/acceso.php), asi que una invitacion emitida desde el BackOffice solo
+ * podia significar alta administrativa. Se cambio por decision explicita: **una
+ * invitacion da de alta un OPERADOR siempre, se emita donde se emita**, y ahora
+ * las dos —esta y la de `app`— hacen exactamente lo mismo.
+ *
+ * CONSECUENCIA QUE HAY QUE TENER PRESENTE: quien acepta esta invitacion **no
+ * entra al BackOffice**. Recibe sus credenciales, opera la app y, si intenta
+ * entrar a panel.reactor.com.ar, el login lo rebota con `motivo=perfil`. Ya no
+ * queda ningun camino que fabrique un Administrador sin que alguien lo decida a
+ * mano: se otorga desde el alta de `cloud` (que elige el `tipo`) o editando el
+ * perfil desde Usuarios. **Si un dominio se queda sin ningun Administrador, el
+ * unico desbloqueo es `cloud`** — el mismo patron que ya rige para los tres
+ * permisos del perfil.
+ *
+ * POR ESO TAMBIEN CAMBIO LA BUSQUEDA: antes pedia `tipo = 'A'` y hoy se queda
+ * con CUALQUIER perfil habilitado del dominio, igual que `appPerfilAsegurado()`
+ * en app/lib/perfiles.php. No es un detalle suelto: si siguiera buscando un 'A'
+ * mientras crea un 'O', invitar a alguien que ya tiene su perfil de Operador ahi
+ * le agregaria un segundo Operador identico en cada invitacion. Lo que la
+ * invitacion promete es acceso al dominio, y esa persona ya lo tiene.
+ *
+ * Y NO SE REESCRIBE EL PERFIL QUE YA ESTA, cualquiera sea su `tipo`: si la
+ * persona ya era Administradora ahi, bajarla a Operadora le sacaria el BackOffice
+ * —y el back office viejo, que lee la misma columna— desde una pantalla que nadie
+ * abrio para eso. Una cuenta con varios perfiles en el mismo dominio es normal en
+ * estos datos, pero duplicarlos por sistema no.
+ *
+ * `panel` NACE SEMBRADO con el panel de id mas baja del dominio, no en NULL —
+ * ver `panelInicialDelDominio()`. Y nunca en 0: el legacy (`cPerfil::nuevo()`)
+ * escribe ese centinela, que con las FK declaradas ya no es un valor valido
+ * (ver db/schema.sql).
  *
  * `$registranteId` es el EMISOR de la invitacion, y va a `perfiles`.`registrante`
  * (migracion 20260907_1100): quien otorgo este acceso. Solo se escribe cuando el
@@ -287,18 +405,19 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
  */
 function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $dominioNombre, int $registranteId = 0): int
 {
+    // CUALQUIER perfil habilitado del dominio, sin filtrar por `tipo`. Ver la
+    // cabecera: filtrar por 'A' mientras se crea un 'O' duplicaria el perfil de
+    // todo Operador que ya estuviera en el dominio.
     $busca = $pdo->prepare(
         'SELECT id FROM perfiles
           WHERE usuario = :u AND dominio = :d
             AND habilitado = :hab
-            AND tipo = :tipo
           ORDER BY id LIMIT 1'
     );
     $busca->execute([
-        ':u'    => $usuarioId,
-        ':d'    => $dominioId,
-        ':hab'  => HABILITADO,
-        ':tipo' => PERFIL_TIPO_ADMINISTRADOR,
+        ':u'   => $usuarioId,
+        ':d'   => $dominioId,
+        ':hab' => HABILITADO,
     ]);
     $id = (int) ($busca->fetchColumn() ?: 0);
     if ($id > 0) {
@@ -307,21 +426,25 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
 
     $alta = $pdo->prepare(
         'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo,
-                               operacion, invitacion, facturacion,
+                               operacion, invitacion, facturacion, panel,
                                registrante, habilitado)
          VALUES (:uuid, :nombre, :usuario, :dominio, :tipo,
-                 :operacion, :invitacion, :facturacion,
+                 :operacion, :invitacion, :facturacion, :panel,
                  :registrante, :habilitado)'
     );
     $alta->execute([
         ':uuid'       => bin2hex(random_bytes(8)),
-        ':nombre'     => mb_substr('Administrador en ' . $dominioNombre, 0, 255),
+        ':nombre'     => mb_substr('Operador en ' . $dominioNombre, 0, 255),
         ':usuario'    => $usuarioId,
         ':dominio'    => $dominioId,
         // `perfiles`.`tipo` es ENUM('A','O') NOT NULL: dos letras y nada mas.
-        // Ya no hay `rol` que acompañar — la columna se eliminó el 06/09/2026 —
-        // pero `tipo` se sigue escribiendo en 'A' porque la lee el legacy.
-        ':tipo'       => PERFIL_TIPO_ADMINISTRADOR,
+        // OPERADOR, no Administrador (07/09/2026, ver la cabecera): una
+        // invitacion da de alta un Operador se emita donde se emita. Como esta
+        // columna la lee el sistema legacy —que SI reparte permisos con ella—,
+        // escribir 'A' aca ademas le abriria al invitado el back office viejo
+        // entero sin que nadie lo decidiera. Es el mismo argumento que ya valia
+        // para la invitacion de `app`; ahora vale para las dos.
+        ':tipo'       => PERFIL_TIPO_OPERADOR,
         // PERMISOS DEL PERFIL NUEVO: opera la app e invita, no factura.
         //
         // Los dos primeros son el mismo criterio con el que la migracion
@@ -349,6 +472,8 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
         ':operacion'   => HABILITADO,
         ':invitacion'  => HABILITADO,
         ':facturacion' => DESHABILITADO,
+        // Panel con el que abre la app la primera vez. Ver la funcion de abajo.
+        ':panel'       => panelInicialDelDominio($pdo, $dominioId),
         // QUIEN OTORGO ESTE ACCESO: el emisor de la invitacion. `?: null` y no
         // el entero pelado porque la columna es una FK y el `0` del sistema
         // historico ya no es un valor valido — mismo criterio con el que
@@ -385,6 +510,53 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
 }
 
 /**
+ * Panel con el que nace el perfil: el de **id mas baja** entre los habilitados
+ * del dominio. NULL si el dominio no tiene ninguno.
+ *
+ * `perfiles`.`panel` (singular, no confundir con `perfiles_paneles`) es la
+ * MEMORIA del ultimo panel abierto: la escribe `app` en cada cambio y es lo que
+ * `app` reabre al conectarse. Hasta el 07/09/2026 el perfil nacia con NULL y
+ * `app` caia sola al primer panel permitido; sembrarla deja el dato escrito
+ * desde el alta.
+ *
+ * **EL FILTRO ES EL MISMO QUE EL DEL `INSERT ... SELECT` de arriba**
+ * (`dominio = :d AND habilitado = 1`), y eso no es casualidad: es lo que
+ * garantiza que el panel sembrado este SIEMPRE entre los que el perfil tiene
+ * permitidos en `perfiles_paneles`. Es la invariante que `app` mantiene y la que
+ * despues protege `olvidarPanelSinPermiso()` en api/usuarios.php. Si se cambia
+ * uno de los dos criterios hay que cambiar el otro, o el perfil nace recordando
+ * un panel que no puede abrir.
+ *
+ * NULL SI EL DOMINIO NO TIENE PANELES HABILITADOS, y no un 0 de relleno: la
+ * columna es FK contra `paneles` (`fk_perfiles_panel`, RESTRICT). Ese perfil
+ * tampoco va a recibir filas en `perfiles_paneles`, asi que el NULL es el
+ * sintoma correcto de un dominio sin paneles, no la causa.
+ *
+ * OJO CON EL DESEMPATE: `app` ordena sus paneles POR NOMBRE
+ * (`appPanelesDelDominio()` en app/lib/contexto.php) y cuando `panel` viene
+ * vacio cae al primero de ESA lista. O sea que el panel de id mas baja no tiene
+ * por que ser el mismo que abriria la app por su cuenta. Se siembra por id
+ * porque es el criterio pedido: estable, no depende de que alguien renombre un
+ * panel.
+ *
+ * Es copia de `appPanelInicialDelDominio()` de app/lib/perfiles.php, como todo
+ * lo que comparten las tres apps sin compartir docroot.
+ */
+function panelInicialDelDominio(PDO $pdo, int $dominioId): ?int
+{
+    $stmt = $pdo->prepare(
+        'SELECT MIN(id) FROM paneles WHERE dominio = :d AND habilitado = 1'
+    );
+    $stmt->execute([':d' => $dominioId]);
+
+    // MIN() sobre cero filas devuelve NULL, no 0: el `?: 0` normaliza las dos
+    // formas antes de decidir.
+    $id = (int) ($stmt->fetchColumn() ?: 0);
+
+    return $id > 0 ? $id : null;
+}
+
+/**
  * Contrasena inicial. Sin caracteres ambiguos (0/O, 1/l/I): se lee de un
  * correo y se tipea a mano. 10 chars -> 16 en base64, dentro del varchar(50)
  * de `usuarios.contrasena`.
@@ -400,11 +572,22 @@ function contrasenaGenerada(): string
     return $out;
 }
 
-/** @param array{usuario:string,contrasena:?string,nueva:bool,correo_ok:bool} $r */
+/** @param array{usuario:string,contrasena:?string,nueva:bool,correo_ok:bool,enlace_app:string} $r */
 function pantallaBienvenida(array $r, string $dominioNombre): string
 {
+    // `Ingresar` VA A LA APP, NO AL PANEL. Desde el 07/09/2026 esta invitacion da
+    // de alta un Operador (ver la cabecera), y un Operador no entra al BackOffice:
+    // el boton viejo —`panelBaseUrl() . '/login.php'`— lo mandaba a un login que lo
+    // iba a rebotar con `motivo=perfil` sin explicarle por que.
+    //
+    // Con enlace se entra con la sesion ya abierta; sin el, al login de la app
+    // para que tipee SU contrasena. Los dos casos van al mismo dominio.
+    $destino = $r['enlace_app'] !== ''
+        ? $r['enlace_app']
+        : panelAppBaseUrl() . '/sesion/iniciar';
+
     $ingresar = '<div class="inv-acciones" style="margin-top:4px">
-            <a class="btn btn-primary" href="' . e(panelBaseUrl()) . '/login.php">
+            <a class="btn btn-primary" href="' . e($destino) . '">
                 <i class="fa-solid fa-right-to-bracket"></i> Ingresar
             </a>
         </div>';

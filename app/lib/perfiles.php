@@ -68,8 +68,9 @@ const PERFIL_TIPO_OPERADOR      = 'O';
  * un perfil de Administrador y agrega uno cuando el que hay es de Operador:
  * alla el `tipo` decide si la persona entra, aca no decide nada.
  *
- * `panel` queda en NULL y no en 0 — con las FK declaradas, el 0 del sistema
- * viejo ya no es un valor valido (ver db/schema.sql).
+ * `panel` NACE SEMBRADO con el panel de id mas baja del dominio, no en NULL —
+ * ver `appPanelInicialDelDominio()`. Y nunca en 0: con las FK declaradas, el
+ * centinela del sistema viejo ya no es un valor valido (ver db/schema.sql).
  *
  * `$registranteId` es el EMISOR de la invitacion, y va a `perfiles`.`registrante`
  * (migracion 20260907_1100): quien otorgo este acceso. Se escribe SOLO cuando el
@@ -92,10 +93,10 @@ function appPerfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $do
 
     $alta = $pdo->prepare(
         'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo,
-                               operacion, invitacion, facturacion,
+                               operacion, invitacion, facturacion, panel,
                                registrante, habilitado)
          VALUES (:uuid, :nombre, :usuario, :dominio, :tipo,
-                 :operacion, :invitacion, :facturacion,
+                 :operacion, :invitacion, :facturacion, :panel,
                  :registrante, :habilitado)'
     );
     $alta->execute([
@@ -108,6 +109,8 @@ function appPerfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $do
         ':operacion'   => HABILITADO,
         ':invitacion'  => HABILITADO,
         ':facturacion' => DESHABILITADO,
+        // Panel con el que abre la app la primera vez. Ver la funcion de abajo.
+        ':panel'       => appPanelInicialDelDominio($pdo, $dominioId),
         // QUIEN OTORGO ESTE ACCESO: el emisor de la invitacion. `?: null` y no
         // el entero pelado porque la columna es una FK y el `0` del sistema
         // historico ya no es un valor valido — mismo criterio con el que
@@ -124,6 +127,50 @@ function appPerfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $do
     appPerfilPanelesDelDominio($pdo, $perfilId, $dominioId);
 
     return $perfilId;
+}
+
+/**
+ * Panel con el que nace el perfil: el de **id mas baja** entre los habilitados
+ * del dominio. NULL si el dominio no tiene ninguno.
+ *
+ * `perfiles`.`panel` es la MEMORIA del ultimo panel abierto (la escribe
+ * app/api/paneles.php en cada cambio) y ademas es lo que `app` reabre al
+ * conectarse. Hasta el 07/09/2026 el perfil nacia con NULL y `app` caia sola al
+ * primer panel permitido; sembrarla deja el dato escrito desde el alta en vez de
+ * resolverse en cada arranque.
+ *
+ * **EL FILTRO ES EL MISMO QUE EL DE `appPerfilPanelesDelDominio()`**
+ * (`dominio = :d AND habilitado = 1`), y eso no es casualidad: es lo que
+ * garantiza que el panel sembrado este SIEMPRE entre los que el perfil tiene
+ * permitidos. Es la invariante que `app` mantiene —"`panel` es siempre uno de
+ * los permitidos"— y la que despues protege `olvidarPanelSinPermiso()` en
+ * panel/api/usuarios.php. Si alguna vez se cambia uno de los dos criterios hay
+ * que cambiar el otro, o el perfil nace recordando un panel que no puede abrir.
+ *
+ * NULL SI EL DOMINIO NO TIENE PANELES HABILITADOS, y no un 0 de relleno: la
+ * columna es FK contra `paneles` (`fk_perfiles_panel`, RESTRICT) y el centinela
+ * del sistema viejo ya no es un valor valido. Ese perfil ademas no va a recibir
+ * ninguna fila en `perfiles_paneles`, asi que entra a una app vacia — el NULL es
+ * el sintoma correcto de eso, no la causa.
+ *
+ * OJO CON EL DESEMPATE: `app` ordena sus paneles POR NOMBRE
+ * (`appPanelesDelDominio()` en lib/contexto.php) y cuando `panel` viene vacio
+ * cae al primero de ESA lista. O sea que el panel de id mas baja no tiene por
+ * que ser el mismo que abriria la app por su cuenta. Se siembra por id porque es
+ * el criterio pedido: estable, no depende de que alguien renombre un panel.
+ */
+function appPanelInicialDelDominio(PDO $pdo, int $dominioId): ?int
+{
+    $stmt = $pdo->prepare(
+        'SELECT MIN(id) FROM paneles WHERE dominio = :d AND habilitado = 1'
+    );
+    $stmt->execute([':d' => $dominioId]);
+
+    // MIN() sobre cero filas devuelve NULL, no 0: el `?: 0` normaliza las dos
+    // formas antes de decidir.
+    $id = (int) ($stmt->fetchColumn() ?: 0);
+
+    return $id > 0 ? $id : null;
 }
 
 /**

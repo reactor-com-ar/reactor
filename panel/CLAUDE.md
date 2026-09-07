@@ -233,12 +233,19 @@ Medido al restaurar el gate:
   permite a `app.js` distinguir este caso —la sesión ya no sirve, hay que volver
   al login— de los 403 de negocio.
 
-**Los tres caminos que otorgan acceso tienen que respetar el gate**, y los tres
-lo hacen:
+**Los caminos que otorgan acceso tienen que respetar el gate**, y lo hacen:
 
-- `invitacion/aceptar.php` crea el perfil con `tipo = 'A'`, y **busca uno de
-  Administrador** para reutilizar: si la persona ya tenía uno de Operador ahí
-  (porque usa `reactor-app`), ese no habilita el panel y se le agrega uno nuevo.
+- **`invitacion/aceptar.php` YA NO OTORGA ACCESO AL PANEL** (07/09/2026): crea el
+  perfil con `tipo = 'O'`, así que quien acepta opera la app y el login del panel
+  lo rebota con `motivo=perfil`. Hasta esa fecha creaba `'A'` y buscaba un perfil
+  de Administrador para reutilizar; hoy se queda con **cualquier** perfil
+  habilitado del dominio (ver "Invitaciones"). **Con esto ya no queda ningún
+  camino automático que fabrique un Administrador**: se otorga desde el alta de
+  `cloud` o editando el perfil en Usuarios. **Un dominio que se quede sin ningún
+  Administrador sólo se desbloquea desde `cloud`**, igual que pasa con los tres
+  permisos del perfil — y esto ya tenía un precedente en los datos:
+  `Camino al Puente Viejo` (#160) tiene 33 perfiles habilitados y los 33 son
+  Operador.
 - `cloud/api/enlaces_acceso.php` **no emite** un enlace de panel para quien no
   tenga un perfil de Administrador habilitado: devuelve 409 en vez de entregar
   algo que va a rebotar.
@@ -1025,11 +1032,19 @@ mismas tablas. Reglas que no se deducen del esquema:
   formulario de aceptación pide nombre y apellido por separado porque es lo
   que la persona espera completar, pero se guardan concatenados en `nombre`.
   No se modificó el esquema por esto.
-- **El perfil se crea con `tipo = 'A'`** y nombre `Administrador en <dominio>`.
-  Ya no lleva rol: `perfiles.rol` se eliminó el 06/09/2026. `tipo` se sigue
-  escribiendo en `'A'` porque la lee el sistema legacy, y una invitación emitida
-  desde el panel sigue significando alta administrativa allá — pero **dentro del
-  panel no habilita nada**, porque el acceso ya no mira ni el rol ni el tipo.
+- **El perfil se crea con `tipo = 'O'`** y nombre `Operador en <dominio>`
+  (07/09/2026). Hasta esa fecha era `'A'` / `Administrador en <dominio>`, porque
+  al panel sólo entra un Administrador y una invitación emitida desde acá sólo
+  podía significar alta administrativa. Se cambió por decisión explícita: **una
+  invitación da de alta un Operador, se emita donde se emita.** El argumento que
+  queda en pie es el que ya valía para la invitación de `app`: **`tipo` la lee el
+  sistema legacy —que sí reparte permisos con ella—, así que escribir `'A'` desde
+  una invitación le abre al invitado el back office viejo entero sin que nadie lo
+  decida.**
+  **Ojo con la consecuencia: esta invitación ya no da acceso al BackOffice.**
+  Quien la acepta recibe sus credenciales, opera la app, y si entra a
+  `panel.reactor.com.ar` el login lo rebota con `motivo=perfil`. Ver "Acceso:
+  sólo Administradores".
 - **Y con `operacion = 1`, `invitacion = 1` y `facturacion = 0`.** Los dos
   primeros por el mismo motivo que los paneles: un perfil que naciera sin ellos
   no podría usar la app. El tercero en `0` **a propósito** — este alta corre sin
@@ -1042,22 +1057,67 @@ mismas tablas. Reglas que no se deducen del esquema:
   cuenta que ya existía la registró otra persona y ese dato no se pisa. Va con
   `?: null` porque es una FK y el `0` del legacy no es un valor válido. Ver
   "`perfiles.registrante`" en el [CLAUDE.md raíz](../CLAUDE.md).
-- **`perfilAsegurado()` busca un perfil de ADMINISTRADOR, no "cualquier perfil
-  del dominio".** Si la persona ya tenía uno de Operador ahí (porque usa
-  `reactor-app`), ese no habilita el panel —el gate es `perfiles.tipo = 'A'`—
-  así que se le **agrega** uno nuevo en vez de reescribirle el que ya tiene.
-  Mutar el `tipo` de una fila existente le cambiaría el acceso en el sistema
-  legacy desde acá.
+- **`perfilAsegurado()` se queda con CUALQUIER perfil habilitado del dominio**,
+  cualquiera sea su `tipo` (07/09/2026). Antes filtraba por Administrador, y
+  tenía sentido mientras creaba `'A'`: un Operador no habilita el panel, así que
+  se le agregaba uno nuevo. **Ese filtro había que sacarlo junto con el cambio de
+  `tipo`, no después**: buscar un `'A'` mientras se crea un `'O'` le agrega un
+  segundo Operador idéntico, una fila por invitación, a toda persona que ya
+  tuviera el suyo en ese dominio. Es el mismo criterio que
+  `appPerfilAsegurado()` en la app, y las dos funciones hacen hoy lo mismo.
+- **El perfil que se reutiliza no se reescribe.** Si la persona ya era
+  Administradora en ese dominio, bajarla a Operadora le sacaría el panel —y el
+  back office viejo, que lee la misma columna— desde una pantalla que nadie abrió
+  para eso. Lo que la invitación promete es acceso al dominio, y esa persona ya
+  lo tiene.
 - **`tipo` acompaña al rol.** Son dos columnas para lo mismo y el legacy lee
   `tipo`; dejarlas en desacuerdo es exactamente como nacieron los 58 perfiles
   inconsistentes que hoy tiene la base (48 con rol Administrador y `tipo = 'O'`,
   10 al revés). Al **crear** hay que ponerlas de acuerdo; a las que ya están
   torcidas **no se las toca** — ver "`perfiles.tipo`: sólo `A` y `O`".
-- **`panel` va en `NULL`, no en `0`.** El legacy (`cPerfil::nuevo()`) escribe
-  `0`, que con las FK declaradas en `db/schema.sql` ya no es un valor válido.
+- **`panel` nace SEMBRADO con el panel de id más baja del dominio** (07/09/2026,
+  `panelInicialDelDominio()`), no en `NULL` como hasta esa fecha. `NULL` queda
+  sólo para el dominio que no tiene ningún panel habilitado — ese perfil tampoco
+  recibe filas en `perfiles_paneles`, así que el `NULL` es el síntoma correcto y
+  no la causa. **Y nunca `0`**: el legacy (`cPerfil::nuevo()`) escribe ese
+  centinela, que con las FK declaradas en `db/schema.sql` ya no es válido.
+  **El criterio de `panelInicialDelDominio()` es el mismo `dominio = :d AND
+  habilitado = 1` del `INSERT ... SELECT` que llena `perfiles_paneles`**, y eso
+  es lo que garantiza que el panel sembrado esté siempre entre los permitidos —
+  la invariante que después protege `olvidarPanelSinPermiso()`. Si se toca uno de
+  los dos criterios hay que tocar el otro.
+  **No es lo mismo que abriría `app` por su cuenta**: `appPanelesDelDominio()`
+  ordena **por nombre** y con `panel` vacío cae al primero de *esa* lista, así
+  que en un dominio con varios paneles el sembrado por id puede ser otro. Se
+  siembra por id porque es estable: no cambia si alguien renombra un panel.
   `perfiles.habilitado` se escribe con `HABILITADO` (el entero 1), igual que
   `usuarios.habilitado`: las dos columnas tienen el mismo par de valores
   (ver "La bandera `habilitado`" más abajo).
+- **La pantalla final manda a la APP, no al panel** (07/09/2026). El botón
+  `Ingresar` apuntaba a `panelBaseUrl() . '/login.php'`; desde que la invitación
+  crea Operadores, eso sólo podía rebotar al invitado con `motivo=perfil` sin
+  explicarle por qué. Ahora va a `app.reactor.com.ar`, y **el correo de
+  credenciales también** (`panelAppBaseUrl() . '/sesion/iniciar'`) — ese correo
+  llega después de que la persona cerró la pantalla, así que es la única pista
+  que le queda.
+- **Y con la sesión de la app ya abierta, vía enlace de un solo uso.** El panel
+  corre en otro host y `setcookie()` no cruza esa frontera, así que
+  `enlaceDeAccesoApp()` inserta una fila en `enlaces_acceso` con
+  `destino = 'app'` y el botón va a `app.reactor.com.ar/acceso?t=…`, que canjea
+  `app/acceso.php` con `appSesionAbrir()`. Se reusa el circuito de los enlaces
+  mágicos de cloud en vez de emitir la cookie sobre `.reactor.com.ar`, que se la
+  entregaría también a cloud y al propio panel. Vive 15 minutos
+  (`ENLACE_APP_MINUTOS`), en la base va el **SHA-256** del token y
+  `emisor_tabla = 'usuarios'` porque `invitaciones.emisor` es de esa tabla.
+  **Se emite después del commit y dentro de un `try`**: el acceso ya es válido
+  sin el enlace, así que si la inserción falla se cae al botón que manda al login
+  en vez de revertir un alta que salió bien.
+- **El enlace SÓLO se emite para la cuenta recién creada.** El `uuid` de la
+  invitación **lo ve el emisor** —el listado lo muestra como `Identificador`—,
+  así que emitirlo sobre una cuenta que ya existía sería un secuestro de cuenta:
+  invitar al correo de una cuenta ajena, copiar el uuid del propio listado, abrir
+  el enlace y entrar como esa persona. Con la cuenta nueva no hay nada que
+  secuestrar: la contraseña está impresa en esa misma pantalla.
 - **La contraseña inicial se genera y se muestra en pantalla, además de
   mandarse por correo.** No hay pantalla de "definir contraseña" y la columna
   guarda la contraseña de forma reversible (cifrado histórico), así que es el
@@ -1245,10 +1305,12 @@ Reglas que no se deducen del esquema:
   agrega el perfil de este dominio y le deja intactos la contraseña y el
   dominio activo. Por eso el alta no necesita backend propio — el circuito de
   invitaciones ya resuelve los dos casos.
-- **Invitar desde el panel es dar de alta a un administrador.** El perfil que
-  se otorga al aceptar es de rol Administrador, porque es el único que habilita
-  el panel (ver "Acceso: sólo Administradores"). No hay forma de invitar a
-  alguien "sólo para mirar": el panel no tiene niveles de permiso internos.
+- **Invitar desde el panel es dar de alta a un OPERADOR** (07/09/2026), no a un
+  administrador como hasta esa fecha. El perfil que se otorga al aceptar es
+  `tipo = 'O'`, así que **la persona invitada no va a poder entrar a este
+  BackOffice**: opera la app. Para que entre acá hay que darle `tipo = 'A'`
+  después, editando su perfil desde este mismo módulo o desde `cloud`. Ver
+  "Acceso: sólo Administradores" y la sección Invitaciones.
 - **No hay formulario de la PERSONA, y no lo va a haber.** `formUsuario()` —el
   que editaba la fila entera de `usuarios`— se borró al mudar el módulo a
   `perfiles` (05/09/2026) y no volvió: los datos de la persona (nombre, correo,
@@ -1449,6 +1511,13 @@ paneles desde afuera de `app`. Por eso el guardado la limpia
   permitido cuando el recordado no está en la lista, y con `panel` vacío hace
   exactamente lo mismo—, así que lo único que se gana es no dejar un dato que
   miente.
+- **Esto NO contradice que las invitaciones siembren `panel` al crear el
+  perfil** (07/09/2026, ver "Invitaciones"). Son dos momentos distintos: al
+  **crear** no hay ninguna decisión previa que preservar y el valor sembrado es
+  un punto de partida; al **revocar** sí la hay, y reemplazarla por otro panel
+  pisaría lo que la persona venía usando con algo que nadie eligió. La regla de
+  fondo es la misma en los dos casos — no inventar decisiones —, y por eso acá se
+  borra y allá se siembra.
 - **`NULL` y no `0`**: con las FK declaradas en `db/schema.sql`, el `0` del
   legacy ya no es un valor válido. Mismo criterio con el que lo escribe
   `panel/invitacion/aceptar.php`.

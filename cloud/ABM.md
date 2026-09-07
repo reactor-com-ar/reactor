@@ -37,6 +37,30 @@ Las columnas del listado deben respetar este orden:
 
 ## Buscador
 
+### Toolbar
+
+Arriba de la tabla, y en este orden de izquierda a derecha:
+
+1. **Buscador rápido** (`.search-wrap > .search-input`), con su × para limpiarlo.
+2. **`Filtros`** — `btn btn-secondary btn-sm` con `fa-filter`. Abre el Modal de Filtros.
+3. **`Refrescar`** — **sin texto**: `btn btn-secondary btn-sm btn-icon-only` con
+   `fa-rotate`, `title` y `aria-label` "Refrescar listado". Misma variante que
+   `Filtros` para que se lean como un par y no como una acción suelta.
+4. A la derecha del todo, la acción primaria `+ Nuevo <entidad>` (que los
+   módulos read-only omiten).
+
+Lo dibuja entero el helper compartido `abmToolbar()` y el botón de refrescar lo
+cablea `wireRefresh(idPrefix, route, state)`: ningún módulo arma el suyo.
+
+**Refrescar vuelve a pedirle todo al backend y re-renderiza el módulo completo**
+—listado, catálogos y stat cards—, **conservando los filtros y la búsqueda
+rápida vigentes**. Los dos detalles son la funcionalidad, no un extra:
+refrescar sólo la tabla deja los KPIs contando lo viejo arriba de datos nuevos,
+y perder los filtros convierte el refresh en un cambio de pantalla. Ver
+`DESIGN.md` §9.
+
+### Modal de Filtros
+
 El formulario de búsqueda debe respetar este orden de campos:
 
 1. **Primer campo: `Código`**

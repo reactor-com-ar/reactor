@@ -119,40 +119,97 @@ de la sección anterior: se leen con `esHabilitado()`, se escriben con
   invitaciones —la del panel y la de la app— los insertan en `1` con
   `facturacion` en `0`.
 
-### Las dos invitaciones: la del panel crea Administradores, la de la app Operadores
+### Las dos invitaciones: las dos crean Operadores
 
 Son el **mismo circuito** (tabla `invitaciones`, mismo canal de correo por
-Databox, misma pantalla de aceptación) emitido desde dos lados, y lo único que
-cambia es a quién dan de alta:
+Databox, misma pantalla de aceptación) emitido desde dos lados, y desde el
+07/09/2026 **dan de alta exactamente lo mismo**. Lo único que cambia es dónde se
+emite y quién puede hacerlo:
 
 | | `panel/` | `app/` |
 |---|---|---|
 | dónde se emite | Usuarios → *+ Nuevo usuario* / Invitaciones | *Mi Dominio* → *Invitar un Usuario* |
 | quién puede emitirla | cualquier perfil que entre al panel (`tipo = 'A'`) | el permiso `invitacion` |
 | a dónde enlaza el correo | `panel.reactor.com.ar/invitacion/` | `app.reactor.com.ar/invitacion/` |
-| `tipo` del perfil que crea | `A` (Administrador) | **`O` (Operador)** |
+| `tipo` del perfil que crea | **`O` (Operador)** | **`O` (Operador)** |
 | `operacion` / `invitacion` / `facturacion` | `1` / `1` / `0` | `1` / `1` / `0` |
 | `registrante` del perfil que crea | `invitaciones.emisor` | `invitaciones.emisor` |
+| `panel` del perfil que crea | panel de id más baja habilitado del dominio | ídem |
 
-- **El `tipo` no es simetría rota, es la razón de ser de cada una.** Al panel
-  sólo entra un Administrador, así que su invitación sólo puede significar alta
-  administrativa; la de la app significa "sumate a operar los equipos", y ahí el
-  Administrador no hace falta. Y como `tipo` la lee el sistema legacy —que sí
-  reparte permisos con ella—, poner `A` desde la app le abriría al invitado el
-  back office viejo entero sin que nadie lo decidiera.
+- **UNA INVITACIÓN DA DE ALTA UN OPERADOR, SE EMITA DONDE SE EMITA.** Hasta el
+  07/09/2026 la del panel creaba `A`, con este argumento: al panel sólo entra un
+  Administrador, así que una invitación emitida desde ahí sólo podía significar
+  alta administrativa. Se cambió por decisión explícita. El argumento que queda
+  en pie es el que ya valía para la app y ahora vale para las dos: **`tipo` la
+  lee el sistema legacy —que sí reparte permisos con ella—, así que poner `A`
+  desde una invitación le abre al invitado el back office viejo entero sin que
+  nadie lo haya decidido.**
+- **CONSECUENCIA: la invitación del panel ya no da acceso al panel.** Quien la
+  acepta opera la app; si entra a `panel.reactor.com.ar` el login lo rebota con
+  `motivo=perfil`, porque el gate sigue siendo `perfiles.tipo = 'A'`
+  ([panel/lib/acceso.php](panel/lib/acceso.php)). **Ningún camino fabrica ya un
+  Administrador sin que alguien lo decida a mano**: se otorga desde el alta de
+  `cloud` (que elige el `tipo`) o editando el perfil en Usuarios. Y **si un
+  dominio se queda sin ningún Administrador, el único desbloqueo es `cloud`** —
+  el mismo patrón que ya rige para los tres permisos del perfil.
 - **Las dos resuelven los mismos tres casos** al aceptar: sin cuenta → se crea
   `usuarios` + `perfiles`; con cuenta y sin perfil → sólo el perfil, sin tocarle
   contraseña ni dominio activo; con perfil habilitado en ese dominio → **no se
   hace nada** y la invitación se cierra igual.
-- La diferencia fina está en ese tercer caso: el panel busca un perfil **de
-  Administrador** y agrega uno si el que hay es Operador (porque el suyo es el
-  `tipo` que abre la puerta), y la app se queda con **cualquier** perfil
-  habilitado que encuentre (`appPerfilAsegurado()` en
-  [app/lib/perfiles.php](app/lib/perfiles.php)) — reescribirlo le cambiaría el
-  acceso en el panel y en el legacy desde una pantalla que no administra nada.
+- **Ese tercer caso ya no se resuelve distinto en cada una**: las dos se quedan
+  con **cualquier** perfil habilitado del dominio, cualquiera sea su `tipo`
+  (`perfilAsegurado()` en [panel/invitacion/aceptar.php](panel/invitacion/aceptar.php),
+  `appPerfilAsegurado()` en [app/lib/perfiles.php](app/lib/perfiles.php)). El
+  panel buscaba uno **de Administrador** mientras creaba `A`; **seguir
+  filtrando por `A` ahora que crea `O` le agregaría un segundo Operador idéntico
+  a cada persona que ya tuviera el suyo**, una fila por invitación. Y el perfil
+  que se reutiliza **no se reescribe**: bajar a Operador a quien ya era
+  Administrador ahí le sacaría el panel —y el back office viejo, que lee la misma
+  columna— desde una pantalla que nadie abrió para eso.
+- **Las dos terminan mandando a la APP, y con la sesión ya abierta cuando la
+  cuenta es nueva.** El botón `Ingresar` de la pantalla final va a
+  `app.reactor.com.ar` en las dos — el del panel apuntaba a su propio
+  `login.php`, que desde que la invitación crea Operadores sólo podía rebotar al
+  invitado con `motivo=perfil`. Cómo se abre la sesión cambia según el host:
+  - **`app/`** corre en el mismo dominio, así que llama a `appSesionAbrir()` —
+    el mismo punto que el login por contraseña— y el botón entra directo a `/`.
+  - **`panel/`** no puede escribir la cookie de otro host, así que emite un
+    **enlace de un solo uso** en `enlaces_acceso` con `destino = 'app'` y el
+    botón va a `app.reactor.com.ar/acceso?t=…`, que lo canjea
+    [app/acceso.php](app/acceso.php) abriendo la sesión con la misma función. Es
+    el circuito que ya existía para los enlaces mágicos de cloud. La alternativa
+    —emitir la cookie sobre `.reactor.com.ar`— se la entregaría también a `cloud`
+    y al panel.
+- **La sesión SÓLO se abre para la cuenta recién creada, y no es una limitación
+  técnica.** La credencial de esa pantalla es el `uuid` del enlace, y **ese uuid
+  lo ve el emisor**: el listado de Invitaciones del panel lo muestra como
+  `Identificador`. Si aceptar abriera sesión también sobre una cuenta que ya
+  existía, cualquiera que pueda invitar tendría un secuestro de cuenta servido —
+  invita al correo de una cuenta existente (que puede ser Administradora de otros
+  dominios), copia el uuid de su propio listado, abre el enlace él mismo y entra
+  como esa persona. Con la cuenta nueva no hay nada que secuestrar: la contraseña
+  se acaba de generar y está impresa en esa misma pantalla. A quien ya tenía
+  cuenta se le sigue pidiendo **su** contraseña, que es lo que la pantalla le
+  dice.
 - **Las dos le asignan al perfil nuevo todos los paneles habilitados del
   dominio.** No es un extra: `perfiles_paneles` no tiene fallback, así que sin
   esas filas la persona entra a una app vacía.
+- **Y las dos le siembran `perfiles.panel`** —la columna singular, que es la
+  *memoria* del último panel abierto— con el **panel de id más baja habilitado
+  del dominio** (`panelInicialDelDominio()` en el panel,
+  `appPanelInicialDelDominio()` en la app; 07/09/2026). Antes nacía en `NULL` y
+  `app` resolvía el panel de arranque en cada conexión.
+  **El criterio es el mismo `dominio = :d AND habilitado = 1` con el que se
+  llena `perfiles_paneles`**, y ahí está la gracia: el panel sembrado siempre es
+  uno de los permitidos, que es la invariante que `app` mantiene y que
+  `olvidarPanelSinPermiso()` protege. Cambiar un criterio sin el otro hace nacer
+  al perfil recordando un panel que no puede abrir.
+  **Queda en `NULL` si el dominio no tiene ningún panel habilitado** — ese perfil
+  tampoco recibe filas en `perfiles_paneles`, así que el `NULL` es el síntoma y
+  no la causa. Nunca `0`: es FK contra `paneles`.
+  **Ojo, no coincide necesariamente con lo que `app` elegiría sola**:
+  `appPanelesDelDominio()` ordena **por nombre**. Se siembra por id porque es
+  estable frente a un renombre.
 - **Y las dos anotan al emisor como `registrante` del perfil** — ver la sección
   siguiente. En el tercer caso (ya tenía perfil) no se anota nada: no se creó
   ningún acceso.

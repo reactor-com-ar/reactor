@@ -279,12 +279,20 @@ El `.user-dropdown`, en cambio, se despliega *bajo* el topbar sobre el área gri
                      border: 1px solid var(--border); }
 .btn-ghost:hover   { background: var(--bg); color: var(--text); }
 .btn-sm            { padding: 5px 12px; font-size: .8rem; }
+.btn-icon-only     { padding-left: 9px; padding-right: 9px; }
 .btn-icon-sm       { background: none; border: none; cursor: pointer;
                      padding: 4px 8px; border-radius: 6px; font-size: .85rem; }
 .btn-icon-sm:hover { background: var(--bg); }
 ```
 
 **Regla:** una sola acción primaria por pantalla o modal. El resto son `secondary` o `ghost`. `danger` solo para destruir / eliminar.
+
+**`.btn-icon-only` vs `.btn-icon-sm`** — los dos son botones sin texto y no son intercambiables:
+
+- `.btn-icon-only` es un **modificador de `.btn`**: conserva fondo, borde y alto de la variante que lo acompaña, y sólo achica el padding horizontal para que la caja quede cuadrada. Se usa cuando el botón convive con otro `.btn` con texto y los dos tienen que leerse como un par — el `Refrescar` al lado de `Filtros` en la toolbar (§9). El padding vertical lo sigue poniendo `.btn-sm`: es lo que garantiza que queden alineados al píxel, así que **no se pisa**.
+- `.btn-icon-sm` es un botón **suelto y sin chrome** (sin fondo ni borde), para íconos que flotan sobre una cabecera o una tarjeta — la × de un modal, el refrescar de una card del dashboard.
+
+Los dos llevan `title` y `aria-label`: sin texto, es lo único que los nombra.
 
 **Única excepción:** la barra de acciones del modal (§21-bis), donde todos los botones menos `Cerrar` van en `btn-primary` — ahí el rojo separa la salida del resto, no marca jerarquía.
 
@@ -372,7 +380,7 @@ rótulo con ícono.
 
 Patrón normativo para el encabezado de cualquier listado ABM (ver `ABM.md` §2).
 
-- **Zona izquierda**: input de búsqueda rápida (`.search-wrap > .search-input`) + botón `Filtros` (`btn-secondary` con `fa-filter`). El botón abre el Modal de Filtros (§23-bis), que es la fuente completa de filtros del módulo. La búsqueda rápida es sólo un atajo.
+- **Zona izquierda**: input de búsqueda rápida (`.search-wrap > .search-input`) + botón `Filtros` (`btn-secondary` con `fa-filter`) + botón `Refrescar` (mismo `btn-secondary`, pero `btn-icon-only` con `fa-rotate` y sin texto). El botón `Filtros` abre el Modal de Filtros (§23-bis), que es la fuente completa de filtros del módulo. La búsqueda rápida es sólo un atajo.
 - **Zona derecha**: una sola acción primaria `+ Nuevo <entidad>` (`btn-primary`).
 
 No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como utilitario legacy).
@@ -387,6 +395,10 @@ No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como 
     </div>
     <button type="button" class="btn btn-secondary btn-sm" id="dev-filters">
       <i class="fa-solid fa-filter"></i> Filtros
+    </button>
+    <button type="button" class="btn btn-secondary btn-sm btn-icon-only"
+            id="dev-refresh" title="Refrescar" aria-label="Refrescar listado">
+      <i class="fa-solid fa-rotate"></i>
     </button>
   </div>
   <div class="toolbar-right">
@@ -410,12 +422,20 @@ No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como 
                       cursor: pointer; color: var(--muted); font-size: 1.1rem;
                       padding: 2px 4px; border-radius: 50%; transition: color .15s; }
 .search-clear:hover { color: var(--text); }
+
+/* Refrescar: mismo `btn-secondary btn-sm` que Filtros, sin texto. Solo se pisa
+   el padding horizontal, asi los dos botones quedan del mismo alto (§6). */
+.btn-icon-only      { padding-left: 9px; padding-right: 9px; }
 ```
 
 **Reglas:**
 - El `placeholder` del input de búsqueda rápida lista los campos sobre los que opera la búsqueda (UID / nombre / tipo / ubicación, operador / nº / ICCID / notas, etc.).
 - El filtrado en vivo se aplica al `input`/`change` event sin re-fetch (filtrado client-side por defecto). Señales y Registros son casos mixtos: filtran client-side sobre la última página descargada, pero re-fetchean cuando cambian los parámetros `?dispositivo=` o `?limit=` server-side.
 - El botón `Filtros` es secundario, no primario — la acción primaria del listado es siempre `+ Nuevo <entidad>`, una sola por pantalla (ver §6).
+- **`Refrescar` va inmediatamente a la derecha de `Filtros`, sin texto** (`btn-icon-only` con `fa-rotate`, `title` + `aria-label` "Refrescar listado"). No lleva rótulo porque el ícono de recarga es universal y porque en la zona izquierda compite con la búsqueda rápida, que es lo que el usuario tiene que encontrar primero; comparte variante con `Filtros` para que se lean como un par y no como una acción suelta.
+- **Refrescar re-renderiza el módulo entero, no sólo las filas.** Vuelve a pedir todos los `fetch` del `render*()` —listado, catálogos y **stat cards**—: refrescar sólo la tabla dejaría los KPIs contando lo viejo arriba de datos nuevos, que es peor que no refrescar. Por eso está implementado como `navigate()` y no como un re-fetch local del `applyAndRender()`.
+- **Y conserva los filtros y la búsqueda rápida vigentes.** `navigate()` arranca cada vista de cero, así que el módulo se deja su propio `state` preparado antes de re-renderizar (`refrescarVista(route, state)` → `tomarEstadoVista(route, defaults)` en el `render*()`; mismo criterio de un solo uso y misma-ruta que `pendingDominioFilter`, §21-bis.1). Un refresh que limpia los filtros no refresca: cambia de pantalla.
+- Los tres pedazos salen del helper compartido `abmToolbar()` / `wireRefresh(idPrefix, route, state)`, así que ningún módulo dibuja ni cablea el suyo.
 - Si el módulo es read-only (señales, registros, adopciones, alertas), se omite el botón `+ Nuevo` y la toolbar colapsa a sólo búsqueda rápida + Filtros. El helper `abmToolbar` lo soporta nativamente pasando `newLabel: null`.
 - `.filter-chip` queda en CSS como utilitario suelto, pero **no se usa en listados ABM nuevos**.
 
@@ -2151,4 +2171,5 @@ rellenaban las dos columnas:
 7. **Densidad**: padding `10–14px` en celdas; gaps `12–20px` entre cards.
 8. **Mobile**: `<768px` colapsa sidebar a overlay; grids `form-row*` a una columna.
 9. **Sin librerías UI pesadas** (Bootstrap / Tailwind / Material). CSS plano + variables.
-10. **Si dudás, mirá los componentes de arriba antes de crear uno nuevo.**
+10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los doce módulos. Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
+11. **Si dudás, mirá los componentes de arriba antes de crear uno nuevo.**

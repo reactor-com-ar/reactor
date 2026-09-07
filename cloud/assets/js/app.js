@@ -113,6 +113,32 @@
         return pedido && pedido.route === route ? pedido : null;
     }
 
+    // Estado del listado que un módulo se deja preparado a sí mismo antes de
+    // re-renderizarse: es lo que hace el botón Refrescar de la toolbar (§9 de
+    // DESIGN.md). Refrescar es `navigate()` — se vuelve a pedir todo, KPIs
+    // incluidos, no sólo las filas de la tabla —, y `navigate()` arranca cada
+    // vista de cero: sin esto el usuario perdería los filtros y la búsqueda
+    // que tenía puestos, que es justo lo que quiere ver actualizado.
+    // Mismo criterio de un solo uso y misma-ruta que `pendingDominioFilter`.
+    let pendingViewState = null;   // { route: 'dominios', state: {...} }
+
+    function refrescarVista(route, state) {
+        pendingViewState = { route, state };
+        navigate();
+    }
+
+    // Devuelve los defaults del módulo, pisados por el estado que dejó el
+    // Refrescar si la vuelta es a la misma ruta. El merge es contra los
+    // defaults y no un reemplazo, así una clave nueva del estado no queda
+    // indefinida al volver de un refresh.
+    function tomarEstadoVista(route, defaults) {
+        const pedido = pendingViewState;
+        pendingViewState = null;
+        return pedido && pedido.route === route
+            ? { ...defaults, ...pedido.state }
+            : defaults;
+    }
+
     /* ---------- Sidebar groups ---------- */
     navGroupToggles.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -358,16 +384,18 @@
     }
 
     // Toolbar del listado ABM (ABM.md §2):
-    //   - Zona izquierda: input de búsqueda rápida + botón Filtros.
+    //   - Zona izquierda: input de búsqueda rápida + botón Filtros + Refrescar.
     //   - Zona derecha:   botón primario "+ Nuevo <entidad>".
     // `idPrefix` se usa para los ids: `${idPrefix}-quick`, `${idPrefix}-filters`,
-    // `${idPrefix}-new`. `quickPlaceholder` lista los campos sobre los que opera.
+    // `${idPrefix}-refresh`, `${idPrefix}-new`. `quickPlaceholder` lista los
+    // campos sobre los que opera.
     // `extraRight` (opcional) inyecta botones secundarios antes de "+ Nuevo"
     // en la zona derecha (ej.: "Monitor en tiempo real" en Señales).
     function abmToolbar({ idPrefix, quickPlaceholder, newLabel, extraRight }) {
         // newLabel = null|false ⇒ módulo read-only (señales, alertas): se omite
         // el botón `+ Nuevo` (ver DESIGN.md §9). El resto del toolbar (búsqueda
-        // rápida + Filtros) se mantiene igual.
+        // rápida + Filtros + Refrescar) se mantiene igual: un listado read-only
+        // se refresca igual que uno editable, y de hecho más seguido.
         const newBtn = newLabel
             ? `<button type="button" class="btn btn-primary btn-sm" id="${idPrefix}-new">
                    <i class="fa-solid fa-plus"></i> ${escape(newLabel)}
@@ -386,10 +414,23 @@
                     <button type="button" class="btn btn-secondary btn-sm" id="${idPrefix}-filters">
                         <i class="fa-solid fa-filter"></i> Filtros
                     </button>
+                    <button type="button" class="btn btn-secondary btn-sm btn-icon-only"
+                            id="${idPrefix}-refresh" title="Refrescar" aria-label="Refrescar listado">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
                 </div>
                 <div class="toolbar-right">${extra}${newBtn}</div>
             </div>
         `;
+    }
+
+    // Botón Refrescar de la toolbar (ABM.md §2). Vuelve a pedirle los datos al
+    // backend y re-renderiza el módulo entero —KPIs incluidos, que si no
+    // quedarían contando lo viejo debajo de una tabla nueva—, conservando los
+    // filtros y la búsqueda rápida vigentes vía `refrescarVista()`.
+    function wireRefresh(idPrefix, route, state) {
+        document.getElementById(`${idPrefix}-refresh`)
+            .addEventListener('click', () => refrescarVista(route, state));
     }
 
     // Abre el Modal de Filtros (ABM.md §3), con el formato estándar de modal:
@@ -942,7 +983,7 @@
             const dispositivos = data.dispositivos;
             const dominios     = domData.dominios;
 
-            const state = dispositivosDefaults();
+            const state = tomarEstadoVista('dispositivos', dispositivosDefaults());
             const domPedido = tomarFiltroDominio('dispositivos');
             if (domPedido) state.dominio = domPedido;
 
@@ -1085,6 +1126,7 @@
 
         btnFilt.addEventListener('click', () => openDevicesFiltersModal(state, allDominios, applyAndRender));
         btnNew.addEventListener('click',  () => openDeviceModal(null));
+        wireRefresh('dev', 'dispositivos', state);
 
         applyAndRender();
     }
@@ -1638,7 +1680,7 @@
             const dominios = domData.dominios;
             const chips    = data.chips;
 
-            const state = chipsDefaults();
+            const state = tomarEstadoVista('chips', chipsDefaults());
             const domPedido = tomarFiltroDominio('chips');
             if (domPedido) state.dominio = domPedido;
 
@@ -1785,6 +1827,7 @@
 
         btnFilt.addEventListener('click', () => openChipsFiltersModal(state, allDominios, applyAndRender));
         btnNew.addEventListener('click',  () => openChipModal(null, allDominios));
+        wireRefresh('chip', 'chips', state);
 
         applyAndRender();
     }
@@ -2107,7 +2150,7 @@
             const data = await api('transceptores');
             const r = data.resumen;
             const transceptores = data.transceptores;
-            const state = transceptoresDefaults();
+            const state = tomarEstadoVista('transceptores', transceptoresDefaults());
 
             root.innerHTML = `
                 ${moduleHeader('Transceptores', 'Gateways de mensajería (host, puerto y credenciales) que reciben y entregan señales hacia los dispositivos.')}
@@ -2239,6 +2282,7 @@
 
         btnFilt.addEventListener('click', () => openTransceptoresFiltersModal(state, applyAndRender));
         btnNew.addEventListener('click',  () => openTransceptorModal(null));
+        wireRefresh('trx', 'transceptores', state);
 
         applyAndRender();
     }
@@ -2522,7 +2566,7 @@
         try {
             const data = await api('dominios');
             const dominios = data.dominios;
-            const state = dominiosDefaults();
+            const state = tomarEstadoVista('dominios', dominiosDefaults());
 
             root.innerHTML = `
                 ${moduleHeader('Dominios', 'Espacios lógicos que agrupan dispositivos, chips y perfiles de acceso.')}
@@ -2642,6 +2686,7 @@
 
         btnFilt.addEventListener('click', () => openDominiosFiltersModal(state, applyAndRender));
         btnNew.addEventListener('click',  () => openDomainModal(null));
+        wireRefresh('dom', 'dominios', state);
 
         applyAndRender();
     }
@@ -2970,7 +3015,7 @@
             const data = await api('users');
             const r = data.resumen;
             const usuarios = data.usuarios;
-            const state = usuariosDefaults();
+            const state = tomarEstadoVista('users', usuariosDefaults());
 
             root.innerHTML = `
                 ${moduleHeader('Usuarios', 'Personas con acceso a la plataforma: sus credenciales y su estado. A qué dominios entra cada una lo definen sus perfiles.')}
@@ -3108,6 +3153,7 @@
 
         btnFilt.addEventListener('click', () => openUsersFiltersModal(state, applyAndRender));
         btnNew.addEventListener('click',  () => openUserModal(null));
+        wireRefresh('usr', 'users', state);
 
         applyAndRender();
     }
@@ -3832,7 +3878,7 @@
             const perfiles  = data.perfiles;
             const usuarios  = usrData.usuarios;
             const dominios  = domData.dominios;
-            const state     = perfilesDefaults();
+            const state     = tomarEstadoVista('profiles', perfilesDefaults());
             perfilesCatalogos = { usuarios, dominios };
             perfilesCtx       = { catalogos: data.catalogos };
 
@@ -4058,6 +4104,7 @@
 
         btnFilt.addEventListener('click', () => openProfilesFiltersModal(state, allUsuarios, allDominios, applyAndRender));
         btnNew.addEventListener('click',  () => openProfileModal(null, allUsuarios, allDominios));
+        wireRefresh('prf', 'profiles', state);
 
         applyAndRender();
     }
@@ -4748,7 +4795,7 @@
             const initialDevice = pendingSignalsDeviceFilter;
             pendingSignalsDeviceFilter = null;
 
-            const state = signalsDefaults();
+            const state = tomarEstadoVista('signals', signalsDefaults());
             if (initialDevice) state.dispositivo = String(initialDevice);
             const domPedido = tomarFiltroDominio('signals');
             if (domPedido) state.dominio = domPedido;
@@ -5196,6 +5243,7 @@
                 else        applyAndRender();
             })
         );
+        wireRefresh('sig', 'signals', state);
 
         applyAndRender();
     }
@@ -5435,7 +5483,7 @@
 
     async function renderRegistros(root) {
         try {
-            const state = registrosDefaults();
+            const state = tomarEstadoVista('registros', registrosDefaults());
             const domPedido = tomarFiltroDominio('registros');
             if (domPedido) state.dominio = domPedido;
 
@@ -5666,6 +5714,7 @@
                 else        applyAndRender();
             })
         );
+        wireRefresh('reg', 'registros', state);
 
         applyAndRender();
     }
@@ -5878,7 +5927,7 @@
 
     async function renderAdopciones(root) {
         try {
-            const state = adopcionesDefaults();
+            const state = tomarEstadoVista('adopciones', adopcionesDefaults());
             const domPedido = tomarFiltroDominio('adopciones');
             if (domPedido) state.dominio = domPedido;
             // "Listar → Adopciones" desde Consultar usuario, que puede pedir
@@ -6080,6 +6129,7 @@
                 else        applyAndRender();
             })
         );
+        wireRefresh('ado', 'adopciones', state);
 
         applyAndRender();
     }
@@ -6303,7 +6353,7 @@
             const r    = data.resumen;
             const controladores = data.controladores;
             controladoresCtx = { catalogos: data.catalogos };
-            const state = controladoresDefaults();
+            const state = tomarEstadoVista('controladores', controladoresDefaults());
 
             root.innerHTML = `
                 ${moduleHeader('Controladores', 'Las únicas personas que pueden ingresar a Reactor Cloud. No son los usuarios de app ni de panel: son dos listas separadas.')}
@@ -6477,6 +6527,7 @@
 
         btnFilt.addEventListener('click', () => openControladoresFiltersModal(state, applyAndRender));
         btnNew.addEventListener('click',  () => openControladorModal(null));
+        wireRefresh('ctl', 'controladores', state);
 
         applyAndRender();
     }
@@ -6999,7 +7050,7 @@
             const roles = data.roles;
             rolesCtx = { catalogos: data.catalogos };
 
-            const state = rolesDefaults();
+            const state = tomarEstadoVista('roles', rolesDefaults());
 
             root.innerHTML = `
                 ${moduleHeader('Roles', 'Conjuntos de permisos de Reactor Cloud. Un rol agrupa lo que una persona puede ver y hacer, y se asigna a los controladores.')}
@@ -7142,6 +7193,7 @@
 
         btnFilt.addEventListener('click', () => openRolesFiltersModal(state, applyAndRender));
         btnNew.addEventListener('click',  () => openRolModal(null));
+        wireRefresh('rol', 'roles', state);
 
         applyAndRender();
     }
@@ -7514,7 +7566,7 @@
             const r        = data.resumen;
             const permisos = data.permisos;
 
-            const state = permisosDefaults();
+            const state = tomarEstadoVista('permisos', permisosDefaults());
 
             root.innerHTML = `
                 ${moduleHeader('Permisos', 'Cada permiso es una acción o una pantalla de Reactor Cloud que un rol puede habilitar.')}
@@ -7647,6 +7699,7 @@
 
         btnFilt.addEventListener('click', () => openPermisosFiltersModal(state, applyAndRender));
         btnNew.addEventListener('click',  () => openPermisoModal(null));
+        wireRefresh('per', 'permisos', state);
 
         applyAndRender();
     }

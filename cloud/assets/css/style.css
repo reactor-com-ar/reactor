@@ -261,6 +261,12 @@ body.has-banner .layout   { min-height: calc(100vh - 44px); }
 .btn-ghost         { background: transparent; color: var(--muted); border: 1px solid var(--border); }
 .btn-ghost:hover   { background: var(--bg); color: var(--text); }
 .btn-sm            { padding: 5px 12px; font-size: .8rem; }
+/* `.btn` de solo icono: mismo alto y mismo relleno que su hermano con texto,
+ * pero caja cuadrada. Se pisa solo el padding horizontal a proposito -- el
+ * vertical lo sigue poniendo `.btn-sm`, que es lo que garantiza que los dos
+ * botones queden alineados al pixel. Va despues de `.btn-sm` porque compiten
+ * con la misma especificidad y gana el ultimo. */
+.btn-icon-only     { padding-left: 9px; padding-right: 9px; }
 .btn-icon-sm       {
     background: none; border: none; cursor: pointer;
     padding: 4px 8px; border-radius: 6px; font-size: .85rem;

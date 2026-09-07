@@ -19,12 +19,12 @@ declare(strict_types=1);
  * `usuarios.perfil` guarda cual se eligio, asi que la fila tiene que
  * identificar al perfil sin ambiguedad. Es como lista el legacy.
  *
- * QUIEN DEFINE LA DISPONIBILIDAD: `perfiles`, y SOLO los de rol Administrador.
- * Una cuenta puede pasar a un dominio si existe una fila habilitada
- * `perfiles(usuario, dominio)` con `rol` en PANEL_ROLES_ADMIN — la misma regla
- * con la que entra al panel, porque el selector no puede ofrecer un destino que
- * despues el gate de lib/acceso.php va a rechazar. Un dominio donde la cuenta
- * es Operadora simplemente no aparece.
+ * QUIEN DEFINE LA DISPONIBILIDAD: `perfiles`, todos los habilitados. Una cuenta
+ * puede pasar a un dominio si existe una fila habilitada
+ * `perfiles(usuario, dominio)` — la misma regla con la que entra al panel,
+ * porque el selector no puede ofrecer un destino que despues el gate de
+ * lib/acceso.php vaya a rechazar. Hasta el 06/09/2026 se filtraba ademas por
+ * rol de Administrador; `perfiles`.`rol` ya no existe.
  * `usuarios.dominio` NO es la lista de dominios permitidos: es el dominio
  * ACTIVO, el que viaja en el JWT y por el que filtra todo el panel.
  *
@@ -82,7 +82,7 @@ function listarPerfiles(int $usuarioId): void
     // misma que usa el login para elegir con que perfil arranca la sesion.
     $perfiles = array_map(
         static fn (array $p): array => $p + ['actual' => $p['perfil'] === $perfilActual],
-        perfilesAdministrador($usuarioId)
+        perfilesHabilitados($usuarioId)
     );
 
     // Ya no se lista el dominio activo sin perfil propio. Existia porque
@@ -129,14 +129,13 @@ function cambiarDominio(int $usuarioId): void
          WHERE p.id = :p
            AND p.usuario = :u
            AND p.habilitado = :hab
-           AND p.rol IN (' . panelRolesAdminSql() . ')
          LIMIT 1'
     );
     $stmt->execute([':p' => $perfilId, ':u' => $usuarioId, ':hab' => HABILITADO]);
     $perfil = $stmt->fetch();
 
     if (!$perfil) {
-        json_error('Ese perfil no está disponible para tu cuenta: al panel solo se entra con perfil de Administrador.', 403);
+        json_error('Ese perfil no está disponible para tu cuenta.', 403);
     }
 
     // Se reemite el token, asi que se revalida la cuenta como en el login: si
@@ -172,7 +171,6 @@ function cambiarDominio(int $usuarioId): void
         'dominio_nombre' => $alcance['dominio_nombre'] ?? '',
         'perfil'         => $alcance['perfil']         ?? null,
         'perfil_nombre'  => $alcance['perfil_nombre']  ?? '',
-        'roles'          => $alcance['roles']          ?? '',
     ];
 
     jwt_cookie_set(jwt_sign($payload, JWT_TTL));

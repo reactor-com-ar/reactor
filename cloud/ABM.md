@@ -16,7 +16,7 @@ Las columnas del listado deben respetar este orden:
 3. **Columna `Acciones`, al final:**
    - Una sola columna llamada **`Acciones`** que contiene un botón con **ícono hamburguesa** (`fa-bars`).
    - El click sobre el botón **y** el **click derecho** sobre cualquier punto de la fila abren el **mismo menú contextual**, posicionado en el punto de activación.
-   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Adopciones, Usuarios y Perfiles** (más la solapa Perfiles del modal de Consultar de Usuarios).
+   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Adopciones, Usuarios, Perfiles, Controladores, Roles y Permisos** (más la solapa Perfiles del modal de Consultar de Usuarios).
    - El menú contextual debe incluir, como mínimo y en este orden:
      - **Consultar** — ícono de ojo (`fa-eye`).
      - **Editar** — ícono de lápiz (`fa-pencil`).
@@ -57,6 +57,13 @@ El formulario de búsqueda debe respetar este orden de campos:
      - Select `Dirección` con dos opciones: `Ascendente` / `Descendente`.
    - Si el módulo no requiere ordenamiento configurable, omitir este bloque.
 
+**Cabecera del modal de Filtros:** la misma que la de Consultar y la de
+Alta/Edición — título en primario (`.modal-header-primary`) y barra de acciones
+(`.modal-menubar`) en lugar del footer, con `Cancelar` (`btn-ghost`) +
+`Limpiar` + `Aplicar` (`btn-primary`), los tres directos. Lo dibuja el helper
+compartido `openFiltersModal()`, así que sale igual en todos los módulos y no
+hay una versión por listado.
+
 ## Modales
 
 ### Consultar
@@ -76,7 +83,7 @@ El formulario de búsqueda debe respetar este orden de campos:
 ### Alta / Edición
 - El modal de **crear un nuevo registro** y el de **editar** deben incluir **todos los campos** de la entidad.
 - Ambos modales comparten la misma estructura de campos; la única diferencia es si vienen precargados con los datos del registro (edición) o vacíos (alta).
-- **Cabecera igual a la del modal de Consultar del mismo módulo**: título en primario (`.modal-header-primary`, §14 de `DESIGN.md`) y la barra de acciones debajo (`.modal-menubar`, §21-bis) en lugar del footer — `Cancelar` (`btn-ghost`) + `Guardar` (`btn-primary`) — **el mismo rótulo en alta y en edición**, porque el título del modal ya dice cuál de las dos es. Consultar y editar son la misma pantalla en dos modos: si una lleva la cabecera y la otra un footer neutro, se leen como dos sistemas distintos. Primer módulo con las dos: Dominios.
+- **Cabecera igual a la del modal de Consultar del mismo módulo**: título en primario (`.modal-header-primary`, §14 de `DESIGN.md`) y la barra de acciones debajo (`.modal-menubar`, §21-bis) en lugar del footer — `Cancelar` (`btn-ghost`) + `Guardar` (`btn-primary`) — **el mismo rótulo en alta y en edición**, porque el título del modal ya dice cuál de las dos es. Consultar y editar son la misma pantalla en dos modos: si una lleva la cabecera y la otra un footer neutro, se leen como dos sistemas distintos. Módulos ya migrados: Dominios, Usuarios, Perfiles, Controladores, Roles y Permisos.
 
 ### Eliminar
 - La baja de un registro **sin dependencias** usa el `confirmDialog` estándar (§15 de `DESIGN.md`): título, una frase y los botones `Cancelar` / `Eliminar`.

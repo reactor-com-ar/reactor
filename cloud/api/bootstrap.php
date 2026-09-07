@@ -8,6 +8,11 @@ date_default_timezone_set('America/Argentina/Buenos_Aires');
 require_once dirname(__DIR__, 2) . '/env.php';
 require_once dirname(__DIR__) . '/lib/auth_check.php';
 require_once dirname(__DIR__) . '/lib/habilitado.php';
+// Catalogo de los tres permisos de `perfiles` (operacion / invitacion /
+// facturacion). Va en el bootstrap y no en profiles.php porque describe una
+// entidad de la base, no un endpoint: la ficha del perfil la muestran dos
+// modulos (Perfiles y la solapa Perfiles de Usuarios).
+require_once dirname(__DIR__) . '/lib/permisos.php';
 
 if (APP_ENV !== 'production') {
     ini_set('display_errors', '1');

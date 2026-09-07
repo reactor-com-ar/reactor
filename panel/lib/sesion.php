@@ -46,7 +46,6 @@ function sessionContext(): ?array
         'dominio_nombre' => (string) ($claims['dominio_nombre'] ?? ''),
         'perfil'         => isset($claims['perfil']) ? (int) $claims['perfil'] : null,
         'perfil_nombre'  => (string) ($claims['perfil_nombre'] ?? ''),
-        'roles'          => (string) ($claims['roles'] ?? ''),
         'origen'         => array_key_exists('dominio', $claims) ? 'token' : 'db',
     ];
 
@@ -67,8 +66,7 @@ function sessionCuentaDesdeDb(int $usuarioId): array
 {
     $stmt = db()->prepare(
         'SELECT u.dominio, d.nombre AS dominio_nombre,
-                u.perfil,  p.nombre AS perfil_nombre,
-                u.roles
+                u.perfil,  p.nombre AS perfil_nombre
          FROM usuarios u
          LEFT JOIN dominios d ON d.id = u.dominio
          LEFT JOIN perfiles p ON p.id = u.perfil
@@ -86,7 +84,6 @@ function sessionCuentaDesdeDb(int $usuarioId): array
         'dominio_nombre' => (string) ($row['dominio_nombre'] ?? ''),
         'perfil'         => $row['perfil'] !== null ? (int) $row['perfil'] : null,
         'perfil_nombre'  => (string) ($row['perfil_nombre'] ?? ''),
-        'roles'          => (string) ($row['roles'] ?? ''),
     ];
 }
 

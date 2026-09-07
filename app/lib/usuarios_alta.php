@@ -3,18 +3,19 @@
 declare(strict_types=1);
 
 /**
- * Canal unico de alta de usuarios del panel.
+ * Canal unico de alta de usuarios de la app.
  *
- * Todo INSERT sobre `usuarios` del panel pasa por aca. Hoy lo usa uno solo:
+ * COPIA de panel/lib/usuarios_alta.php, con el unico cambio de la ruta del
+ * cifrado legacy (aca vive en lib/, alla en api/). Las tres apps no comparten
+ * docroot, igual que pasa con `habilitado.php`, `permisos.php` y `databox.php`.
+ * LA FORMA DEL ALTA TIENE QUE SER LA MISMA EN LAS DOS: un usuario creado por la
+ * invitacion de la app y otro creado por la del panel son la misma cuenta en la
+ * misma tabla, y si cada camino escribiera columnas distintas la diferencia se
+ * veria recien cuando alguien no pueda entrar.
  *
- *   - panel/invitacion/aceptar.php  (alta al aceptar una invitacion)
+ * Todo INSERT sobre `usuarios` de la app pasa por aca. Hoy lo usa uno solo:
  *
- * Era el canal compartido con `api/usuarios.php` -> handleCreate(), el alta
- * manual del BackOffice, que dejo de existir: el modulo Usuarios administra
- * PERFILES (quien tiene acceso al dominio) y no cuentas, y su unica alta es la
- * invitacion. La funcion se conserva igual —con un solo llamador— porque es
- * donde vive la forma fija del alta y porque cualquier camino nuevo tiene que
- * entrar por aca y no armarse su propio INSERT.
+ *   - app/invitacion/aceptar.php  (alta al aceptar una invitacion)
  *
  * El objetivo es que no haya variaciones: todo camino escribe las mismas
  * columnas, con el mismo cifrado y con los mismos valores por defecto. Si hace

@@ -1009,6 +1009,61 @@ CREATE TABLE `contratos` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `controladores`
+--
+-- Las personas que pueden entrar a Reactor Cloud, y solo a cloud. Es una isla
+-- deliberada del esquema: no tiene FKs contra `usuarios` ni contra `dominios`
+-- porque el acceso al backoffice no es un atributo de un cliente ni de un
+-- dominio. `usuarios` sigue siendo la poblacion de `app` y `panel`; las dos
+-- listas no se cruzan. `contrasena` guarda un hash bcrypt (`password_hash()`),
+-- NO el cifrado reversible historico que usa `usuarios.contrasena`.
+-- Creada por cloud/sql/migrations/20260906_1000_crear_controladores.sql
+--
+
+DROP TABLE IF EXISTS `controladores`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `controladores` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `nombre` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `correo` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `celular` varchar(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `contrasena` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
+  `registrado` datetime NOT NULL,
+  `ingresado` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_controladores_correo` (`correo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `controladores_roles`
+--
+-- Tabla puente: qué roles tiene asignado cada controlador de cloud. Las dos
+-- FKs tienen reglas distintas a propósito: al controlador CASCADE (una
+-- asignación sin su persona no vale nada) y al rol RESTRICT (borrar un rol
+-- asignado le saca el acceso a alguien, y eso se decide, no se limpia).
+-- Creada por cloud/sql/migrations/20260906_1100_crear_controladores_roles.sql
+--
+
+DROP TABLE IF EXISTS `controladores_roles`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `controladores_roles` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `controlador` int NOT NULL,
+  `rol` int NOT NULL,
+  `asignado` datetime NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_controladores_roles` (`controlador`,`rol`),
+  KEY `ix_controladores_roles_rol` (`rol`),
+  CONSTRAINT `fk_controladores_roles_controlador` FOREIGN KEY (`controlador`) REFERENCES `controladores` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_controladores_roles_rol` FOREIGN KEY (`rol`) REFERENCES `roles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `controles`
 --
 
@@ -1503,6 +1558,40 @@ CREATE TABLE `enlaces___` (
   `utilizado` datetime DEFAULT NULL,
   `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `enlaces_acceso`
+--
+-- Enlaces mágicos de un solo uso: abren sesión en `panel` o en `app` como el
+-- usuario indicado, sin su contraseña. Los emite un operador desde cloud
+-- (Usuarios -> Consultar -> Acciones). ES SUPLANTACIÓN DE IDENTIDAD, y por eso
+-- la tabla guarda quién lo emitió, cuándo, desde qué IP y cuándo se usó.
+-- `token` guarda el SHA-256, no el token: quien lea la base no puede fabricar
+-- un enlace válido. `destino` impide que un enlace de app abra el panel.
+-- Creada por cloud/sql/migrations/20260906_2000_crear_enlaces_acceso.sql
+--
+
+DROP TABLE IF EXISTS `enlaces_acceso`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `enlaces_acceso` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `usuario` int NOT NULL,
+  `destino` enum('panel','app') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `token` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `emisor` int DEFAULT NULL,
+  `emisor_tabla` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `emitido` datetime NOT NULL,
+  `expira` datetime NOT NULL,
+  `usada` datetime DEFAULT NULL,
+  `origen` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `origen_uso` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_enlaces_acceso_token` (`token`),
+  KEY `ix_enlaces_acceso_usuario` (`usuario`,`emitido`),
+  CONSTRAINT `fk_enlaces_acceso_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2256,6 +2345,16 @@ CREATE TABLE `parametros` (
 DROP TABLE IF EXISTS `perfiles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+-- `rol` y `roles` se eliminaron el 06/09/2026: los roles pasaron a ser un
+-- concepto de cloud (`controladores_roles`, `roles_permisos`) y dejaron de
+-- colgar del perfil de un cliente. Con `rol` se fue el gate del panel, que
+-- ahora sólo exige un perfil habilitado en el dominio de la sesión.
+-- `permisos` y `paneles` (los dos varchar con listas `(1003)`) se eliminaron el
+-- mismo día: el primero apuntaba a permisos que ya no existen y el segundo lo
+-- reemplazó la tabla puente `perfiles_paneles`. `panel` EN SINGULAR se queda —
+-- es el último panel abierto y lo usa `app`.
+-- Ver cloud/sql/migrations/20260906_1800_perfiles_sin_permisos_ni_paneles.sql
+-- Ver cloud/sql/migrations/20260906_1500_perfiles_sin_rol.sql
 CREATE TABLE `perfiles` (
   `id` int NOT NULL AUTO_INCREMENT,
   `uuid` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -2263,20 +2362,17 @@ CREATE TABLE `perfiles` (
   `usuario` int DEFAULT NULL,
   `dominio` int DEFAULT NULL,
   `tipo` enum('A','O') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'O',
-  `roles` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `rol` int DEFAULT NULL,
-  `paneles` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'paneles habilitados',
+  `operacion` tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = puede usar los paneles de operacion en app',
+  `invitacion` tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = puede invitar usuarios desde app',
+  `facturacion` tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = puede ver y abonar las facturas en panel',
   `panel` int DEFAULT NULL COMMENT 'id del ultimo panel',
-  `permisos` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_perfiles_usuario` (`usuario`),
   KEY `fk_perfiles_dominio` (`dominio`),
-  KEY `fk_perfiles_rol` (`rol`),
   KEY `fk_perfiles_panel` (`panel`),
   CONSTRAINT `fk_perfiles_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_perfiles_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_perfiles_rol` FOREIGN KEY (`rol`) REFERENCES `roles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_perfiles_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -2310,18 +2406,54 @@ SET @saved_cs_client     = @@character_set_client;
 SET character_set_client = @saved_cs_client;
 
 --
+-- Table structure for table `perfiles_paneles`
+--
+-- Tabla puente: a qué paneles de su dominio puede entrar un perfil desde `app`.
+-- SIN FILAS PARA UN PERFIL SIGNIFICA "todos los paneles del dominio", no
+-- "ninguno": es lo que preserva el comportamiento previo, en el que app no
+-- filtraba por perfil. Nació vacía a propósito — la columna legacy
+-- `perfiles.paneles` tenía 2368 de 2375 referencias a paneles inexistentes.
+-- Creada por cloud/sql/migrations/20260906_1600_crear_perfiles_paneles.sql
+--
+
+DROP TABLE IF EXISTS `perfiles_paneles`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `perfiles_paneles` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `perfil` int NOT NULL,
+  `panel` int NOT NULL,
+  `asignado` datetime NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_perfiles_paneles` (`perfil`,`panel`),
+  KEY `ix_perfiles_paneles_panel` (`panel`),
+  CONSTRAINT `fk_perfiles_paneles_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_perfiles_paneles_perfil` FOREIGN KEY (`perfil`) REFERENCES `perfiles` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `permisos`
 --
 
 DROP TABLE IF EXISTS `permisos`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+-- `sistema` (A/C/P, el reparto entre los tres productos del sistema histórico)
+-- se eliminó el 06/09/2026: los permisos son de Reactor Cloud y de nadie más.
+-- Ver cloud/sql/migrations/20260906_1300_permisos_solo_cloud.sql
+-- `slug` es el identificador con el que el código pide el permiso
+-- (`puede('usuarios.consultar')`); `nombre` es la ruta legible en el menú.
+-- Los 20 slugs terminados en `-<id>` son pares que hasta el 06/09/2026 se
+-- distinguían por `sistema` y al perderla quedaron con el mismo nombre.
+-- Ver cloud/sql/migrations/20260906_1400_permisos_slug.sql
 CREATE TABLE `permisos` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `sistema` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `slug` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `nombre` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `descripcion` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_permisos_slug` (`slug`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2524,17 +2656,45 @@ CREATE TABLE `registros` (
 DROP TABLE IF EXISTS `roles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+-- El 06/09/2026 se eliminaron cinco columnas del modelo de permisos histórico:
+-- `sistema` (reparto A/C/P entre productos), `nivel`, `menus`, `accesos` (que
+-- apuntaba a una tabla inexistente) y `permisos` (lista de ids en un varchar,
+-- reemplazada por la tabla puente `roles_permisos`).
+-- Ver cloud/sql/migrations/20260906_1300_permisos_solo_cloud.sql
 CREATE TABLE `roles` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `sistema` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nivel` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `habilitado` tinyint(1) NOT NULL DEFAULT '0',
-  `menus` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `accesos` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `permisos` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `descripcion` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `roles_permisos`
+--
+-- Tabla puente normalizada de qué permisos tiene cada rol. NO reemplaza a
+-- `roles`.`permisos` (el varchar con la lista `(1001)(1004)`): esa columna la
+-- lee el sistema legacy fuera de este repo, así que cloud la sigue escribiendo
+-- como espejo serializado de esta tabla, en la misma transacción. Los ids que
+-- el varchar referencia y `permisos` no tiene (1101-1105) no entran acá — la FK
+-- no los admite — y sobreviven sólo en el varchar.
+-- Creada por cloud/sql/migrations/20260906_1200_crear_roles_permisos.sql
+--
+
+DROP TABLE IF EXISTS `roles_permisos`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `roles_permisos` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `rol` int NOT NULL,
+  `permiso` int NOT NULL,
+  `asignado` datetime NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_roles_permisos` (`rol`,`permiso`),
+  KEY `ix_roles_permisos_permiso` (`permiso`),
+  CONSTRAINT `fk_roles_permisos_permiso` FOREIGN KEY (`permiso`) REFERENCES `permisos` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_roles_permisos_rol` FOREIGN KEY (`rol`) REFERENCES `roles` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2818,6 +2978,12 @@ CREATE TABLE `usos` (
 DROP TABLE IF EXISTS `usuarios`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+-- El 06/09/2026 se eliminaron las cinco columnas del alcance histórico:
+-- `perfiles` y `dominios` (vacías o con un literal "0"), `paneles` (vacía),
+-- `roles` (3 filas) y `panel`. Las reemplazan `perfiles`, `perfiles_paneles` y
+-- `perfiles`.`panel`. **`perfil` y `dominio` EN SINGULAR se quedan**: son el
+-- perfil y el dominio activos de la sesión, y los leen panel y app.
+-- Ver cloud/sql/migrations/20260906_1900_usuarios_sin_legacy.sql
 CREATE TABLE `usuarios` (
   `id` int NOT NULL AUTO_INCREMENT,
   `uuid` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -2832,20 +2998,13 @@ CREATE TABLE `usuarios` (
   `registrante` int DEFAULT NULL,
   `registrado` datetime DEFAULT NULL,
   `ingresado` datetime DEFAULT NULL,
-  `perfiles` int DEFAULT NULL,
   `perfil` int DEFAULT NULL,
-  `roles` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `dominios` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `dominio` int DEFAULT NULL,
-  `paneles` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `panel` int DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_usuarios_perfil` (`perfil`),
   KEY `fk_usuarios_dominio` (`dominio`),
-  KEY `fk_usuarios_panel` (`panel`),
   KEY `fk_usuarios_registrante` (`registrante`),
   CONSTRAINT `fk_usuarios_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_usuarios_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_usuarios_perfil` FOREIGN KEY (`perfil`) REFERENCES `perfiles` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_usuarios_registrante` FOREIGN KEY (`registrante`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;

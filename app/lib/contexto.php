@@ -17,28 +17,44 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/habilitado.php';
+// Los tres permisos del perfil. De la app gatean dos: `operacion` (los paneles
+// de control) e `invitacion` (el item "Invitar un Usuario"). `facturacion` es
+// del panel y viaja igual — el catalogo es uno solo para las tres apps.
+require_once __DIR__ . '/permisos.php';
 
 /**
- * @return array{perfil:int, dominio:int, nombre:string, panel:int, rol:string}
+ * @return array{perfil:int, dominio:int, nombre:string, panel:int, rol:string,
+ *               permisos:array{operacion:bool, invitacion:bool, facturacion:bool}}
  *         Todo en cero/vacío si el usuario no tiene ningún perfil habilitado.
  *
  * `panel` es el último panel abierto de ese perfil (`perfiles.panel`); puede
  * venir en cero si el perfil todavía no abrió ninguno.
  *
- * `rol` es el nombre del rol del perfil ("Administrador", "Operador",
- * "Técnico"...), que sale de `perfiles.rol` -> `roles.nombre`. Ver
- * `appRolDelPerfil()` por el fallback cuando `rol` viene vacío.
+ * `rol` es la etiqueta del perfil ("Administrador" / "Operador"), derivada de
+ * `perfiles.tipo`. Ver `appRolDelPerfil()`.
+ *
+ * `permisos` son las tres banderas de `perfiles`. **Sin perfil van las tres en
+ * `false`**, no en `true`: una cuenta que no está parada en ningún dominio no
+ * tiene permisos, no los tiene todos.
  */
 function appDominioActivo(array $usuario): array
 {
-    $vacio = ['perfil' => 0, 'dominio' => 0, 'nombre' => '', 'panel' => 0, 'rol' => '', 'situacion' => ''];
+    $vacio = [
+        'perfil'    => 0,
+        'dominio'   => 0,
+        'nombre'    => '',
+        'panel'     => 0,
+        'rol'       => '',
+        'situacion' => '',
+        'permisos'  => perfilSinPermisos(),
+    ];
 
     $sel = 'SELECT p.id AS perfil, p.dominio, p.panel, p.tipo,
+                   p.operacion, p.invitacion, p.facturacion,
                    d.nombre, d.situacion,
-                   r.nombre AS rol
+                   NULL AS rol
             FROM perfiles p
-            LEFT JOIN dominios d ON d.id = p.dominio
-            LEFT JOIN roles    r ON r.id = p.rol';
+            LEFT JOIN dominios d ON d.id = p.dominio';
 
     // 1) El perfil recordado en `usuarios.perfil`.
     $perfil = (int) ($usuario['perfil'] ?? 0);
@@ -74,22 +90,41 @@ function appContextoDesdeFila(array $row): array
         'panel'     => (int) ($row['panel'] ?? 0),
         'rol'       => appRolDelPerfil($row),
         'situacion' => (string) ($row['situacion'] ?? ''),
+        'permisos'  => perfilPermisos($row),
     ];
 }
 
 /**
- * Nombre del rol del perfil, para mostrar.
+ * ¿El contexto de sesión tiene ese permiso?
  *
- * La fuente buena es `perfiles.rol` -> `roles.nombre` (1589 perfiles Operador,
- * 469 Administrador, y algunos Técnico / Contador / etc.). Pero 145 perfiles
- * tienen `rol` en NULL, así que se cae a `perfiles.tipo`, que codifica lo mismo
- * en una letra: `ENUM('A','O') NOT NULL DEFAULT 'O'` desde
- * 20260905_2300_perfiles_tipo_a_o.sql (444 filas 'A', 1.783 'O').
+ * Es la ÚNICA lectura de `$ctx['permisos']` en toda la app: si mañana el
+ * permiso deja de ser una columna del perfil, se cambia acá y no en las cinco
+ * pantallas que preguntan.
  *
- * Como la columna ya no admite NULL ni cadena vacía, el fallback SIEMPRE da un
- * nombre y la vista dejó de poder mostrar un guión en esa celda. El `default`
- * queda igual porque `match` sin él lanza `UnhandledMatchError`: es la red que
- * cubre una fila leída antes de aplicar la migración, no un caso esperado.
+ * FALLA CERRADO. Un contexto sin la clave —una sesión sin perfil, o un array
+ * armado antes de que existieran los permisos— devuelve `false`.
+ */
+function appPuede(array $ctx, string $permiso): bool
+{
+    return ($ctx['permisos'][$permiso] ?? false) === true;
+}
+
+/**
+ * Etiqueta del perfil, para mostrar.
+ *
+ * SALE DE `perfiles`.`tipo`, que es lo único que queda. Hasta el 06/09/2026 la
+ * fuente buena era `perfiles.rol` -> `roles.nombre` y `tipo` era sólo el
+ * fallback para los 145 perfiles con `rol` en NULL; al eliminarse la columna
+ * (`20260906_1500_perfiles_sin_rol.sql`) el fallback pasó a ser el camino único.
+ *
+ * Se pierde granularidad y hay que saberlo: los perfiles que eran "Técnico",
+ * "Contador" o "Director Comercial" ahora se muestran como Administrador u
+ * Operador según su letra. Son ~20 filas y esta pantalla sólo lo usa como
+ * rótulo, no para decidir nada.
+ *
+ * `tipo` es `ENUM('A','O') NOT NULL DEFAULT 'O'` desde
+ * 20260905_2300_perfiles_tipo_a_o.sql, así que siempre da un nombre. El
+ * `default` queda porque `match` sin él lanza `UnhandledMatchError`.
  */
 function appRolDelPerfil(array $row): string
 {
@@ -137,6 +172,57 @@ function appDominioContadores(int $dominio): array
 }
 
 /**
+ * Nombres de los administradores del dominio, para mostrar.
+ *
+ * ES `perfiles`.`tipo` = 'A', la MISMA fuente con la que `appRolDelPerfil()`
+ * rotula "Administrador" el perfil propio. Tiene que serlo: el modal muestra las
+ * dos cosas una debajo de la otra, y si cada una saliera de un criterio distinto
+ * alguien podría verse como Administrador y no figurar en la lista de al lado.
+ *
+ * ES UN ROTULO, NO UN PERMISO — y por eso mirar `tipo` acá está bien. Lo que
+ * gatea pantallas son `operacion` / `invitacion` / `facturacion` (ver
+ * lib/permisos.php), que no se derivan de `tipo` ni al revés.
+ *
+ * DOBLE `habilitado`: el del perfil y el del usuario. El del perfil es el que
+ * dice si esa persona sigue siendo administradora ACA (un perfil deshabilitado
+ * ya no es de este dominio); el del usuario, si la cuenta puede entrar. Listar a
+ * alguien deshabilitado sería mandar a golpearle la puerta a quien no puede
+ * abrir.
+ *
+ * `DISTINCT` porque una misma persona puede tener más de un perfil administrador
+ * en el mismo dominio: se la nombra una vez.
+ *
+ * @return list<string> Vacío si el dominio no tiene ninguno (o no hay dominio).
+ */
+function appDominioAdministradores(int $dominio): array
+{
+    if ($dominio <= 0) {
+        return [];
+    }
+
+    $stmt = db()->prepare(
+        "SELECT DISTINCT u.nombre
+           FROM perfiles p
+           INNER JOIN usuarios u ON u.id = p.usuario
+          WHERE p.dominio = :d
+            AND p.tipo = 'A'
+            AND p.habilitado = 1
+            AND u.habilitado = 1
+            AND u.nombre IS NOT NULL
+            AND TRIM(u.nombre) <> ''
+          ORDER BY u.nombre"
+    );
+    $stmt->execute([':d' => $dominio]);
+
+    $nombres = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $nombres[] = trim((string) $row['nombre']);
+    }
+
+    return $nombres;
+}
+
+/**
  * Paneles habilitados de un dominio, y cuál de ellos está abierto.
  *
  * `perfiles.panel` guarda el último panel que usó ESE perfil. Si viene vacío
@@ -150,19 +236,60 @@ function appDominioContadores(int $dominio): array
  *
  * @return array{activo:int, nombre:string, paneles:list<array{id:int, nombre:string, actual:bool}>}
  */
-function appPanelesDelDominio(int $dominio, int $panelRecordado): array
+/**
+ * Ids de panel a los que ese perfil tiene permiso, segun `perfiles_paneles`.
+ *
+ * **SIN FILAS SIGNIFICA NINGUN PANEL.** El permiso es explicito: si el perfil
+ * no tiene una fila para ese panel, no lo ve. No hay fallback a "todos".
+ *
+ * Hubo un fallback y duro poco. Cuando la tabla se creo vacia
+ * (`20260906_1600`), "sin filas" significaba "todos los del dominio" — era lo
+ * unico que no le sacaba los paneles a los 2227 perfiles de golpe. La siembra
+ * de `20260906_1700` volvio ese permiso explicito para los 2225 que tenian
+ * paneles, y con eso el fallback dejo de hacer falta: ahora destildar la lista
+ * entera significa lo que parece.
+ *
+ * QUIEN CREA PERFILES TIENE QUE ASIGNARLES PANELES. Un perfil nuevo sin filas
+ * no ve nada. Los dos caminos que los crean ya lo hacen: el alta de cloud
+ * pre-tilda todos los del dominio, y `panel/invitacion/aceptar.php` los inserta
+ * al crear el perfil.
+ *
+ * @return list<int>
+ */
+function appPanelesPermitidos(int $perfil): array
+{
+    if ($perfil <= 0) {
+        return [];
+    }
+
+    $stmt = db()->prepare('SELECT panel FROM perfiles_paneles WHERE perfil = :p');
+    $stmt->execute([':p' => $perfil]);
+
+    return array_map('intval', array_column($stmt->fetchAll(), 'panel'));
+}
+
+function appPanelesDelDominio(int $dominio, int $panelRecordado, int $perfil = 0): array
 {
     $vacio = ['activo' => 0, 'nombre' => '', 'paneles' => []];
     if ($dominio <= 0) {
         return $vacio;
     }
 
-    $stmt = db()->prepare(
-        'SELECT id, nombre
-         FROM paneles
-         WHERE dominio = :d AND habilitado = 1
-         ORDER BY nombre'
-    );
+    // Permiso por perfil: la lista SIEMPRE se acota a lo que diga
+    // `perfiles_paneles`. Sin filas no hay paneles, asi que se corta antes de
+    // consultar — un `IN ()` vacio ni siquiera es SQL valido.
+    $permitidos = appPanelesPermitidos($perfil);
+    if ($permitidos === []) {
+        return $vacio;
+    }
+
+    $sql = 'SELECT id, nombre
+              FROM paneles
+             WHERE dominio = :d AND habilitado = 1
+               AND id IN (' . implode(',', $permitidos) . ')
+             ORDER BY nombre';
+
+    $stmt = db()->prepare($sql);
     $stmt->execute([':d' => $dominio]);
     $filas = $stmt->fetchAll();
     if (!$filas) {
@@ -216,7 +343,9 @@ function appPanelesDelDominio(int $dominio, int $panelRecordado): array
  * Entorno, que es el equivalente del `print_r($_SESSION)` del legacy.
  *
  * @return array{perfil:int, dominio:int, nombre:string, panel:int,
- *               panelNombre:string, rol:string, situacion:string, origen:string}
+ *               panelNombre:string, rol:string, situacion:string,
+ *               permisos:array{operacion:bool, invitacion:bool, facturacion:bool},
+ *               origen:string}
  */
 function appContextoSesion(array $usuario): array
 {
@@ -245,7 +374,7 @@ function appContextoSesion(array $usuario): array
 
     // --- Panel: el del token si sigue siendo válido, si no el de la base ---
     $recordado = $panToken > 0 ? $panToken : $ctx['panel'];
-    $paneles   = appPanelesDelDominio($ctx['dominio'], $recordado);
+    $paneles   = appPanelesDelDominio($ctx['dominio'], $recordado, (int) $ctx['perfil']);
 
     if ($panToken > 0 && $paneles['activo'] !== $panToken) {
         // El panel del token ya no existe / no es de este dominio: el alcance
@@ -261,6 +390,11 @@ function appContextoSesion(array $usuario): array
         'panelNombre' => $paneles['nombre'],
         'rol'         => $ctx['rol'],
         'situacion'   => $ctx['situacion'],
+        // Los permisos salen SIEMPRE de la fila del perfil que se acaba de
+        // resolver contra la base, nunca de un claim del token: el JWT de esta
+        // app dura un año (ver arriba), así que un permiso revocado tiene que
+        // dejar de valer en el request siguiente y no al vencer la sesión.
+        'permisos'    => $ctx['permisos'] ?? perfilSinPermisos(),
         'origen'      => $origen,
     ];
 
@@ -283,11 +417,11 @@ function appPerfilHabilitado(int $perfil, int $usuario): ?array
 
     $stmt = db()->prepare(
         'SELECT p.id AS perfil, p.dominio, p.panel, p.tipo,
+                p.operacion, p.invitacion, p.facturacion,
                 d.nombre, d.situacion,
-                r.nombre AS rol
+                NULL AS rol
          FROM perfiles p
          LEFT JOIN dominios d ON d.id = p.dominio
-         LEFT JOIN roles    r ON r.id = p.rol
          WHERE p.id = :p AND p.usuario = :u AND p.habilitado = 1
          LIMIT 1'
     );
@@ -305,7 +439,7 @@ function appPerfilHabilitado(int $perfil, int $usuario): ?array
 function appClaimsDeSesion(array $usuario): array
 {
     $ctx = appDominioActivo($usuario);
-    $pan = appPanelesDelDominio($ctx['dominio'], $ctx['panel']);
+    $pan = appPanelesDelDominio($ctx['dominio'], $ctx['panel'], (int) $ctx['perfil']);
 
     return [
         'per' => $ctx['perfil'],

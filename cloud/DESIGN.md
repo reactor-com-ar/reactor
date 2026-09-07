@@ -882,7 +882,8 @@ Estructura:
                   z-index: 100; opacity: 0; pointer-events: none; transition: opacity .2s; }
 .modal-backdrop.open { opacity: 1; pointer-events: all; }
 .modal          { background: var(--surface); border-radius: 14px;
-                  width: 100%; max-width: 520px; max-height: 100%; overflow-y: auto;
+                  width: 100%; max-width: 520px; max-height: 100%; overflow: hidden;
+                  display: flex; flex-direction: column;
                   box-shadow: var(--shadow-lg);
                   transform: scale(.96) translateY(12px); transition: transform .2s; }
 .modal-backdrop.open .modal { transform: scale(1) translateY(0); }
@@ -891,7 +892,9 @@ Estructura:
 .modal-title    { font-size: 1rem; font-weight: 700;
                   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .modal-subtitle { font-size: .8rem; font-weight: 500; color: var(--muted); }
-.modal-body     { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.modal-body     { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;
+                  flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.modal-header, .modal-menubar, .modal-footer { flex: 0 0 auto; }
 .modal-footer   { padding: 16px 24px; border-top: 1px solid var(--border);
                   display: flex; gap: 10px; justify-content: flex-end; }
 
@@ -912,6 +915,26 @@ en un viewport de 904px de alto, dejaba **45px arriba y abajo contra 16px a los
 costados** — y el desajuste cambia con cada tamaño de pantalla, así que no hay
 valor de `vh` que los empareje. Mismo criterio en `panel/` y en `app/`.
 
+**El que scrollea es el cuerpo, nunca el modal entero.** El `.modal` es un
+contenedor flex vertical con `overflow: hidden`; el `.modal-body` lleva
+`flex: 1 1 auto; min-height: 0; overflow-y: auto` y las tres franjas
+—`.modal-header`, `.modal-menubar` y `.modal-footer`— van con `flex: 0 0 auto`.
+Así la barra de título y la de acciones quedan **fijas** y sólo se desplaza el
+contenido.
+
+- Con `overflow-y: auto` en el `.modal` (la regla anterior) la cabecera se iba
+  hacia arriba al scrollear: el usuario perdía de vista el botón de salida justo
+  cuando más contenido había, que es cuando más lo necesita.
+- **`min-height: 0` en el cuerpo no es opcional.** Un hijo flex no baja de su
+  alto de contenido por defecto (`min-height: auto`), así que sin esa línea el
+  `overflow-y` nunca se activa: el body empuja, el modal crece hasta el tope y
+  la cabecera se va igual. Es el error clásico de este patrón.
+- `overflow: hidden` en el `.modal` además **recorta el scroll del cuerpo contra
+  el radio de las esquinas**, así la barra no se dibuja sobre el redondeo.
+- Los modales de Herramientas que ya traían este layout propio
+  (`.db-exp-modal`, `.s3-exp-modal`) quedan igual: sus reglas locales repiten lo
+  que ahora es el default y no chocan.
+
 **Variantes:**
 - `.modal-wide`: aumenta el `max-width` a 760px. Usar **solo** cuando el contenido sea un editor monoespaciado (JSON, logs, payloads) que necesita ancho real para no envolver — ver §23. Los formularios normales se quedan en el ancho base de 520px.
 - `.modal-subtitle`: chip secundario al lado del título (mismo bloque `.modal-title`) para identificar el recurso editado, por ejemplo `Configuración JSON · Nombre · <code>UID</code>`. No reemplaza al título, lo complementa.
@@ -929,7 +952,7 @@ valor de `vh` que los empareje. Mismo criterio en `panel/` y en `app/`.
   - **Sobre el rojo los hijos usan `#fff` y opacidades de blanco**, nunca `--text` / `--muted` / `--border`: esos tokens están calibrados contra el gris del modal y sobre el rojo se ensucian. Misma regla que el chrome (§4 y §5).
   - **El `border-bottom` se saca y el radio superior se repite en el header**: con el fondo pintado, la línea divisoria sobra y la esquina redondeada ahora la dibuja el header, no el `.modal`.
   - **Es más baja que el header normal**: `padding: 10px 24px` contra los `20px 24px 16px` del base, para que junto a la barra de acciones de §21-bis se lean como una sola cabecera en vez de dos bloques apilados. Ojo: **no comparte el valor con esa barra** — la de acciones va en `14px` porque lleva botones; acá es texto y con `10px` alcanza.
-  - **Va siempre junto a la barra de acciones de §21-bis**, nunca solo: el bloque rojo (título) y la barra gris (acciones) forman una sola cabecera, y el rojo sin la barra debajo queda como un adorno suelto. Lo llevan los modales de un mismo módulo **de a pares** —Consultar y Alta/Edición— para que consultar y editar no se vean como dos pantallas de sistemas distintos. Un `confirmDialog` **no** lo lleva: es una alerta, no una ficha, y **tampoco lo lleva el modal de borrado con desglose de impacto** (§15.1) — es la misma alerta con más letra chica, y su botón rojo se queda abajo a propósito, lejos de la salida. Uso actual: Dominios (Consultar + Alta / Edición) y Usuarios (Consultar + Alta / Edición).
+  - **Va siempre junto a la barra de acciones de §21-bis**, nunca solo: el bloque rojo (título) y la barra gris (acciones) forman una sola cabecera, y el rojo sin la barra debajo queda como un adorno suelto. Lo llevan los modales de un mismo módulo **de a pares** —Consultar y Alta/Edición— para que consultar y editar no se vean como dos pantallas de sistemas distintos. Un `confirmDialog` **no** lo lleva: es una alerta, no una ficha, y **tampoco lo lleva el modal de borrado con desglose de impacto** (§15.1) — es la misma alerta con más letra chica, y su botón rojo se queda abajo a propósito, lejos de la salida. Uso actual: Dominios, Usuarios y Perfiles (los tres con Consultar + Alta / Edición), más el modal de Filtros compartido.
 
 ## 15. Confirm dialog (alerta de confirmación)
 
@@ -949,6 +972,18 @@ Para "¿Seguro que querés borrar?" y similares.
 .confirm-msg     { font-size: .88rem; color: var(--muted); margin-bottom: 20px; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 ```
+
+**El rótulo y el tono del botón de confirmar son parámetros, no literales.**
+`confirmDialog(title, message, onConfirm, opts)` acepta `opts.label` (default
+`Eliminar`) y `opts.tono` (default `danger`). Estuvieron hardcodeados mientras el
+diálogo se usó sólo para bajas, y la primera acción no destructiva que lo llamó
+—generar un enlace de acceso— apareció con un botón rojo que decía **Eliminar**.
+
+- **El rojo se reserva para lo destructivo.** Una acción que no borra nada pasa
+  `tono: 'primary'`; que exista la confirmación ya comunica el peso.
+- **El rótulo nombra la acción, no la genérica.** `Generar acceso a Panel`, no
+  `Aceptar`: el botón tiene que poder leerse solo, sin el título.
+- Los doce call sites de baja no pasan `opts` y siguen en `Eliminar` / rojo.
 
 ### 15.1 Confirmación de borrado con desglose de impacto
 
@@ -1206,7 +1241,7 @@ el momento del click con el mismo formato que el menú de fila
 - La barra **envuelve** (`flex-wrap`) en pantallas angostas; no se scrollea horizontalmente ni se colapsa en un solo dropdown.
 - **El fondo es un gris intermedio entre los dos tokens que ya conviven en el modal**: `color-mix(in srgb, var(--surface) 40%, var(--bg))` ≈ `#1e1e1f`. Queda un escalón más claro que `--bg` (`#1a1a1a`) y todavía más oscuro que los dos grises del cuerpo — las tarjetas de consulta (`#202122`) y el fondo del modal / los inputs (`--surface`, `#242526`). Así la franja se despega del header y del body sin sumar otra línea divisoria y sin repetir ningún tono del contenido.
 - **La mezcla es entre dos tokens, nunca contra `#000`.** Un `color-mix(--surface X%, #000)` fija un tono que no existe en el sistema y hay que recalcularlo a mano en cada cambio de tema; mezclando `--surface` con `--bg`, el intermedio sigue solo a la paleta. La escala de grises, de claro a oscuro: `--border` → `--row-hover` → `--surface` → **franja** → `--bg`.
-- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`) y **Usuarios** (`openUserViewModal` + `openUserModal`), todos en `app.js`. Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos.
+- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`) y **el modal de Filtros de los nueve módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos.
 
 ### 21-bis.1 "Listar": saltar a otro módulo ya filtrado
 
@@ -1297,9 +1332,14 @@ Form completo de filtros del listado (ver `ABM.md` §3). Se abre desde el botón
 ```html
 <div class="modal-backdrop open">
   <div class="modal">
-    <div class="modal-header">
+    <div class="modal-header modal-header-primary">
       <div class="modal-title">Filtros</div>
       <button class="btn-icon-sm" data-act="close">×</button>
+    </div>
+    <div class="modal-menubar" role="toolbar" aria-label="Acciones de los filtros">
+      <button class="btn btn-sm btn-ghost"   data-act="close"><i class="fa-solid fa-xmark"></i> Cancelar</button>
+      <button class="btn btn-sm btn-primary" data-act="clear"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+      <button class="btn btn-sm btn-primary" data-act="apply"><i class="fa-solid fa-check"></i> Aplicar</button>
     </div>
     <div class="modal-body">
       <div class="filters-grid">
@@ -1337,11 +1377,6 @@ Form completo de filtros del listado (ver `ABM.md` §3). Se abre desde el botón
         </div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost"     data-act="clear">Limpiar</button>
-      <button class="btn btn-secondary" data-act="close">Cancelar</button>
-      <button class="btn btn-primary"   data-act="apply">Aplicar</button>
-    </div>
   </div>
 </div>
 ```
@@ -1356,7 +1391,8 @@ Form completo de filtros del listado (ver `ABM.md` §3). Se abre desde el botón
 - En el medio, los **filtros propios del recurso** (selects de estado / rol / dominio, texto libre, etc.). Las ids llevan el prefijo del módulo + `-fm-` (filter modal) para evitar choques con los inputs de los modales de edición.
 - **Antepenúltimo bloque `Límite`** (`type="number"`, default `100`). Modifica cuántas filas se muestran en el listado.
 - **Últimos campos `Ordenar por` + `Dirección`** (`desc` por default). La grilla los pone uno al lado del otro. El select de `Ordenar por` debe incluir al menos la opción `Código` (`value="id"`).
-- Footer en orden **Limpiar → Cancelar → Aplicar**: ghost / secondary / primary. `Limpiar` solo resetea los campos del modal a sus defaults (no aplica ni cierra). `Cancelar` cierra sin aplicar. `Aplicar` lee los valores, actualiza el estado del listado y cierra el modal.
+- **Barra de acciones** (§21-bis) en orden **Cancelar → Limpiar → Aplicar**, sin footer: la salida primero en `btn-ghost` y las otras dos en `btn-primary`, las tres directas — este modal no tiene desplegables. `Limpiar` solo resetea los campos del modal a sus defaults (no aplica ni cierra). `Cancelar` cierra sin aplicar. `Aplicar` lee los valores, actualiza el estado del listado y cierra el modal.
+- **El modal de Filtros lo dibuja un único helper compartido** (`openFiltersModal()` en `app.js`): cada módulo aporta sólo el `bodyHtml` de sus campos. Por eso los doce listados tienen exactamente la misma cabecera y la misma barra, y migrarlo al formato nuevo fue un solo cambio — no hay una copia por módulo que se pueda quedar atrás.
 - Filtrado **client-side por defecto** (un único array en memoria por módulo): el cambio de filtros re-renderiza la tabla sin re-fetch.
 - La búsqueda rápida del toolbar (§9) escribe en la misma propiedad `state.texto` que el campo `Buscar` del modal — abrir el modal pre-rellena el input con lo que haya tipeado el usuario.
 - **Caso mixto (señales, registros):** los filtros `Dispositivo` y `Límite` viajan al backend en la query string (`?dispositivo=&limit=`); cambiar cualquiera de los dos dispara un re-fetch. El resto de los filtros (texto, dominio, sentido, estado, usuario, código) se aplican client-side sobre el array ya descargado.
@@ -1407,7 +1443,7 @@ th.action-col, td.action-col { width: 1%; white-space: nowrap; text-align: cente
 - Cada `<td>` de acción tiene la clase `action-col` para forzar ancho mínimo y centrado.
 - Los módulos **read-only** (eventos, logs, señales) usan solo la columna **Consultar**; no incluyen Editar / Eliminar.
 - Tooltip exacto (`title="Consultar" / "Editar" / "Eliminar"`) para que el ícono sea legible sin contexto.
-- **Click izquierdo en la fila → acción por defecto (Consultar).** Opt-in por módulo: `<tr class="row-clickable">` (§10) + listener de `click` en la fila que abre el modal de Consultar. El botón hamburguesa hace `stopPropagation()` para no dispararlo. Activo en todos los listados ABM: **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Adopciones, Usuarios y Perfiles** (más la solapa Perfiles del modal de Consultar de Usuarios). El click derecho sigue abriendo el menú contextual completo.
+- **Click izquierdo en la fila → acción por defecto (Consultar).** Opt-in por módulo: `<tr class="row-clickable">` (§10) + listener de `click` en la fila que abre el modal de Consultar. El botón hamburguesa hace `stopPropagation()` para no dispararlo. Activo en todos los listados ABM: **Dominios, Dispositivos, Chips, Transceptores, Señales, Registros, Adopciones, Usuarios, Perfiles, Controladores, Roles y Permisos** (más la solapa Perfiles del modal de Consultar de Usuarios). El click derecho sigue abriendo el menú contextual completo.
 
 ## 25. ABM: tarjetas de consulta (read-only)
 
@@ -1469,6 +1505,19 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 - JSON / payloads dentro de `<pre>`; no usar `.json-editor` (es para edición, no para read-only).
 
 **Pestañas dentro del modal de Consultar (opcional).** Cuando la entidad tiene relaciones importantes con otras tablas (ej.: usuarios ↔ perfiles), el modal de Consultar puede dividirse en pestañas usando `.modal-tabs` / `.modal-tab` / `.modal-tabpanel`. La primera pestaña se llama siempre **`General`** y contiene el `view-grid` con todos los campos de la entidad; las pestañas siguientes muestran cada relación en una tabla `.table-card` de solo lectura (sin columna `Acciones`, sin menú contextual — las acciones se hacen desde el módulo de la relación, no desde acá). El primer ejemplo es Consultar usuario → `General` + `Perfiles` (lista de dominios y rol por dominio). Cada pestaña de relación lazy-loads su contenido en el primer click al tab correspondiente para no penalizar la apertura del modal.
+
+**Las pestañas también valen para el modal de Alta/Edición**, no sólo para Consultar. El formulario de Perfiles las usa: `General` con los campos de la entidad, `Permisos` con las tres banderas de la fila y `Paneles` con el selector de `perfiles_paneles`. Dos reglas propias de ese caso:
+
+- **Las tres pestañas del módulo se llaman igual** (`General` / `Permisos` / `Paneles` en Consultar, Nuevo y Editar): son la misma ficha en tres modos, y si los rótulos no coinciden se leen como pantallas distintas.
+- **Si la validación falla en un campo que está en otra pestaña, hay que traer al operador a esa pestaña ANTES de enfocar.** Enfocar un input dentro de un `.modal-tabpanel[hidden]` no hace nada: el error se marca donde no se ve y el modal parece no responder al Guardar. Por eso `wireModalTabs()` devuelve su función `mostrar(nombre)` — no alcanza con cablear los clicks.
+
+El cableado sale de **`wireModalTabs(scope, onShow)`**, el helper compartido: recibe el `.modal-backdrop`, alterna `active` y `hidden` por `data-tab` / `data-panel`, y devuelve `mostrar(nombre)`. El `onShow` opcional corre en cada cambio y es lo que usa Consultar usuario para cargar su solapa recién al abrirla.
+
+**Un campo de la ficha que nombra otra entidad se dibuja como pastilla clickeable** (`.badge.badge-link`, §11) y abre la ficha de esa entidad apilada encima. Hoy lo usan `Usuario` y `Dominio` en Consultar perfil. Tres reglas:
+
+- **Se dibuja con `<button>`, no con `<a>`**: no navega a ninguna URL, monta un modal. El `<a href="#">` obligaría a cancelar el evento y ensuciaría el historial.
+- **Sin id no hay pastilla.** Un perfil puede apuntar a un usuario borrado o traer el centinela `0`; ahí el campo se degrada a texto plano —o a un guión si tampoco hay nombre— en vez de dejar un botón que no lleva a ningún lado.
+- **El objeto sale del catálogo ya cargado**, y si no está se pide (`catalogosPerfiles()`). Por eso el handler es async: quien llega desde Consultar usuario → solapa Perfiles no pasó por el módulo Perfiles y todavía no tiene los catálogos.
 
 Las filas de una pestaña de relación son **clickeables** (`<tr class="row-clickable" data-id="…">`, §10): el click izquierdo abre el **modal de Consultar de la entidad relacionada**, apilado encima del modal actual (`.modal-backdrop` comparte `z-index:100`, así que el último montado queda arriba). Al cerrarlo, el modal de origen sigue abierto y con la pestaña activa. Se reutiliza el mismo `openXxxViewModal()` que usa el módulo de la relación — no se duplica el markup de tarjetas. Ejemplo vigente: Consultar usuario → pestaña `Perfiles` → click en una fila → **Consultar perfil**.
 
@@ -1774,6 +1823,7 @@ Cada `apply` (individual o masivo) pasa por un confirm reforzado en producción:
 - **Sin CSS propio** para el preview: `.modal-wide` (760px) + `.json-editor` para el textarea SQL; botón `Aplicar` solo visible cuando la migración está pendiente.
 - **Confirm reforzado en prod**: usar el helper local `confirmarMigrador(titulo, msg, ctaLabel, danger, onOk)` — `confirmDialog` estándar hardcodea el label "Eliminar" y no sirve acá.
 - **Cierre durante corrida masiva**: bloqueado con toast (`Hay una migración en curso`). El backdrop de listado ignora clicks; el ESC solo cierra el preview, no el listado, mientras `_migradorAplicando` esté activo.
+- **UNA MIGRACIÓN APLICADA NO SE EDITA — NI SUS COMENTARIOS.** El ledger guarda el SHA-256 del archivo entero, así que cambiar una sola línea `--` la marca `drift` en todos los entornos donde ya corrió, y el Migrador **no tiene forma de reconocer el hash nuevo**: no puede reaplicarla (corta con 409 `ya fue aplicada`) ni aceptar el cambio. El aviso queda ahí hasta que alguien toque `migraciones.hash` a mano. Pasó el 06/09/2026 con `20260906_1600` y `20260906_1700`: se corrigió la prosa de dos migraciones ya aplicadas en producción y hubo que revertir el texto al que se había aplicado para limpiarlo. **Si lo que decía la migración quedó viejo, la corrección va en el código y en este documento, no en el `.sql`** — el archivo describe el cambio en el momento en que se hizo, no el comportamiento actual.
 - **Cuándo NO usar este patrón**: si la migración implica progreso multi-paso visible (log de 100 líneas por archivo), un modal-consola SSE sería más apropiado. El Migrador DB apuesta a que cada `.sql` es corto y se aplica en <1s — para eso alcanza con el toast final.
 
 ## 30. Herramientas: Visor de sucesos
@@ -1884,7 +1934,176 @@ Utilidad de **Herramientas** que administra procesos automáticos programables. 
 
 Estos pasos se documentan también en el propio `cloud/jobs/crontab` y quedan pendientes del script de aprovisionar del server (no forman parte del deploy).
 
+## 34. Selector de ids (Roles y Controladores)
+
+Control de modal de Alta/Edición para elegir un subconjunto de un catálogo de decenas de opciones. Lo usan dos campos, en dos módulos, y los dos guardan el dato en una **tabla puente con FK**:
+
+| módulo | campo | tabla puente | catálogo |
+|---|---|---|---|
+| Roles | permisos | `roles_permisos` | `permisos` (113) |
+| Controladores | roles | `controladores_roles` | `roles` (10) |
+| Perfiles | paneles | `perfiles_paneles` | `paneles` del dominio del perfil |
+
+```html
+<div class="form-group">
+  <label for="rol-permisos-search">Permisos</label>
+  <div class="id-picker" id="rol-permisos">
+    <div class="id-picker-toolbar">
+      <input type="search" id="rol-permisos-search" placeholder="Buscar permiso…">
+      <span class="id-picker-count" data-role="count">12 de 113</span>
+      <button type="button" class="btn btn-sm btn-ghost" data-act="ninguno">Limpiar</button>
+    </div>
+    <div class="id-picker-list">
+      <div class="id-picker-group">
+        <span>Permisos</span>
+        <span class="id-picker-group-actions">
+          <button type="button" class="btn btn-sm btn-ghost" data-act="grupo-todos">Todos</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-act="grupo-ninguno">Ninguno</button>
+        </span>
+      </div>
+      <label class="id-picker-item" data-busca="usuarios > consultar 1005">
+        <input type="checkbox" value="1005" checked>
+        <span class="id-picker-item-text">Usuarios &gt; Consultar <code>#1005</code></span>
+      </label>
+    </div>
+  </div>
+</div>
+```
+
+```css
+.id-picker         { border: 1px solid var(--border); border-radius: var(--radius);
+                     background: var(--bg); overflow: hidden; }
+.id-picker-toolbar { display: flex; gap: 8px; align-items: center;
+                     padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.id-picker-list    { max-height: 240px; overflow-y: auto; padding: 4px 0; }
+.id-picker-group   { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px;
+                     font-size: .72rem; font-weight: 700; text-transform: uppercase;
+                     letter-spacing: .04em; color: var(--muted); }
+.id-picker-item    { display: flex; gap: 9px; align-items: flex-start;
+                     padding: 5px 12px; font-size: .85rem; cursor: pointer; }
+.id-picker-item:hover { background: var(--row-hover); }
+.id-picker .id-picker-item input { width: auto; flex: 0 0 auto; margin-top: 3px; }
+.id-picker-item-text  { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+```
+
+**Reglas:**
+
+- **Es una lista plana, sin grupos.** Los tuvo hasta el 06/09/2026, cuando agrupaba por `sistema` — la columna que repartía roles y permisos entre los tres productos del sistema histórico (`A` Reactor Admin, `C` Reactor Control, `P` Reactor App). Ese concepto se eliminó: los permisos son de cloud y de nadie más, así que no queda ningún eje por el cual agrupar. La cabecera que quedó es una sola y existe nada más que para alojar `Todos` / `Ninguno`.
+- **Tampoco hay grupo `Sin catálogo`, y ya no puede haberlo.** Mientras los permisos de un rol vivían en un varchar sin integridad referencial (`roles`.`permisos`, con el formato `(1001)(1004)`), un rol podía referenciar un permiso inexistente y el selector tenía que mostrarlos, admitirlos y conservarlos para no borrarlos de oficio. Las dos listas viven hoy en tablas puente con FK: un id que no existe no entra, y el backend lo rechaza con 422.
+- **La lista lleva `max-height` propio.** El `.modal-body` ya tiene su scroll; sin la cota el modal crecería 113 filas y la barra de acciones (§21-bis) quedaría a un scroll de distancia.
+- **El checkbox lleva `width: auto` explícito y el selector va con dos clases.** El control vive dentro de un `.form-group`, y `.form-group input` fuerza `width: 100%` (§7): sobre un checkbox eso lo estira a lo ancho de la fila y deja el texto exprimido a una letra por renglón contra el borde derecho, más una barra de scroll horizontal. La regla usa `.id-picker .id-picker-item input` para ganar por especificidad (0,2,1 contra 0,1,1) y no por orden de aparición en la hoja.
+- **El buscador esconde ítems y `Todos` / `Ninguno` operan sólo sobre lo visible.** Con un filtro activo, tildar lo que no se ve es una sorpresa.
+- **El contador (`N de M`) es del selector entero**, no del filtro: es lo que se va a guardar.
+- **`extraKey` elige la línea secundaria del ítem**, que se pinta como texto tenue. Hoy la usa sólo el selector de roles, para marcar los que están deshabilitados — se ofrecen igual, porque un rol apagado que alguien ya tiene asignado tiene que poder verse y quitarse; esconderlo lo volvería una asignación invisible.
+- **El selector de Perfiles se acota al dominio y se rearma al cambiarlo.** Los paneles de un dominio no son los de otro, así que en el alta el control se re-renderiza entero cada vez que cambia el select de dominio, descartando la selección previa (que el backend rechazaría con 422). Mientras no haya dominio elegido muestra *"Elegí primero un dominio"* en vez de una caja vacía.
+- **La siembra de `20260906_1700` dejó a los 2225 perfiles existentes con todos los paneles de su dominio tildados explícitamente** (3598 filas). Por eso el alta pre-tilda todos los del dominio elegido, y por eso `panel/invitacion/aceptar.php` los inserta al crear el perfil: un perfil que naciera sin filas no podría usar la app.
+- **Ahí, no tildar nada significa "ningún panel".** El permiso es explícito y no hay fallback a "todos" — lo hubo mientras la tabla estaba vacía, y la siembra lo volvió innecesario. El selector lleva una línea debajo que lo dice, y tanto la celda del listado como la tarjeta de la ficha marcan ese estado en `badge-warn`, porque casi siempre es un error de carga y no una decisión.
+- **El guardado sincroniza por diferencia, no borra y reinserta.** `asignado` es la fecha en que se dio esa asignación, y reescribir la fila entera en cada guardado la volvería la fecha del último `Guardar`. Vale para los dos módulos (`sincronizarPermisos()` en `api/roles.php`, `sincronizarRoles()` en `api/controladores.php`).
+
 ---
+
+
+## 35. Lista de paneles del perfil
+
+Control de la pestaña **Paneles** del modal de Alta/Edición de Perfiles: un switch por panel del dominio, con dos botones de selección masiva.
+
+```html
+<div id="prf-paneles-wrap" class="paneles-wrap">
+  <div class="paneles-acciones">
+    <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-todos">
+      <i class="fa-solid fa-check-double"></i> Seleccionar todo
+    </button>
+    <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-ninguno">
+      <i class="fa-solid fa-xmark"></i> Deseleccionar todo
+    </button>
+  </div>
+  <div class="paneles-lista">
+    <label class="toggle-switch panel-item">
+      <span class="panel-item-nombre">AMERICANA <code>#218</code></span>
+      <input type="checkbox" value="218" checked>
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    </label>
+  </div>
+</div>
+```
+
+```css
+.paneles-wrap      { display: flex; flex-direction: column; gap: 12px; }
+.paneles-acciones  { display: flex; gap: 8px; flex-wrap: wrap; }
+.paneles-lista     { border: 1px solid var(--border); border-radius: var(--radius);
+                     background: var(--bg); overflow: hidden; }
+.paneles-lista .panel-item               { padding: 9px 12px; }
+.paneles-lista .panel-item + .panel-item { border-top: 1px solid var(--border); }
+.paneles-lista .panel-item:hover         { background: var(--row-hover); }
+.panel-item-nombre { flex: 1 1 auto; min-width: 0; font-size: .88rem;
+                     color: var(--text); word-break: break-word; }
+.paneles-vacio     { padding: 16px 12px; text-align: center;
+                     color: var(--muted); font-size: .85rem; }
+```
+
+**Reglas:**
+
+- **NO reusa el selector de ids (§34), y es a propósito.** Ese control existe para catálogos de decenas de opciones —115 permisos, 122 menús— y por eso trae buscador y contador. Acá se listan los paneles de **un** dominio: el más grande de la base tiene 7. Un buscador sobre siete filas es ruido, y el switch comunica mejor que un checkbox que se está prendiendo o apagando un permiso.
+- **La fila ES el `.toggle-switch`**: el `label` envuelve nombre + `input` + track, así hereda el `display:flex`, el `cursor:pointer` y el pintado del §17. Esta sección sólo agrega el reparto horizontal — `flex: 1` en el nombre es lo que empuja el switch al borde derecho, y `min-width: 0` deja que un nombre largo corte en vez de desbordar.
+- **El `input` va pegado al `.toggle-track`.** El CSS del switch pinta el estado con `input:checked + .toggle-track`: cualquier nodo entre los dos deja el switch siempre apagado. Es el error fácil de cometer al reordenar el markup.
+- **`Seleccionar todo` / `Deseleccionar todo` operan sobre TODA la lista**, no sobre "lo visible" como en §34: sin buscador no hay nada oculto que puedan pisar por sorpresa.
+- **La lista está acotada al dominio del perfil** y se re-renderiza entera cuando cambia el select de dominio en el alta. Un panel de otro dominio no es una opción válida y el backend lo rechaza con 422.
+- **El `gap` vertical vive en `.paneles-wrap`**, no en márgenes de los hijos: el wrap se re-renderiza entero al cambiar de dominio y así el ritmo no depende de qué se haya dibujado adentro.
+
+---
+
+## 35-bis. Pestaña Permisos del perfil
+
+Los **tres permisos** de `perfiles` — `operacion`, `invitacion` y `facturacion`, columnas nuevas desde la migración `20260907_1000` — tienen pestaña propia en los tres modales del módulo Perfiles: `Permisos`, entre `General` y `Paneles`.
+
+Cada uno abre algo concreto **en otra app del repo**:
+
+| permiso | dónde vale | qué abre |
+|---|---|---|
+| `operacion` | app.reactor.com.ar | Ver y usar los paneles de operación (los controles del dominio). |
+| `invitacion` | app.reactor.com.ar | El ítem *Invitar un Usuario*. |
+| `facturacion` | panel.reactor.com.ar | El agrupador *Cuenta* entero (Facturas / Recibos / Facturación). |
+
+**Reglas:**
+
+- **Pestaña propia, no tarjetas nuevas en `General`.** Dos de los tres permisos son de la app y el tercero del panel: mezclarlos con el usuario y el dominio los haría leer como atributos de cloud. Y `General` tiene ocho tarjetas justo por paridad (§25) — cualquier agregado la rompe.
+- **En Consultar va una `view-card-full` por permiso, no tres medias.** Con tres tarjetas media, la grilla flex estira la última a todo el ancho y se lee como un destaque deliberado. Las full además dejan lugar para decir en la misma línea qué abre cada permiso y en qué app, que es el dato que vuelve entendible una lista de permisos de otro producto.
+- **En Alta/Edición se reusa la lista de switches de §35** (`.paneles-lista` + `.toggle-switch.panel-item`). Es la misma forma —una lista corta y cerrada de cosas que se prenden y se apagan— y duplicar el CSS para tres filas no compra nada. El `input` va **pegado** al `.toggle-track`, igual que allá.
+- **El segundo renglón de la fila es una frase, no un `<code>` con el id.** Por eso `.panel-item-nombre .muted` va en `display:block`: sin eso los tres permisos quedan en una línea sola y la frase se lee como parte del título.
+- **El alta pre-tilda `operacion` e `invitacion` y deja `facturacion` apagada.** Es exactamente el reparto con el que la migración sembró los 2.227 perfiles que ya existían (2.227 / 2.227 / 444) y el mismo criterio por el que el alta pre-tilda todos los paneles del dominio: un perfil que naciera sin permisos sería un perfil que no puede usar la app.
+- **Cloud los otorga sin restricción**, a diferencia del panel. Allá `facturacion` sólo la puede dar un perfil que ya la tenga, porque quien edita es un cliente administrando su propio dominio y sin ese corte se la daría a sí mismo. Acá quien edita es Reactor sobre el sistema entero: si ya puede crear el perfil y elegirle el dominio, pedirle además que tenga el permiso que reparte no protege nada.
+- **No se derivan de `tipo` ni lo reemplazan.** `tipo` (`A`/`O`) es lo que lee el sistema legacy y lo que gatea la *entrada* al panel; estos tres gatean pantallas concretas una vez adentro. Un Administrador puede no tener facturación y un Operador puede tener operación — es el caso normal, no el raro.
+
+### 35-bis.1 Columna `Permisos` del listado
+
+Los mismos tres permisos aparecen en el listado del módulo como una columna
+propia, **entre `Tipo` y `Paneles`** — el lugar que ya ocupan en la ficha y en
+las pestañas de los modales, así el orden es el mismo se mire donde se mire.
+
+```html
+<td>
+  <span class="td-permisos">
+    <i class="fa-solid fa-sliders"             title="Operación — app.reactor.com.ar"></i>
+    <i class="fa-solid fa-file-invoice-dollar" title="Facturación — panel.reactor.com.ar"></i>
+  </span>
+</td>
+```
+
+```css
+.td-permisos   { display: flex; gap: 10px; color: var(--muted); font-size: .95rem; }
+.td-permisos i { cursor: default; }
+```
+
+**Reglas:**
+
+- **Un ícono por permiso OTORGADO y nada por el denegado.** No hay versión apagada ni tachada: al lado de otro ícono del mismo gris, un ícono tenue se lee como "tiene algo" y no como "no lo tiene". La ausencia es el dato. Un perfil sin ninguno de los tres muestra `<span class="muted">—</span>`, como cualquier celda vacía del sistema.
+- **Van en `--muted`, el gris de `.td-id`, y no en los colores de los badges.** La fila ya lleva tres badges de color (Dominio, Tipo, Estado) y un cuarto bloque coloreado la vuelve ilegible. Estas son marcas de lectura rápida, no estados que compitan con ellos.
+- **Cada ícono dibuja lo que el permiso ABRE**, no el permiso en abstracto: `fa-sliders` los controles del panel de operación, `fa-user-plus` el alta de una persona, `fa-file-invoice-dollar` el comprobante. Con tres íconos grises en la misma celda esa es la única pista de cuál es cuál antes de leer el tooltip.
+- **`title` obligatorio con permiso + dónde vale** (`Operación — app.reactor.com.ar`), el mismo par que muestra la ficha de Consultar: un ícono suelto no distingue si abre `app` o `panel`, y sin eso la columna miente por omisión.
+- **Los íconos salen de `PERMISOS_PERFIL`**, el catálogo único de `app.js` que ya alimenta la ficha y el formulario. Un permiso nuevo se agrega ahí con su `icono` y aparece en las tres vistas a la vez.
+
+---
+
 
 ## Reglas duras (criterios de aceptación)
 

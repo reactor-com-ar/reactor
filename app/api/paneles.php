@@ -77,11 +77,19 @@ try {
     // columna y la franja mostraria el del token: dos respuestas distintas a
     // "cual esta abierto" en la misma pantalla.
     $ctx = appContextoSesion($sesion);
+
+    // PERMISO `operacion`: sin el no hay paneles que listar ni a cual cambiar.
+    // El boton de la topbar ya no se dibuja (index.php), pero eso es UI: el
+    // endpoint se puede pedir a mano.
+    if (!appPuede($ctx, 'operacion')) {
+        responder(403, ['ok' => false, 'error' => 'Tu perfil no tiene permiso para operar los paneles.']);
+    }
+
     if ($ctx['dominio'] <= 0) {
         responder(200, ['ok' => true, 'dominio' => '', 'total' => 0, 'paneles' => []]);
     }
 
-    $res = appPanelesDelDominio($ctx['dominio'], $ctx['panel']);
+    $res = appPanelesDelDominio($ctx['dominio'], $ctx['panel'], (int) $ctx['perfil']);
 
     responder(200, [
         'ok'      => true,
@@ -121,11 +129,14 @@ function cambiarPanel(array $sesion): never
 
     try {
         $ctx = appContextoSesion($sesion);
+        if (!appPuede($ctx, 'operacion')) {
+            responder(403, ['ok' => false, 'error' => 'Tu perfil no tiene permiso para operar los paneles.']);
+        }
         if ($ctx['perfil'] <= 0) {
             responder(409, ['ok' => false, 'error' => 'Tu cuenta no tiene un perfil activo.']);
         }
 
-        $res = appPanelesDelDominio($ctx['dominio'], $ctx['panel']);
+        $res = appPanelesDelDominio($ctx['dominio'], $ctx['panel'], (int) $ctx['perfil']);
 
         $elegido = null;
         foreach ($res['paneles'] as $p) {

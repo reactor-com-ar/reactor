@@ -263,26 +263,16 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
 /**
  * Perfil de ADMINISTRADOR del usuario en el dominio, creandolo si no lo tenia.
  *
- * EL PERFIL ES DE ADMINISTRADOR PORQUE LA INVITACION ES AL PANEL. El legacy
- * (cPerfil::registrar()) crea Operador porque invita a reactor-app, la app del
- * usuario final; esta pantalla la abre un enlace de panel.reactor.com.ar, y al
- * panel solo entra un administrador (lib/acceso.php). Con un perfil de Operador
- * la persona completaria el formulario, recibiria sus credenciales y rebotaria
- * en el primer ingreso — el alta del modulo Usuarios ES esta invitacion, asi
- * que seria el unico camino de alta del panel y no serviria para nada.
- *
  * SE BUSCA UN PERFIL DE ADMINISTRADOR, NO "cualquier perfil del dominio". Si la
- * persona ya tenia uno de Operador ahi (porque usa reactor-app), ese no habilita
- * el panel: se le agrega uno nuevo en vez de reescribirle el que ya tiene. Una
- * cuenta con varios perfiles en el mismo dominio es normal en estos datos y
- * mutar el rol de una fila existente seria cambiarle el acceso a otro sistema
- * desde aca.
+ * persona ya tenia uno de Operador ahi (porque usa reactor-app), ese NO habilita
+ * el panel — el gate es `perfiles`.`tipo` = 'A' (lib/acceso.php) — asi que se le
+ * agrega uno nuevo en vez de reescribirle el que ya tiene. Mutar el `tipo` de
+ * una fila existente le cambiaria el acceso en el sistema legacy desde aca.
+ *
+ * Una cuenta con varios perfiles en el mismo dominio es normal en estos datos.
  *
  * `panel` queda en NULL y no en 0 — con las FK declaradas, el 0 del sistema
- * viejo ya no es un valor valido (ver db/schema.sql). `tipo` acompaña al rol
- * ('A'): son dos columnas para lo mismo y el legacy lee `tipo`, asi que
- * dejarlas en desacuerdo es como nacen los 47 perfiles habilitados que hoy
- * tiene la base con las dos columnas en desacuerdo.
+ * viejo ya no es un valor valido (ver db/schema.sql).
  */
 function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $dominioNombre): int
 {
@@ -290,18 +280,25 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
         'SELECT id FROM perfiles
           WHERE usuario = :u AND dominio = :d
             AND habilitado = :hab
-            AND rol IN (' . panelRolesAdminSql() . ')
+            AND tipo = :tipo
           ORDER BY id LIMIT 1'
     );
-    $busca->execute([':u' => $usuarioId, ':d' => $dominioId, ':hab' => HABILITADO]);
+    $busca->execute([
+        ':u'    => $usuarioId,
+        ':d'    => $dominioId,
+        ':hab'  => HABILITADO,
+        ':tipo' => PERFIL_TIPO_ADMINISTRADOR,
+    ]);
     $id = (int) ($busca->fetchColumn() ?: 0);
     if ($id > 0) {
         return $id;
     }
 
     $alta = $pdo->prepare(
-        'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo, rol, habilitado)
-         VALUES (:uuid, :nombre, :usuario, :dominio, :tipo, :rol, :habilitado)'
+        'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo,
+                               operacion, invitacion, facturacion, habilitado)
+         VALUES (:uuid, :nombre, :usuario, :dominio, :tipo,
+                 :operacion, :invitacion, :facturacion, :habilitado)'
     );
     $alta->execute([
         ':uuid'       => bin2hex(random_bytes(8)),
@@ -309,14 +306,62 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
         ':usuario'    => $usuarioId,
         ':dominio'    => $dominioId,
         // `perfiles`.`tipo` es ENUM('A','O') NOT NULL: dos letras y nada mas.
+        // Ya no hay `rol` que acompañar — la columna se eliminó el 06/09/2026 —
+        // pero `tipo` se sigue escribiendo en 'A' porque la lee el legacy.
         ':tipo'       => PERFIL_TIPO_ADMINISTRADOR,
-        ':rol'        => panelRolAdminPorDefecto(),
+        // PERMISOS DEL PERFIL NUEVO: opera la app e invita, no factura.
+        //
+        // Los dos primeros son el mismo criterio con el que la migracion
+        // 20260907_1000 sembro las filas que ya existian, y el mismo con el que
+        // el alta de cloud pre-tilda los switches: un perfil que naciera sin
+        // ellos seria un perfil que no puede usar la app.
+        //
+        // `facturacion` EN 0, Y NO ES UN DESCUIDO. Este alta corre SIN sesion
+        // —la credencial es el uuid del enlace, no un perfil—, asi que no hay
+        // contra quien chequear la regla de "nadie otorga lo que no tiene"
+        // (api/usuarios.php). Si naciera en 1, cualquier administrador sin
+        // facturacion tendria el camino servido: invita a una cuenta que
+        // controle, la acepta, y ya hay un perfil con facturacion en el dominio.
+        // El corte del PUT quedaria en decoracion. Se lo da despues un perfil
+        // que si lo tenga.
+        //
+        // PENDIENTE: desde el 07/09/2026 esa regla vale para LOS TRES permisos,
+        // asi que `operacion` e `invitacion` en 1 son el mismo agujero — un
+        // administrador sin `operacion` puede fabricarse un perfil que la tenga
+        // invitando a una cuenta propia. Cerrarlo pide guardar los permisos del
+        // EMISOR en la fila de `invitaciones` (columna nueva: hay que proponer el
+        // cambio de esquema antes), porque aca ya no hay sesion de la cual
+        // leerlos. Se dejan en 1 mientras tanto: bajarlos a 0 romperia el alta
+        // —el perfil no podria usar la app— que es peor que el agujero.
+        ':operacion'   => HABILITADO,
+        ':invitacion'  => HABILITADO,
+        ':facturacion' => DESHABILITADO,
         // El perfil nace habilitado. La columna es tinyint(1) NOT NULL y su
         // unico otro valor es 0 (lib/habilitado.php).
         ':habilitado' => HABILITADO,
     ]);
 
-    return (int) $pdo->lastInsertId();
+    $perfilId = (int) $pdo->lastInsertId();
+
+    // PANELES: el perfil nace con acceso a TODOS los paneles habilitados de su
+    // dominio. No es un extra — es obligatorio. `perfiles_paneles` no tiene
+    // fallback: un perfil sin filas no ve NINGUN panel en `app`
+    // (appPanelesPermitidos() en app/lib/contexto.php), asi que sin esto la
+    // persona aceptaria la invitacion, recibiria sus credenciales y entraria a
+    // una app vacia. Es la misma regla con la que la migracion
+    // `20260906_1700_sembrar_perfiles_paneles.sql` sembro los 2225 perfiles que
+    // ya existian, y el mismo default que pre-tilda el alta de cloud.
+    //
+    // El INSERT ... SELECT con `dominio = :d` en las dos puntas es lo que impide
+    // que se cuele un panel de otro dominio.
+    $pdo->prepare(
+        'INSERT IGNORE INTO perfiles_paneles (perfil, panel, asignado)
+         SELECT :perfil, pa.id, NOW()
+           FROM paneles pa
+          WHERE pa.dominio = :d AND pa.habilitado = 1'
+    )->execute([':perfil' => $perfilId, ':d' => $dominioId]);
+
+    return $perfilId;
 }
 
 /**

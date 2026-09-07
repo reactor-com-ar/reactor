@@ -19,10 +19,9 @@ declare(strict_types=1);
  *
  *       autenticacion = 'F'
  *       habilitado    = 1
- *       perfiles      = 0
- *       dominios      = ''
- *       paneles       = ''
- *       panel         = NULL
+ *   (las cinco columnas de alcance historico —`perfiles`, `dominios`,
+ *    `paneles`, `panel` y `roles`— se eliminaron el 06/09/2026; ver
+ *    `20260906_1900_usuarios_sin_legacy.sql`)
  *
  *   Las plurales NO son el par de las singulares: `perfil` y `dominio` siguen
  *   recibiendo el id real que manda el llamador. `panel`, en cambio, siempre
@@ -42,15 +41,11 @@ require_once dirname(__DIR__) . '/api/legacy_crypto.php';
 require_once __DIR__ . '/habilitado.php';
 
 /** Valores de inicializacion de las columnas plurales (ver cabecera). */
-const USUARIO_PERFILES_INICIAL = 0;
-const USUARIO_DOMINIOS_INICIAL = '';
-const USUARIO_PANELES_INICIAL  = '';
 
-/** `panel` nace siempre vacio: el alta no elige panel. */
-const USUARIO_PANEL_INICIAL = null;
 
-/** `roles` arranca vacio salvo que el llamador mande otra cosa. */
-const USUARIO_ROLES_INICIAL = '';
+
+
+
 
 /**
  * Modo de autenticacion con el que nace todo usuario.
@@ -96,11 +91,11 @@ function usuarioAlta(PDO $pdo, array $datos): int
         'INSERT INTO usuarios
             (uuid, nombre, usuario, autenticacion, contrasena, correo, celular,
              habilitado, registrante, registrado,
-             perfil, perfiles, dominio, dominios, panel, paneles, roles)
+             perfil, dominio)
          VALUES
             (:uuid, :nombre, :usuario, :autenticacion, :contrasena, :correo, :celular,
              :habilitado, :registrante, NOW(),
-             :perfil, :perfiles, :dominio, :dominios, :panel, :paneles, :roles)'
+             :perfil, :dominio)'
     );
     $stmt->execute([
         ':uuid'          => bin2hex(random_bytes(8)),
@@ -110,18 +105,13 @@ function usuarioAlta(PDO $pdo, array $datos): int
         ':correo'        => $datos['correo']  ?? null,
         ':celular'       => $datos['celular'] ?? null,
         ':registrante'   => ($datos['registrante'] ?? 0) ?: null,
-        ':roles'         => $datos['roles'] ?? USUARIO_ROLES_INICIAL,
 
         ':perfil'        => $perfil  ?: null,
         ':dominio'       => $dominio ?: null,
 
         // Constantes de alta: no dependen de lo que mande el llamador.
-        ':panel'         => USUARIO_PANEL_INICIAL,
         ':autenticacion' => USUARIO_AUTENTICACION_INICIAL,
         ':habilitado'    => USUARIO_HABILITADO_INICIAL,
-        ':perfiles'      => USUARIO_PERFILES_INICIAL,
-        ':dominios'      => USUARIO_DOMINIOS_INICIAL,
-        ':paneles'       => USUARIO_PANELES_INICIAL,
     ]);
 
     return (int) $pdo->lastInsertId();

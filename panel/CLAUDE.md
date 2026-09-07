@@ -92,6 +92,38 @@ en vez de derivarlo del `Host`.
   las cuatro hojas `sharp-*` desde ahí. Cache-bust propio por `filemtime`,
   independiente de `version.txt`. Ver `assets/fontawesome/README.md`.
 
+## Modales: formato único (obligatorio — skill `abm_design`)
+
+**Todos** los modales del panel salen de `openModal()` en `assets/js/app.js`, y
+todos tienen la misma forma: **barra de título pintada en `--primary`** y más
+baja (`.modal-header-primary`, `padding: 10px 24px`), **barra de acciones
+debajo** con todos los botones (`.modal-menubar`) y **sin footer**.
+
+- **La salida va primera y es el único botón neutro** (`btn-ghost`); el resto va
+  en `btn-primary`. El rótulo lo hereda de lo que hacía en el footer: `Cerrar`
+  en los modales de consulta, `Cancelar` en formularios, filtros y
+  confirmaciones.
+- **Los call sites siguen pasando `footerHtml` / `primaryHtml`** — los nombres
+  quedaron por compatibilidad, pero su contenido va a la barra. **No hace falta
+  agregarles `btn-sm`**: la barra normaliza el tamaño por CSS, así ningún call
+  site se olvida y todos los botones quedan del mismo alto.
+- **Las acciones extra van en un desplegable `Acciones`** que abre el
+  `openRowMenu()` flotante (`position: fixed`), no un dropdown absoluto: el
+  `.modal` lleva `overflow: hidden` y recortaría cualquier hijo absoluto. El
+  trigger tiene que llamar a `stopPropagation()` o el handler global lo cierra
+  en el mismo click que lo abre. **Un menú de un solo ítem no se justifica**: si
+  la ficha tiene una acción sola, va directa a la barra (es el caso de `Editar`
+  en Consultar dispositivo).
+- **La única excepción es `confirmarBaja()`**, que pasa `confirmacion: true` y
+  conserva la forma vieja —cabecera neutra y los dos botones abajo—: una
+  confirmación es una pregunta, no una pantalla, y su botón rojo se queda lejos
+  de la salida a propósito.
+- **Sobre el primario los hijos van en `#fff`** y opacidades de blanco, nunca
+  `--text` / `--muted` / `--border`. Es la misma regla del sidebar y la topbar.
+- El scroll sigue siendo **del cuerpo**, nunca del modal entero: la barra de
+  título y la de acciones quedan fijas (ya estaba así en el panel desde el
+  arranque; `cloud/` se alineó después).
+
 ## Bump de version.txt
 
 Al tocar cualquier archivo bajo `panel/assets/css/` o `panel/assets/js/` hay
@@ -137,73 +169,126 @@ mismo criterio que `habilitado`.
 - **Se escribe con `PERFIL_TIPO_ADMINISTRADOR` / `PERFIL_TIPO_OPERADOR`** de
   [lib/acceso.php](lib/acceso.php). Hoy el único que la escribe es
   `invitacion/aceptar.php`.
-- **No confundirla con el gate de acceso**, que es `perfiles.rol` — ver la
-  sección siguiente. Las dos columnas siguen desalineadas a propósito y la
-  migración **no** las alineó: derivar `tipo` de `rol` le daría acceso de
-  administrador en el sistema legacy a 48 cuentas que hoy no lo tienen, y eso
-  es repartir permisos, no normalizar un tipo.
+- **NO es el gate de acceso, y hoy no gatea nada.** Antes no lo era porque el
+  gate era `perfiles.rol`; desde que esa columna se eliminó (06/09/2026) el
+  panel no filtra por privilegio en absoluto — ver la sección siguiente. `tipo`
+  se conserva porque **la lee el sistema legacy**, y ahí sí decide: por eso
+  `invitacion/aceptar.php` la sigue escribiendo en `A`.
+- **Es el único rastro que queda de la distinción Administrador / Operador**
+  dentro de `perfiles`, y por eso ocupó el lugar de `Rol` en las fichas de
+  panel y de cloud. Que se muestre no significa que reparta permisos.
 
 ## Acceso: sólo Administradores (obligatorio)
 
-**Al panel entra únicamente una cuenta con perfil de Administrador en el
-dominio activo.** El Operador queda afuera, y no es un caso de borde: es el rol
-más común por lejos (medido en dev: 1.470 perfiles habilitados de Operador
-contra 383 de Administrador), así que la regla recorta el panel de ~2.065
-cuentas habilitadas a ~368. La regla vive entera en
+**Al panel entra únicamente una cuenta con un perfil de Administrador habilitado
+en el dominio activo.** El Operador queda afuera, y no es un caso de borde: es el
+perfil más común por lejos. La regla vive entera en
 [lib/acceso.php](lib/acceso.php) y todo lo demás la consume desde ahí.
 
-- **El criterio es `perfiles.rol`, NO `perfiles.tipo`.** El legacy gatea por
-  `tipo = 'A'` y las dos columnas están desalineadas en los datos: 39 perfiles
-  con rol Administrador llevan `tipo = 'O'` y 8 con rol Operador llevan
-  `tipo = 'A'`. Gatear por `tipo` dejaría afuera a 39 administradores reales y
-  adentro a 8 operadores.
-- **La lista de roles que habilitan el panel es `PANEL_ROLES_ADMIN`**, hoy
-  `[101]` (Administrador). Quedan afuera `Técnico` y los roles internos de
-  Reactor (`Desarrollador`, `Director Técnico`, `Director Comercial`,
-  `Contador`, `Técnico Instalador`) — son ~20 perfiles y varias de esas
-  personas además tienen un perfil de Administrador, con el que sí entran. Si
-  alguno tiene que poder entrar por su propio rol, se agrega su id a esa
-  constante y **no hay nada más que tocar**.
-- **Se mira el perfil ACTIVO, no "algún perfil de la cuenta"**, y se exigen las
-  cuatro condiciones juntas: que el perfil sea de esta cuenta, que esté
-  habilitado, que su rol esté en la lista y que su `dominio` sea el de la
-  sesión. La última no es redundante: hay 13 cuentas cuyo `usuarios.perfil`
-  apunta a un perfil de administrador de un dominio **distinto** del de
-  `usuarios.dominio`, y sin comparar el dominio entrarían a un dominio donde no
-  son administradoras.
+**EL CRITERIO ES `perfiles.tipo = 'A'`, y es el único que queda.** Hasta el
+06/09/2026 era `perfiles.rol IN (101)` — y era el bueno, porque las dos columnas
+estaban desalineadas en los datos. Ese mismo día `rol` se eliminó
+(`20260906_1500_perfiles_sin_rol.sql`) y el panel quedó **sin gate** por un rato:
+entraba cualquier perfil habilitado. `tipo` es lo que sobrevivió de esa
+distinción, así que es por donde se gatea ahora.
+
+Medido al restaurar el gate:
+
+| | sin gate | con `tipo = 'A'` |
+|---|---|---|
+| perfiles habilitados que entran | 2.063 | **404** |
+| cuentas distintas | 1.958 | **356** |
+
+**Un dominio se queda sin nadie que lo administre:** `Camino al Puente Viejo`
+(#160) tiene 33 perfiles habilitados y los 33 son Operador. Hay que ponerle
+`tipo = 'A'` a alguno o nadie va a poder entrar a administrarlo.
+
+**Lo que sigue en pie:**
+
+- **El perfil tiene que estar habilitado.** Revocar un acceso sigue siendo poner
+  `perfiles.habilitado = 0`, y tiene efecto en el request siguiente.
+- **El perfil tiene que ser de esa cuenta y de ese dominio.** La comparación de
+  dominio no es redundante: hay 13 cuentas cuyo `usuarios.perfil` apunta a un
+  perfil de un dominio **distinto** del de `usuarios.dominio`, y sin compararlo
+  entrarían a operar sobre un dominio que no es el suyo.
 - **El gate se resuelve contra la base en cada request, nunca contra un claim
-  del JWT.** El token dura 12 h y lo puede haber emitido `cloud/` (que no aplica
-  esta regla y comparte la cookie), así que revocar un perfil —bajarle el rol o
-  ponerlo en `habilitado = 0`— tiene efecto en el request siguiente y no al
-  vencer el token.
+  del JWT.** El token dura 12 h y lo puede haber emitido `cloud/` (que comparte
+  la cookie), así que bajar un perfil a Operador o deshabilitarlo tiene efecto en
+  el request siguiente y no al vencer el token.
 - **Dónde se aplica**: `api/bootstrap.php` (todo endpoint que no declare
-  `PANEL_API_PUBLIC`), `index.php` (el shell), `login.php` y `api/login.php`.
-  El gate de rol va en el bootstrap y **no** endpoint por endpoint para que un
-  módulo nuevo nazca cerrado: olvidarse de la línea lo deja protegido, no
-  abierto.
-- **El login elige el perfil de arranque.** `usuarios.perfil` es el último que
-  la persona usó *en cualquiera* de los sistemas que comparten `usuarios`, así
-  que puede ser un Operador o un perfil de otro dominio: hoy 247 de las 368
-  cuentas administradoras están así. Si el perfil que trae no habilita el panel,
-  `api/login.php` toma el primero de `perfilesAdministrador()` y lo asienta con
-  `panelPerfilActivoAsentar()` — el mismo helper del cambio de dominio. **Sin
-  esto la sesión nace denegada y el login rebota para siempre.**
+  `PANEL_API_PUBLIC`), `index.php` (el shell), `login.php`, `api/login.php` y
+  `acceso.php` (el canje de un enlace mágico). El gate va en el bootstrap y **no**
+  endpoint por endpoint para que un módulo nuevo nazca cerrado.
+- **El login elige el perfil de arranque.** `usuarios.perfil` es el último que la
+  persona usó *en cualquiera* de los sistemas que comparten `usuarios`, así que
+  puede ser un Operador o un perfil de otro dominio. Si el que trae no sirve,
+  `api/login.php` toma el primero de `perfilesHabilitados()` y lo asienta con
+  `panelPerfilActivoAsentar()`. **Sin esto la sesión nace denegada y el login
+  rebota para siempre.**
 - **El rechazo se ve, no se traga.** `api/login.php` corta con 403 *después* de
   validar la contraseña, para que el mensaje distinga "no sos vos" de "no tenés
-  permiso". Para una pantalla, `requireAdministrador()` redirige a
-  `/login?motivo=rol` y `login.php` muestra el aviso en la tarjeta (`.inv-note`,
-  CSS §19). **`login.php` sólo salta a `index.php` si la sesión vigente además
-  es de administrador** — sin esa condición, index redirige a login y login a
-  index, en un rebote infinito.
-- **La API devuelve 403 con `motivo: 'rol'`**, no un 403 pelado. Es lo que le
+  permiso". Para una pantalla, `requirePerfilValido()` redirige a
+  `/login?motivo=perfil` y `login.php` muestra el aviso en la tarjeta.
+- **La API devuelve 403 con `motivo: 'perfil'`**, no un 403 pelado. Es lo que le
   permite a `app.js` distinguir este caso —la sesión ya no sirve, hay que volver
-  al login— de los 403 de negocio que sí son un error de la pantalla ("El
-  usuario está deshabilitado", "Ese perfil no está disponible para tu cuenta").
-  Al recibirlo, `api()` navega a `login?motivo=rol` en vez de mostrar un toast.
-- **Consecuencia sobre las invitaciones**: como el alta de usuarios del panel
-  *es* una invitación, el perfil que se otorga al aceptar tiene que ser de
-  Administrador o la persona rebota en su primer ingreso. Ver
-  `perfilAsegurado()` más abajo.
+  al login— de los 403 de negocio.
+
+**Los tres caminos que otorgan acceso tienen que respetar el gate**, y los tres
+lo hacen:
+
+- `invitacion/aceptar.php` crea el perfil con `tipo = 'A'`, y **busca uno de
+  Administrador** para reutilizar: si la persona ya tenía uno de Operador ahí
+  (porque usa `reactor-app`), ese no habilita el panel y se le agrega uno nuevo.
+- `cloud/api/enlaces_acceso.php` **no emite** un enlace de panel para quien no
+  tenga un perfil de Administrador habilitado: devuelve 409 en vez de entregar
+  algo que va a rebotar.
+- `acceso.php` **revalida** al canjear, aunque cloud ya lo haya hecho: entre la
+  emisión y el uso pasan hasta 15 minutos y el perfil se pudo bajar a Operador.
+
+**Nombres de las funciones**: `perfilesHabilitados()`, `esPerfilValido()`,
+`sessionTienePerfilValido()`, `requirePerfilValido()` y
+`PANEL_MENSAJE_SIN_PERFIL`. Son genéricos porque el criterio ya cambió una vez
+(de `rol` a `tipo`) y puede volver a cambiar; lo que no cambia es su contrato —
+*"¿este perfil habilita el panel?"*.
+
+## Permisos del perfil: el segundo escalón (obligatorio)
+
+El gate de arriba dice si la cuenta **entra**. Los tres permisos de `perfiles`
+—`operacion`, `invitacion`, `facturacion`, columnas desde el 07/09/2026— dicen
+qué ve **una vez adentro**. La regla completa y el catálogo compartido con las
+otras dos apps están en el [CLAUDE.md raíz](../CLAUDE.md) y en
+[lib/permisos.php](lib/permisos.php); acá van las consecuencias para el panel.
+
+- **Del panel gatea uno solo: `facturacion` → el agrupador `Cuenta` entero**
+  (Facturas / Recibos / Facturación). `operacion` e `invitacion` son de `app`;
+  viajan igual porque el catálogo es único y porque el panel es donde se
+  administran.
+- **Se aplica en las dos capas.** `index.php` omite el agrupador completo del
+  sidebar —no cada ítem: una categoría vacía se lee como un menú roto— y
+  `app.js` **borra las tres rutas del router**, así el hash pegado a mano cae en
+  Dashboard. El corte real es `requirePermisoPanel('facturacion')` al tope de
+  [api/comprobantes.php](api/comprobantes.php) y
+  [api/facturacion.php](api/facturacion.php).
+- **El 403 lleva `motivo: 'permiso'`, no `'perfil'`**, y la diferencia importa:
+  `'perfil'` significa *"la sesión ya no sirve, volvé al login"* y el front actúa
+  en consecuencia; `'permiso'` significa *"la sesión está bien, esta pantalla no
+  es tuya"* y volver al login no arreglaría nada. Mandarlos por el mismo camino
+  echaría de la sesión a quien no tiene facturación cada vez que toca Facturas.
+- **`panelPermisosDeSesion()` repite las cuatro condiciones del gate** (perfil
+  habilitado, de esa cuenta, de ese dominio y `tipo = 'A'`) en vez de buscar el
+  perfil por id: un perfil que no pasa el gate no tiene permisos que informar, y
+  leerlos igual dejaría una segunda definición de *"el perfil de la sesión"* que
+  podría discrepar de la primera. Cacheado por request, como `sessionContext()`.
+- **`sesion.permisos` viaja inyectado en `index.php`** junto al resto del
+  contexto, y el front lo lee con `puede(<permiso>)`. Si el tag no vino, los tres
+  quedan en `false`: sin dato no hay permiso.
+- **`invitacion/aceptar.php` crea el perfil con `facturacion = 0`.** Ese alta
+  corre **sin sesión** —la credencial es el uuid del enlace— así que con `1`
+  cualquier administrador sin facturación tendría el camino servido: invita a una
+  cuenta que controle, la acepta, y ya hay un perfil con el permiso en el
+  dominio. El corte del `PUT` quedaría en decoración. `operacion` e `invitacion`
+  sí nacen en `1`.
+
 
 ## Contexto de sesión y filtrado por dominio (obligatorio)
 
@@ -231,10 +316,15 @@ alcance y se guardan como claims del JWT: `dominio` (columna
 
 Todo `INSERT` sobre `usuarios` del panel pasa por **`usuarioAlta()`** en
 [lib/usuarios_alta.php](lib/usuarios_alta.php). Ningún archivo arma el INSERT por
-su cuenta. Hoy lo usan los dos caminos de alta que existen:
+su cuenta. Hoy lo usa **el único camino de alta que queda**:
 
-- `api/usuarios.php` → `handleCreate()` (alta manual del BackOffice)
 - `invitacion/aceptar.php` (alta al aceptar una invitación)
+
+*(Hubo un segundo, `api/usuarios.php` → `handleCreate()`, el alta manual del
+BackOffice. Se eliminó al mudar el módulo Usuarios a `perfiles` el 05/09/2026:
+un alta de `usuarios` dentro del endpoint que administra `perfiles` sólo podía
+confundir. La función se conserva igual porque el día que vuelva un alta, entra
+por acá.)*
 
 Reglas que la función garantiza, y que por eso no hay que repetir en los llamadores:
 
@@ -558,11 +648,11 @@ marcar una tarjeta `view-card-full` en una ranura **impar** (para que los
 bloques de arriba y de abajo sigan cerrando de a dos), no simplemente editar
 la lista y dejar que se estire la última.
 
-El pie del modal tampoco lleva el botón ☰ de "Más acciones" que sí tienen los
+La barra de acciones tampoco lleva el desplegable `Acciones` que sí tienen
 otros módulos: sus opciones (copiar identificador / MAC / coordenadas,
 habilitar-deshabilitar) están todas en el menú contextual de la fila, y dos de
-las tres de copiar apuntaban a campos que la ficha ya no muestra. El pie queda
-en `Cerrar` + `Editar`.
+las tres de copiar apuntaban a campos que la ficha ya no muestra. La barra
+queda en `Cerrar` + `Editar`.
 
 ### Dispositivos → modal Consultar → pestaña Conexión
 
@@ -831,11 +921,11 @@ entidad que el registro referencia. Reglas que no se deducen del esquema:
 
 Dos recortes de UI del 03/09/2026 sobre `renderActividad()`:
 
-- **El pie del modal de Consultar es sólo `Cerrar`.** No lleva el botón ☰ de
-  "Más acciones" que sí tienen otros módulos: sus tres opciones (filtrar por
-  este usuario, filtrar por este dispositivo, copiar detalle) ya viven en el
-  menú contextual de la fila, que es desde donde se abre el modal. Tampoco hay
-  acción primaria: `api/actividad.php` sólo responde `GET`.
+- **La barra de acciones del modal de Consultar es sólo `Cerrar`.** No lleva
+  el desplegable `Acciones` que sí tienen otros módulos: sus tres opciones
+  (filtrar por este usuario, filtrar por este dispositivo, copiar detalle) ya
+  viven en el menú contextual de la fila, que es desde donde se abre el modal.
+  Tampoco hay acción primaria: `api/actividad.php` sólo responde `GET`.
 - **"Ventana de búsqueda" salió del modal de Filtros, pero la ventana sigue
   existiendo.** `actividad.ventana` queda clavada en 200.000 en
   `ACTIVIDAD_DEFAULTS` y **se sigue mandando en cada `GET`** — sacarla del
@@ -935,24 +1025,22 @@ mismas tablas. Reglas que no se deducen del esquema:
   formulario de aceptación pide nombre y apellido por separado porque es lo
   que la persona espera completar, pero se guardan concatenados en `nombre`.
   No se modificó el esquema por esto.
-- **El perfil que se otorga es de ADMINISTRADOR** (`rol = 101`,
-  `tipo = PERFIL_TIPO_ADMINISTRADOR`,
-  nombre `Administrador en <dominio>`), no de Operador como en el legacy. El
-  legacy (`cPerfil::registrar()`) crea Operador porque invita a `reactor-app`,
-  la app del usuario final; esta pantalla la abre un enlace de
-  `panel.reactor.com.ar`, y **al panel sólo entra un administrador**. Con un
-  perfil de Operador la persona completaría el formulario, recibiría sus
-  credenciales y rebotaría en el primer ingreso — y como el alta del módulo
-  Usuarios *es* esta invitación, sería el único camino de alta del panel y no
-  serviría para nada. El rol sale de `panelRolAdminPorDefecto()`
-  ([lib/acceso.php](lib/acceso.php)): si la lista de roles con acceso cambia,
-  la invitación la sigue sola.
-- **`perfilAsegurado()` busca un perfil de administrador, no "cualquier perfil
+- **El perfil se crea con `tipo = 'A'`** y nombre `Administrador en <dominio>`.
+  Ya no lleva rol: `perfiles.rol` se eliminó el 06/09/2026. `tipo` se sigue
+  escribiendo en `'A'` porque la lee el sistema legacy, y una invitación emitida
+  desde el panel sigue significando alta administrativa allá — pero **dentro del
+  panel no habilita nada**, porque el acceso ya no mira ni el rol ni el tipo.
+- **Y con `operacion = 1`, `invitacion = 1` y `facturacion = 0`.** Los dos
+  primeros por el mismo motivo que los paneles: un perfil que naciera sin ellos
+  no podría usar la app. El tercero en `0` **a propósito** — este alta corre sin
+  sesión, así que con `1` sería la puerta trasera para fabricarse el permiso que
+  el `PUT` sólo deja otorgar a quien ya lo tiene. Ver "Permisos del perfil".
+- **`perfilAsegurado()` busca un perfil de ADMINISTRADOR, no "cualquier perfil
   del dominio".** Si la persona ya tenía uno de Operador ahí (porque usa
-  `reactor-app`), ese no habilita el panel: se le **agrega** uno nuevo en vez de
-  reescribirle el que ya tiene. Una cuenta con varios perfiles en el mismo
-  dominio es normal en estos datos, y mutar el `rol` de una fila existente sería
-  cambiarle el acceso a otro sistema desde acá.
+  `reactor-app`), ese no habilita el panel —el gate es `perfiles.tipo = 'A'`—
+  así que se le **agrega** uno nuevo en vez de reescribirle el que ya tiene.
+  Mutar el `tipo` de una fila existente le cambiaría el acceso en el sistema
+  legacy desde acá.
 - **`tipo` acompaña al rol.** Son dos columnas para lo mismo y el legacy lee
   `tipo`; dejarlas en desacuerdo es exactamente como nacieron los 58 perfiles
   inconsistentes que hoy tiene la base (48 con rol Administrador y `tipo = 'O'`,
@@ -1028,8 +1116,8 @@ respecto de lo que devuelve `api/invitaciones.php`:
   Sin eso, la grilla flex estira la última tarjeta del bloque y se lee como
   un destaque deliberado. **Agregar o quitar un campo obliga a rehacer esa
   cuenta en el bloque que se tocó.**
-- **El pie es sólo `Cerrar`**: sin acción primaria (una invitación emitida no
-  se edita) y **sin el botón ☰ de "Más acciones"** — filtrar por emisor,
+- **La barra es sólo `Cerrar`**: sin acción primaria (una invitación emitida
+  no se edita) y **sin el desplegable `Acciones`** — filtrar por emisor,
   filtrar por estado y copiar ya viven en el menú contextual de la fila, que
   es desde donde se abre el modal. Mismo recorte que Actividad y Usuarios.
 
@@ -1061,20 +1149,20 @@ quién tiene acceso a este dominio, y eso vive en `perfiles`, no en
 - **Una persona puede aparecer varias veces**: son 8 los pares
   `(usuario, dominio)` con más de un perfil. La fila se identifica por el
   **`Código` = id del perfil**, no por el usuario.
-- **La columna es `Rol`, no `Perfil`.** El rol ("Operador") describe la fila;
-  `perfiles.nombre` ("Operador en OSSE San Juan") repite el dominio que ya
-  filtra toda la pantalla — el mismo criterio de `perfilesAdministrador()`. El
-  nombre del perfil sigue estando en el buscador y en el modal de Consultar.
-- **Hay filas sin rol y filas sin cuenta, y se muestran igual.** 145 perfiles
-  tienen `rol` NULL (27 en un solo dominio) y unos pocos tienen `usuario` NULL o
-  con el centinela `0`. Los JOIN con `usuarios` y `roles` son **LEFT** a
+- **Ya no hay columna `Rol` en el listado** (06/09/2026): se eliminó
+  `perfiles.rol`. El listado quedó en `Código / Usuario / Nombre / Correo /
+  Celular / Estado / Último ingreso / Acciones`, y el filtro por rol se fue del
+  modal de Filtros junto con la opción `Rol` del selector de orden.
+- **El modal de Consultar muestra `Tipo` en la ranura que ocupaba `Rol`.** No es
+  un reemplazo conceptual —`tipo` es el `ENUM('A','O')` que lee el legacy, no un
+  rol— pero es el único atributo del perfil que queda además del nombre, y la
+  ficha tenía que seguir siendo par (12 tarjetas, seis renglones).
+- **Hay filas sin cuenta y se muestran igual.** Unos pocos perfiles tienen
+  `usuario` NULL o con el centinela `0`. El JOIN con `usuarios` es **LEFT** a
   propósito: con INNER esas filas desaparecían del listado, y una fila que no le
   sirve a nadie y además no se puede ver es una que nadie puede limpiar.
   **No usar `perfiles.tipo` para rellenar el rol que falta** — las dos columnas
   están desalineadas (ver "Acceso: sólo Administradores").
-- **El filtro de rol se arma con los roles PRESENTES en el dominio**
-  (`rolesDelDominio()`), no con la tabla `roles` entera: un rol sin ninguna fila
-  acá sólo puede dar un listado vacío.
 
 ### Usuarios → las tres acciones trabajan sobre el perfil
 
@@ -1093,27 +1181,54 @@ sobre la cuenta. Reglas que no se deducen del esquema:
   de quitar. Las dos escrituras van en una transacción.
 - **`usuarios.perfil` NO se toca**: su FK es `ON DELETE SET NULL` y la base lo
   resuelve sola. Si el perfil borrado era el activo de esa cuenta, el login
-  elige otro (`api/login.php` → `perfilesAdministrador()`).
-- **Sobre el perfil de la propia sesión sólo queda `Consultar`.**
+  elige otro (`api/login.php` → `perfilesHabilitados()`).
+- **Sobre el perfil de la propia sesión sólo quedan `Consultar` y `Editar`.**
   Deshabilitarlo o borrarlo cierra el panel en el request siguiente —el gate se
   resuelve contra la base en cada request, no contra el token—, así que el
-  backend corta con 409 y el menú de la fila directamente no ofrece las
+  backend corta con 409 y el menú de la fila directamente no ofrece esas dos
   acciones (`es_propio`, que lo calcula el backend). Como efecto lateral el
-  dominio nunca se queda sin administrador: el de la sesión siempre sobrevive.
-- **El `PUT` manda sólo `{id, habilitado}`** y toca sólo esa columna. La
-  versión que reescribía la fila entera de `usuarios` obligaba a un `GET`
-  previo para no borrar `roles` al guardar; acá no hay ningún otro campo que el
-  guardado pueda pisar.
-- **No hay `POST` ni edición.** `handleCreate()` y el `PUT` de fila completa se
-  eliminaron del endpoint junto con `formUsuario()` del front: un alta de
-  `usuarios` dentro del endpoint que administra `perfiles` sólo podía
-  confundir. El alta sigue siendo la invitación (abajo) y los datos de la
-  persona los administra su propia cuenta.
+  dominio nunca se queda sin acceso: el perfil de la sesión siempre sobrevive.
+  **Editarlo sí se puede**, porque `tipo` y los paneles no gatean el panel — el
+  editor deja bloqueado el switch de estado, que es lo único que podría
+  cerrarle la puerta a la sesión.
+- **El `PUT` acepta `{id, tipo?, habilitado?, paneles?, operacion?, invitacion?,
+  facturacion?}`, todos opcionales e independientes.** Lo que no viene, no se
+  toca: se relee de la fila y se reescribe igual. El menú de la fila sigue
+  mandando sólo `{id, habilitado}` (el toggle) y el editor manda el resto. Se
+  distingue con `array_key_exists` y **no** con `isset`, para que un `null`
+  cuente como "vino vacío" y no como "no vino". Sigue sin reescribir la fila
+  entera: no hay ningún otro campo que el guardado pueda pisar.
+- **Los tres permisos sólo los mueve un perfil que ya los tenga**, y es la única
+  regla del endpoint que mira a *quien edita* en vez de a la fila editada. Sin
+  ella ninguno significaría nada: un administrador se daría a sí mismo el que le
+  falta en dos clicks. **El corte es sobre el CAMBIO**, igual que el del estado
+  del perfil propio — guardar la ficha con los permisos tal como están pasa, así
+  quien no tiene ninguno igual puede editar `tipo` y los paneles.
+  **Valía sólo para `facturacion` hasta el 07/09/2026.** Los otros dos quedaban
+  libres con el argumento de que son de `app` y quien administra el dominio
+  reparte el acceso a la app aunque él no la use; no se sostuvo — repartir lo que
+  uno no tiene es exactamente la escalada que el corte evita, y que el permiso se
+  ejerza en otra pantalla no cambia quién lo está regalando.
+- **Nadie quedó sin poder otorgar al ampliarlo.** Medido el 07/09/2026: los 404
+  perfiles que pasan el gate del panel tienen los tres permisos en `1` (es el
+  backfill de `20260907_1000`), así que ninguno de los 120 dominios con
+  administrador se quedó sin quien reparta. La regla recién muerde cuando alguien
+  revoca un permiso, y **el desbloqueo siempre es `cloud`**, que no lleva esta
+  restricción: ahí quien edita es Reactor sobre el sistema entero.
+- **El corte del 409 es sobre el CAMBIO de estado, no sobre el perfil entero.**
+  Guardar el propio perfil con el estado tal como está no es un cambio y pasa;
+  lo que se rechaza es apagarlo. Sin esa distinción, editarle los paneles al
+  perfil de la sesión sería imposible.
+- **No hay `POST`.** `handleCreate()` se eliminó del endpoint: un alta de
+  `usuarios` dentro del endpoint que administra `perfiles` sólo podía confundir.
+  El alta sigue siendo la invitación (abajo).
 
-### Usuarios → el alta es una invitación, y no hay edición
+### Usuarios → el alta es una invitación, la edición es del perfil
 
 El módulo se recortó a **consultar, habilitar/deshabilitar y eliminar**
-(03/09/2026). Reglas que no se deducen del esquema:
+(03/09/2026) y recuperó la **edición del perfil** el 06/09/2026 (ver la sección
+siguiente). Lo que sigue sin existir es el alta y la edición de la *persona*.
+Reglas que no se deducen del esquema:
 
 - **`+ Nuevo usuario` no da de alta: invita.** El botón abre
   `formInvitacion()`, el mismo modal del módulo Invitaciones —un solo campo, el
@@ -1127,22 +1242,22 @@ El módulo se recortó a **consultar, habilitar/deshabilitar y eliminar**
   se otorga al aceptar es de rol Administrador, porque es el único que habilita
   el panel (ver "Acceso: sólo Administradores"). No hay forma de invitar a
   alguien "sólo para mirar": el panel no tiene niveles de permiso internos.
-- **Ya no hay formulario de edición.** Se le sacó `Editar` al menú contextual de
-  la fila y también el botón primario del modal de Consultar, el alta pasó a ser
-  la invitación y `formUsuario()` quedó sin call sites; al mudar el módulo a
-  `perfiles` (05/09/2026) se borró junto con el `POST` / `PUT` de fila completa
-  del endpoint. **Si alguna vez se repone la edición, no es de esta pantalla**:
-  los datos de la persona son de su cuenta y el perfil (nombre, rol, tipo) lo
-  administra Reactor.
+- **No hay formulario de la PERSONA, y no lo va a haber.** `formUsuario()` —el
+  que editaba la fila entera de `usuarios`— se borró al mudar el módulo a
+  `perfiles` (05/09/2026) y no volvió: los datos de la persona (nombre, correo,
+  celular, contraseña) son de **su cuenta** y los administra su dueño. Lo que se
+  repuso el 06/09/2026 es el editor **del perfil**, que es otra cosa y toca
+  otras tres columnas.
 - **Menú contextual de la fila**: `Consultar` → `Habilitar` / `Deshabilitar` →
-  separador → `Eliminar`. Se aparta del orden del skill `abm_design`, que
-  intercala `Editar` antes de la baja. Sobre el perfil de la propia sesión queda
-  sólo `Consultar` (ver arriba).
+  separador → `Editar` → `Eliminar`. Es el orden del skill `abm_design`. Sobre
+  el perfil de la propia sesión quedan `Consultar` y `Editar` (ver arriba).
 - **El modal de Consultar usa `wide: 'xl'`** (`.modal-xl`, 1040px = el doble
   del ancho base), no el `modal-wide` de 880px de los dumps y las tablas.
-- **El pie de Consultar es sólo `Cerrar`**: sin botón ☰ de "Más acciones"
-  —copiar usuario / correo y habilitar-deshabilitar viven en el menú de la
-  fila— y sin acción primaria `Editar`.
+- **La barra de Consultar es `Cerrar` + `Editar`**, con `Editar` como botón
+  **directo** y no dentro de un desplegable `Acciones`: es la única acción de la
+  ficha, y un menú de un solo ítem no se justifica (misma regla que Consultar
+  dispositivo). Copiar usuario / correo y habilitar-deshabilitar siguen viviendo
+  en el menú contextual de la fila.
 - **La ficha no muestra `id`, `autenticacion`, `roles`, `panel`, `dominio` ni
   `perfiles.tipo`.** El id ya encabeza el modal (`Consultar perfil #N`);
   `autenticacion`, `roles` y `panel` son internos del sistema histórico;
@@ -1159,13 +1274,140 @@ El módulo se recortó a **consultar, habilitar/deshabilitar y eliminar**
   cierran de a dos. **Agregar o quitar un campo deja la cuenta impar** y estira
   la última a todo el ancho, que se lee como un destaque deliberado (mismo
   criterio que Dispositivos → General).
+- **Los tres permisos van en un SEGUNDO BLOQUE, detrás de una `.view-sep`**
+  (mismo recurso que Consultar invitación). No son atributos de la persona ni del
+  acceso en general sino lo que ese perfil *puede hacer*, y mezclarlos con el
+  correo y las fechas los perdía en la grilla. **La divisoria obliga a mirar la
+  paridad por bloque**: arriba las doce medias y abajo tres, con `Operación` a
+  todo el ancho —la ranura impar— para que `Invitación` y `Facturación` cierren
+  de a dos. Cada uno muestra su badge más, en tenue, qué abre: dos de los tres no
+  son de esta pantalla y sin eso se leen como permisos del panel.
+
+### Usuarios → modal Editar perfil (pestañas General / Permisos / Paneles)
+
+`formPerfil()` + el `PUT` de `api/usuarios.php` (06/09/2026; la pestaña
+`Permisos`, el 07/09/2026). Es el port del editor de cloud
+(`openProfileModal()` + `cloud/api/profiles.php`), con las diferencias que impone
+el alcance por dominio del panel.
+
+- **No edita ningún dato de la persona: `tipo`, `habilitado`, los tres permisos
+  y los paneles.** Es la línea que separa este modal del `formUsuario()` que se
+  borró: los datos personales son de la cuenta, y el `nombre` / `uuid` del perfil
+  los escribe la invitación que lo creó.
+- **Los permisos tienen pestaña propia y no se suman a `General`.** Dos de los
+  tres (`operacion`, `invitacion`) son de `app` y no del panel, así que meterlos
+  junto a `tipo` y `habilitado` los haría leer como atributos de esta pantalla.
+  La pestaña los agrupa y le pone a cada uno qué abre y dónde.
+- **El permiso que la sesión no tiene NO SE DIBUJA** (07/09/2026). La lista sale
+  de `PERMISOS_PERFIL` filtrada por `puede()`, así que quien edita sólo ve los
+  que su propio perfil tiene. Antes se mostraba el switch bloqueado con el motivo
+  debajo — un switch apagado que no se puede tocar sólo invita a pelearse con él.
+- **Es la excepción a "visible y bloqueado"**, que sigue valiendo para el
+  `habilitado` del perfil propio (más abajo). La diferencia es de quién es el
+  dato que falta: ahí el switch se queda porque el dato es **del perfil que se
+  está mirando** y esconderlo haría dudar de si falta el dato; acá lo que falta
+  es **del que mira**, y no es información sobre la fila editada.
+- **Sin ningún permiso que otorgar, la pestaña no existe**: ni la solapa ni el
+  panel. Una solapa vacía se lee como una pantalla rota — el mismo criterio con
+  el que `index.php` omite el agrupador `Cuenta` entero en vez de vaciarlo.
+- **La pestaña no lleva texto introductorio.** Tuvo un `.form-nota` que explicaba
+  que los permisos son independientes del estado y del tipo; se sacó por pedido
+  explícito. Las tres filas ya dicen qué abre cada una.
+- **Viajan sólo los permisos dibujados**, y los que no están no se tocan (el
+  `PUT` relee de la fila lo que no viene). Hasta el 07/09/2026 iban los tres
+  siempre —el bloqueado mandaba su valor sin cambios— para que el payload no
+  dependiera de quién edita; desde que el switch no existe, ese valor lo
+  inventaría el front en vez de elegirlo alguien, y si la fila cambió entre el
+  `GET` y el `PUT` lo mandaría viejo y se comería un 403 por un cambio que nadie
+  pidió.
+- **El payload se arma DENTRO del handler de `Guardar`**, no al abrir el modal:
+  leer los controles antes mandaría siempre los valores iniciales.
+- **Las filas de permiso reusan el markup de la lista de paneles**
+  (`.paneles-lista` + `.toggle-switch.panel-item`): es la misma forma y duplicar
+  CSS para tres filas no compra nada. Lo único que se agregó es
+  `.panel-item-nombre .muted { display: block }`, porque el segundo renglón acá
+  es una frase y no el `<code>` con el id.
+- **El usuario va como campo deshabilitado.** Da el contexto de *qué* acceso se
+  está editando; no es un campo del formulario. Mismo recurso que usa cloud, que
+  ahí muestra los selects de usuario y dominio en `disabled`.
+- **NO se muestra el dominio, a diferencia de cloud.** Allá el listado cruza
+  todos los dominios y el dato distingue una fila de otra; acá el panel filtra
+  todo por el dominio de la sesión, así que la columna sólo puede tener un valor
+  — el mismo criterio con el que se excluyó de la ficha de Consultar y de
+  Dispositivos → General.
+- **Las tres pestañas se llaman igual que en cloud** (`General` / `Permisos` /
+  `Paneles`): es la misma ficha en dos productos, y si los rótulos no coinciden
+  se leen como pantallas distintas. Se cablean con `montarPestanas()`, el helper
+  que ya usan Dispositivos y Actividad.
+- **`tipo` lleva una nota que aclara que no reparte permisos.** Es el `ENUM('A','O')`
+  que lee el sistema histórico; ofrecerlo en un formulario sin decirlo invita a
+  leerlo como el rol verdadero (ver "`perfiles.tipo`: sólo `A` y `O`").
+- **El switch de `habilitado` va bloqueado sobre el perfil de la propia sesión**,
+  visible y no escondido: un campo que desaparece según la fila hace dudar de si
+  falta el dato o falta el permiso. El backend igual corta con 409 — la UI no es
+  el control de acceso.
+- **La lista de paneles es un switch por fila, sin buscador.** No reusa ningún
+  selector con filtro a propósito: el catálogo son los paneles de **un** dominio
+  y el más grande de la base tiene 7 (dominio 216), así que un buscador sobre
+  siete filas es ruido. `Seleccionar todo` / `Deseleccionar todo` operan sobre
+  toda la lista — sin buscador no hay nada oculto que puedan pisar por sorpresa.
+- **El `input` va PEGADO al `.toggle-track`.** El CSS del switch (§11h) pinta el
+  estado con `input:checked + .toggle-track`: cualquier nodo entre los dos lo
+  deja siempre apagado. Es el error fácil de cometer al reordenar el markup.
+- **Sin ningún panel tildado el perfil no ve NINGUNO**, y el modal lo dice. El
+  permiso es explícito y no hay atajo a "todos" — lo hubo mientras
+  `perfiles_paneles` estaba vacía, y la siembra de `20260906_1700` (3.598 filas)
+  lo volvió innecesario.
+- **El guardado sincroniza por diferencia, no borra y reinserta.**
+  `perfiles_paneles.asignado` es la fecha en que se dio ese permiso, y reescribir
+  la fila entera en cada `Guardar` la volvería la fecha del último guardado.
+  Mismo criterio que las otras tablas puente del repo.
+- **El catálogo de paneles viaja en el `GET ?id=N`, no en el listado.** Son los
+  paneles de un solo dominio y el listado ni los usa: mandarlos por fila sería
+  repetirlos hasta 1.000 veces.
+- **Un id de panel que no esté en el catálogo del dominio se rechaza con 422.**
+  Inexistente, deshabilitado o de otro dominio son el mismo caso desde acá. La
+  base no puede expresar "el panel tiene que ser del dominio del perfil" con una
+  FK, así que ésta es la única defensa: sin ella, un id a mano en el payload le
+  daría a un perfil acceso al panel de otro cliente.
+- **El error de guardado no cierra el modal**: lo que rebota son validaciones del
+  backend, y cerrarlo perdería lo que se acaba de elegir.
+
+#### `perfiles.panel` (singular) es una MEMORIA, y el editor la toca de rebote
+
+No confundirla con `perfiles_paneles`. **`perfiles.panel` guarda el último panel
+que ese perfil abrió en `app`, y es también el que `app` le reabre al
+conectarse.** La escribe `app/api/paneles.php` cada vez que la persona cambia de
+panel, y sólo con uno que ya pasó por `appPanelesDelDominio()` — o sea que la
+invariante que `app` mantiene es *"`panel` es siempre uno de los permitidos"*.
+
+**Este endpoint es el único que puede romperla**, porque es el único que revoca
+paneles desde afuera de `app`. Por eso el guardado la limpia
+(`olvidarPanelSinPermiso()`):
+
+- **Si el guardado le quita el permiso sobre el panel recordado, `panel` va a
+  `NULL`.** Sin eso queda un puntero a algo que el perfil ya no puede abrir.
+- **A `NULL` y no al primero de la lista.** Es una memoria, no una preferencia:
+  elegirle uno sería inventarle al perfil una decisión que nadie tomó. Para la
+  persona no cambia nada — `appPanelesDelDominio()` ya cae al primer panel
+  permitido cuando el recordado no está en la lista, y con `panel` vacío hace
+  exactamente lo mismo—, así que lo único que se gana es no dejar un dato que
+  miente.
+- **`NULL` y no `0`**: con las FK declaradas en `db/schema.sql`, el `0` del
+  legacy ya no es un valor válido. Mismo criterio con el que lo escribe
+  `panel/invitacion/aceptar.php`.
+- **La UI lo marca con el badge `Último abierto`** sobre la fila que corresponde,
+  y la nota de la pestaña avisa que destildarla borra esa memoria. **No es una
+  tercera opción del switch**: es información sobre qué pasa si se destilda esa
+  fila, no algo que se elija desde acá.
 
 ### Módulos de ficha única
 
 No todo módulo es un ABM. Cuando el dominio tiene **un solo registro** de ese
 recurso (hoy: Dominio y Facturación, la ficha fiscal de `clientes` a la que
-apunta `dominios.cliente`) no hay listado ni alta ni baja: se consulta —y, si
-el recurso es del cliente, se edita— en la propia pantalla. Estructura fija:
+apunta `dominios.cliente`) no hay listado ni alta ni baja: se consulta en la
+propia pantalla y, si el recurso es del cliente, se edita en un modal.
+Estructura fija:
 
 - Tarjeta de ayuda del skill `abm_design` arriba y, debajo, la ficha. **Sin
   toolbar**: a diferencia de los ABM, estas pantallas no llevan el botón ícono
@@ -1176,12 +1418,35 @@ el recurso es del cliente, se edita— en la propia pantalla. Estructura fija:
   más oscura** (`.view-card`, las mismas del modal de Consultar de los ABM),
   media o full según el largo del valor.
 - **Pie de la tarjeta** (`.form-card-foot`, acciones a la derecha) **sólo en
-  las fichas editables**: en modo lectura, `Editar`; al entrar en edición las
-  mismas tarjetas cambian el valor por un control **sin mover la
-  distribución**, y el pie pasa a `Cancelar` + `Guardar`. En edición la
-  tarjeta es un `<form>`, así Enter guarda como el submit del legacy. Las
-  fichas de sólo lectura (Dominio) no llevan pie: sin acciones, la línea
-  divisoria queda vacía.
+  las fichas editables**, y con un solo botón: `Editar`. Las fichas de sólo
+  lectura (Dominio) no llevan pie: sin acciones, la línea divisoria queda
+  vacía.
+- **La pantalla NUNCA se convierte en formulario: `Editar` abre un modal**
+  (06/09/2026). La ficha se queda en lectura detrás, y al guardar se repinta
+  con lo que devolvió el `PUT`. Hasta esa fecha la edición era en la propia
+  pantalla —las mismas tarjetas cambiaban el valor por un control y el pie
+  pasaba a `Cancelar` + `Guardar`—, y era la única pantalla del panel donde
+  editar no abría un modal: sin el fondo gris ni el marco, lo único que
+  distinguía lectura de edición era la forma de los controles, y el
+  formulario no tenía un límite visual que dijera que estaba abierto.
+- **El formulario del modal usa `.form-group` / `.form-row`, como todos los
+  demás modales de edición del panel** (Editar dispositivo, Invitar usuario).
+  **No reusa las `.view-card` de la ficha**: hasta el 06/09/2026 lo hacía
+  —`editCard()` armaba la misma tarjeta oscura con un control adentro— y era la
+  única pantalla del panel donde un input venía envuelto en una caja. La
+  tarjeta oscura es del **modo consulta**; el modo edición son label + control
+  sobre el fondo del modal. `editCard()` se eliminó al no quedarle call sites.
+- **El `<form>` lleva `.form-stack`** (flex column, `gap: 16px`): es hijo único
+  del `.modal-body`, así que el `gap` del body no separa nada y sin esa clase
+  los `form-group` de adentro quedan pegados.
+- **El botón `Guardar` va en la barra de acciones del modal, que `openModal()`
+  dibuja FUERA del `<form>`**: por eso lleva `form="fc-form"` (el atributo de
+  HTML5 que le da dueño a un control externo). Sin eso el submit no dispara y
+  habría que duplicar el guardado en un listener de click. Enter dentro de
+  cualquier campo entra por el mismo camino.
+- **El error de guardado se muestra dentro del modal y el modal no se cierra**:
+  lo que rebota son validaciones del backend (CUIT, razón social) y cerrarlo
+  perdería lo tipeado.
 
 El endpoint **no acepta ningún id**: resuelve el registro desde el dominio de
 la sesión, para que no se pueda leer ni escribir la ficha de otro dominio.
@@ -1207,27 +1472,27 @@ Porta `reactor-panel/sesion/cambiar.php` + `cPerfil::cargar()` del legacy
 (`reactor-api/framework/subframework.php`). `GET` lista, `POST {perfil}`
 cambia. Reglas que no se deducen del esquema:
 
-- **La disponibilidad la define `perfiles`, y sólo los de rol Administrador**:
-  la cuenta puede pasar a un dominio si existe una fila habilitada
-  `perfiles(usuario, dominio)` con `rol` en `PANEL_ROLES_ADMIN`. Es la misma
-  regla con la que entra al panel (ver "Acceso: sólo Administradores"), porque
-  el selector no puede ofrecer un destino que después el gate va a rechazar:
-  un dominio donde la cuenta es Operadora simplemente no aparece. La consulta
-  es `perfilesAdministrador()` de [lib/acceso.php](lib/acceso.php), la misma
-  que usa el login para elegir con qué perfil arranca la sesión.
-  `usuarios.dominio` es sólo el dominio **activo** — el que viaja en el JWT y
-  por el que filtra todo el panel — y no es la lista de dominios permitidos.
+- **La disponibilidad la define `perfiles`, y sólo los de tipo Administrador.**
+  La cuenta puede pasar a un dominio si existe una fila habilitada
+  `perfiles(usuario, dominio)` con `tipo = 'A'`. Es la misma regla con la que
+  entra al panel (ver
+  "Acceso: sólo Administradores"), porque el selector no puede ofrecer un
+  destino que después el gate vaya a rechazar: un dominio donde la cuenta es
+  Operadora simplemente no aparece. La consulta es `perfilesHabilitados()` de
+  [lib/acceso.php](lib/acceso.php), la misma que usa el login para elegir con qué
+  perfil arranca la sesión. `usuarios.dominio` es sólo el dominio **activo** — el
+  que viaja en el JWT y por el que filtra todo el panel — y no es la lista de
+  dominios permitidos.
 - **Ya no se lista el dominio activo sin perfil propio.** Existía porque
   `usuarios.dominio` lo puede asignar el back office interno sin crear fila en
   `perfiles` (el usuario 3 está así en `OSSE San Juan`), y se mostraba —
   primero y no elegible— para que la sesión en curso no faltara de la lista.
-  Con el gate de rol esa sesión ya no puede existir: sin perfil de
-  Administrador en el dominio activo, `requireAdministrador()` no la deja
-  llegar al endpoint. **Todas las filas son elegibles**, así que el front
-  perdió la rama del `<div>` no clickeable.
+  Con el gate resolviéndose contra `perfiles`, esa sesión no puede existir:
+  `requirePerfilValido()` no la deja llegar al endpoint. **Todas las filas son
+  elegibles**, así que el front perdió la rama del `<div>` no clickeable.
 - **Una fila por perfil, no por dominio**: lo que se elige es un perfil. La
-  misma cuenta puede tener varios en el mismo dominio con distinto rol (el
-  usuario 3 tiene cuatro en `Reactor`), y `usuarios.perfil` guarda cuál se
+  misma cuenta puede tener varios en el mismo dominio (el usuario 3 tiene cuatro
+  en `Reactor`), y `usuarios.perfil` guarda cuál se
   eligió, así que agrupar por dominio dejaría el click ambiguo. Es como
   lista el legacy.
 - **Qué se asienta**: `usuarios.perfil` (último perfil) y `usuarios.dominio`
@@ -1249,15 +1514,9 @@ cambia. Reglas que no se deducen del esquema:
 - **El dominio deshabilitado se lista y se puede elegir**, con badge: el
   legacy no mira `dominios.habilitado` y hoy 95 de 148 dominios están en 0,
   así que bloquearlos le sacaría al usuario accesos que viene usando.
-- **Se filtra por `perfiles.rol`, NO por `perfiles.tipo`** — aunque el legacy
-  use `tipo="A"` con el mensaje "Requiere rol de administrador". Las dos
-  columnas están desalineadas en los datos (el perfil 456 es `tipo='O'` con
-  `rol=101` Administrador): 39 perfiles de rol Administrador llevan `tipo='O'`
-  y 8 de rol Operador llevan `tipo='A'`, así que gatear por `tipo` dejaría
-  afuera a 39 administradores reales y adentro a 8 operadores.
-- El rol (`roles.nombre`, "Administrador") es la etiqueta de la fila, no
-  `perfiles.nombre` ("Administrador en Reactor"), que repite el nombre del
-  dominio que ya encabeza la tarjeta.
+- La etiqueta de la fila es `perfiles.nombre` ("Administrador en Reactor").
+  Hasta el 06/09/2026 era el nombre del rol, que describía mejor la fila sin
+  repetir el dominio; al eliminarse `perfiles.rol` quedó esto o nada.
 - **No se porta el manejo de `perfiles.panel`** que hace el legacy al
   cambiar (asignarle un panel del dominio si está en 0): este panel no usa
   la tabla `paneles` en ninguna pantalla.

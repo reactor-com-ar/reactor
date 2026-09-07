@@ -5,8 +5,6 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 require_once dirname(__DIR__) . '/lib/usuarios_alta.php';
 
-const ROLES_VALIDOS = ['admin', 'operador', 'lectura'];
-
 /**
  * Dependencias reales de `usuarios`, tomadas de db/schema.sql y verificadas
  * contra information_schema. Son 14 FKs en 13 tablas, con tres comportamientos
@@ -72,15 +70,19 @@ try {
 
 function handleList(): void
 {
-    // Esquema real (db/schema.sql -> tabla `usuarios`): correo, roles, habilitado,
-    // ingresado, registrado. Se aliasan a los nombres que ya usa el front (email, rol,
-    // last_login_at, created_at) para no tocar el JS.
+    // Esquema real (db/schema.sql -> tabla `usuarios`): correo, habilitado,
+    // ingresado, registrado. Se aliasan a los nombres que ya usa el front
+    // (email, last_login_at, created_at) para no tocar el JS.
+    //
+    // YA NO HAY ROL. `usuarios`.`roles` se elimino el 06/09/2026 junto con el
+    // resto del alcance historico (`20260906_1900_usuarios_sin_legacy.sql`):
+    // los roles pasaron a ser un concepto de cloud (`controladores_roles`) y un
+    // usuario final no tiene uno. Lo que define su alcance son sus `perfiles`.
     $stmt = db()->query(
         "SELECT id,
                 correo     AS email,
                 nombre,
                 celular,
-                roles      AS rol,
                 habilitado,
                 ingresado  AS last_login_at,
                 registrado AS created_at
@@ -94,18 +96,10 @@ function handleList(): void
         return $r;
     }, $stmt->fetchAll());
 
-    $resumen = [
-        'total'     => count($usuarios),
-        'activos'   => 0,
-        'admins'    => 0,
-        'operador'  => 0,
-        'lectura'   => 0,
-    ];
+    $resumen = ['total' => count($usuarios), 'activos' => 0, 'inactivos' => 0];
     foreach ($usuarios as $u) {
         if ($u['activo']) $resumen['activos']++;
-        if ($u['rol'] === 'admin')    $resumen['admins']++;
-        if ($u['rol'] === 'operador') $resumen['operador']++;
-        if ($u['rol'] === 'lectura')  $resumen['lectura']++;
+        else              $resumen['inactivos']++;
     }
 
     json_ok(['usuarios' => $usuarios, 'resumen' => $resumen]);
@@ -147,12 +141,11 @@ function handleCreate(): void
     $email    = strtolower(trim((string) ($in['email']    ?? '')));
     $nombre   = trim((string) ($in['nombre']   ?? ''));
     $celular  = trim((string) ($in['celular']  ?? ''));
-    $rol      = trim((string) ($in['rol']      ?? 'operador'));
     $password = (string) ($in['password'] ?? '');
     // `activo` llega del toggle del formulario pero no se usa en el alta:
     // `habilitado` es una constante (1). Se respeta al editar.
 
-    validarComunes($email, $nombre, $celular, $rol);
+    validarComunes($email, $nombre, $celular);
     if ($password === '')          json_error('La contrasena es obligatoria', 422);
     if (mb_strlen($password) < 6)  json_error('La contrasena debe tener al menos 6 caracteres', 422);
     // `usuarios.contrasena` es varchar(50) y el cifrado legacy es base64:
@@ -180,7 +173,6 @@ function handleCreate(): void
         'contrasena'  => $password,
         'correo'      => $email,
         'celular'     => $celular === '' ? null : $celular,
-        'roles'       => $rol,
         'registrante' => (int) ($actual['id'] ?? 0),
     ]);
 
@@ -194,12 +186,11 @@ function handleUpdate(): void
     $email    = strtolower(trim((string) ($in['email']    ?? '')));
     $nombre   = trim((string) ($in['nombre']   ?? ''));
     $celular  = trim((string) ($in['celular']  ?? ''));
-    $rol      = trim((string) ($in['rol']      ?? 'operador'));
     $activo   = isset($in['activo']) ? (bool) $in['activo'] : true;
     $password = (string) ($in['password'] ?? '');
 
     if ($id <= 0) json_error('Id invalido', 422);
-    validarComunes($email, $nombre, $celular, $rol);
+    validarComunes($email, $nombre, $celular);
 
     if ($password !== '') {
         if (mb_strlen($password) < 6)  json_error('La contrasena debe tener al menos 6 caracteres', 422);
@@ -225,14 +216,13 @@ function handleUpdate(): void
         json_error('Ya existe un usuario con ese email', 409);
     }
 
-    // Nombres reales de db/schema.sql: correo, roles, habilitado, contrasena.
-    // El front manda email/rol/activo/password (ver el alias de handleList()).
-    $sql    = 'UPDATE usuarios SET correo = :e, nombre = :n, celular = :c, roles = :r, habilitado = :a';
+    // Nombres reales de db/schema.sql: correo, habilitado, contrasena.
+    // El front manda email/activo/password (ver el alias de handleList()).
+    $sql    = 'UPDATE usuarios SET correo = :e, nombre = :n, celular = :c, habilitado = :a';
     $params = [
         ':e'  => $email,
         ':n'  => $nombre,
         ':c'  => $celular === '' ? null : $celular,
-        ':r'  => $rol,
         // `habilitado` es tinyint(1) NOT NULL con dos valores: 1 y 0. Se
         // escribe el entero, nunca el booleano de PHP (PDO lo bindearia como
         // cadena vacia). Ver lib/habilitado.php.
@@ -405,7 +395,7 @@ function handleDelete(): void
     ]);
 }
 
-function validarComunes(string $email, string $nombre, string $celular, string $rol): void
+function validarComunes(string $email, string $nombre, string $celular): void
 {
     if ($email === '')                          json_error('El email es obligatorio', 422);
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) json_error('El email no es valido', 422);
@@ -416,7 +406,6 @@ function validarComunes(string $email, string $nombre, string $celular, string $
     if ($celular !== '' && !preg_match('/^[+0-9\s().-]+$/', $celular)) {
         json_error('El celular solo puede contener numeros, espacios y los signos + ( ) - .', 422);
     }
-    if (!in_array($rol, ROLES_VALIDOS, true))   json_error('Rol invalido', 422);
 }
 
 function readJson(): array

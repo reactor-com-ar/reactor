@@ -43,6 +43,11 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+// PERMISO `facturacion`: Facturas y Recibos son las otras dos pantallas del
+// agrupador "Cuenta" y se cierran con la misma llave que Facturacion. Ver
+// requirePermisoPanel() en lib/acceso.php.
+requirePermisoPanel('facturacion');
+
 const ORDEN_VALIDO = ['id', 'emision', 'vencimiento', 'total', 'serie'];
 
 /**

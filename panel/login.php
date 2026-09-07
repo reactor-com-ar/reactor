@@ -12,7 +12,7 @@ require_once __DIR__ . '/lib/acceso.php';
 // perfil de Administrador entra aca, la mandamos a index.php, index.php la
 // devuelve al login y asi para siempre. Con ella se queda en el formulario y
 // puede ingresar con otra cuenta.
-if (authUser() !== null && sessionEsAdministrador()) {
+if (authUser() !== null && sessionTienePerfilValido()) {
     header('Location: index');
     exit;
 }
@@ -21,7 +21,7 @@ if (authUser() !== null && sessionEsAdministrador()) {
 // index.php, y app.js al recibir un 403 con `motivo: 'rol'` (perfil revocado
 // con la sesion abierta). Es un aviso, no un error del formulario: la
 // contrasena que la persona esta por tipear no tiene nada que ver.
-$avisoRol = (($_GET['motivo'] ?? '') === 'rol');
+$avisoRol = (($_GET['motivo'] ?? '') === 'perfil');
 
 $appName     = 'Reactor Panel';
 $versionFile = __DIR__ . '/version.txt';
@@ -69,7 +69,7 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
                  nace en las paginas publicas pero esta calibrada para vivir
                  dentro de .login-card, que es esta misma tarjeta. -->
             <div class="inv-note inv-note-bad">
-                <?= htmlspecialchars(PANEL_MENSAJE_SIN_ROL) ?>
+                <?= htmlspecialchars(PANEL_MENSAJE_SIN_PERFIL) ?>
                 Ingres&aacute; con una cuenta que tenga ese perfil.
             </div>
         <?php endif; ?>

@@ -45,7 +45,15 @@ if ($sesion === null) {
 
 try {
     $ctx = appContextoSesion($sesion);
-    if ($ctx['dominio'] <= 0 || $ctx['panel'] <= 0) {
+
+    // PERMISO `operacion`: sin él no hay tablero que monitorear. Se responde con
+    // la lista VACÍA y no con un 403 porque este endpoint lo llama un sondeo de
+    // un segundo: un 403 repetido llenaría la consola del navegador y el log del
+    // servidor con un error que no es un error. Es el mismo criterio con el que
+    // se contesta cuando no hay panel abierto, dos líneas más abajo. La pantalla
+    // que dibuja los controles ya está cerrada por index.php, así que en la
+    // práctica el sondeo ni siquiera arranca.
+    if (!appPuede($ctx, 'operacion') || $ctx['dominio'] <= 0 || $ctx['panel'] <= 0) {
         responder(200, ['ok' => true, 'controles' => []]);
     }
 

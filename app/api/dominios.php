@@ -149,7 +149,7 @@ function cambiarDominio(array $sesion): never
         // Qué panel abre el dominio nuevo. `appPanelesDelDominio()` devuelve el
         // recordado por el perfil si sigue siendo válido, y si no el primero
         // de la lista — la misma regla de `cPanel::perfil2id()`.
-        $paneles = appPanelesDelDominio($perfil['dominio'], $perfil['panel']);
+        $paneles = appPanelesDelDominio($perfil['dominio'], $perfil['panel'], (int) $perfil['perfil']);
         $panel   = $paneles['activo'];
 
         db()->beginTransaction();

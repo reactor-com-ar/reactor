@@ -60,12 +60,11 @@ try {
     // por que no entra en vez de un "usuario o contrasena incorrectos" que lo
     // manda a probar contrasenas que estan bien.
     $usuarioId = (int) $row['id'];
-    $admin     = perfilesAdministrador($usuarioId);
+    $habiles   = perfilesHabilitados($usuarioId);
 
-    if ($admin === []) {
+    if ($habiles === []) {
         json_error(
-            PANEL_MENSAJE_SIN_ROL . ' Tu cuenta no tiene ese perfil en ningún dominio: '
-            . 'pedile a un administrador que te lo asigne.',
+            PANEL_MENSAJE_SIN_PERFIL . ' Pedile a un administrador que te asigne uno.',
             403
         );
     }
@@ -82,8 +81,8 @@ try {
     // esto la sesion nace denegada y el login rebota para siempre: son 247 de
     // las 368 cuentas administradoras las que hoy tienen el perfil activo en
     // otra cosa.
-    if (!esPerfilAdministrador($usuarioId, (int) ($cuenta['perfil'] ?? 0), (int) ($cuenta['dominio'] ?? 0))) {
-        panelPerfilActivoAsentar($usuarioId, $admin[0]['perfil'], $admin[0]['dominio']);
+    if (!esPerfilValido($usuarioId, (int) ($cuenta['perfil'] ?? 0), (int) ($cuenta['dominio'] ?? 0))) {
+        panelPerfilActivoAsentar($usuarioId, $habiles[0]['perfil'], $habiles[0]['dominio']);
         $cuenta = sessionCuentaDesdeDb($usuarioId);
     }
 
@@ -96,7 +95,6 @@ try {
         'dominio_nombre' => $cuenta['dominio_nombre'] ?? '',
         'perfil'         => $cuenta['perfil']         ?? null,
         'perfil_nombre'  => $cuenta['perfil_nombre']  ?? '',
-        'roles'          => $cuenta['roles']          ?? '',
     ];
 
     jwt_cookie_set(jwt_sign($usuarioPayload, JWT_TTL));

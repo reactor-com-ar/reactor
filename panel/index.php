@@ -17,11 +17,26 @@ if ($currentUser === null) {
 // (`?motivo=rol`) en vez de cargar una SPA que despues iba a fallar endpoint
 // por endpoint. Es tambien el corte para un token emitido por cloud/, que no
 // aplica esta regla y comparte la cookie con el panel. Ver lib/acceso.php.
-requireAdministrador();
+requirePerfilValido();
 
 // Datos de alcance de la sesion (dominio, perfil). Se inyectan en la pagina
 // para que el front los tenga en el arranque, sin un request extra.
 $sesion = sessionContext() ?? [];
+
+// PERMISOS DEL PERFIL. Viajan con el resto del contexto por la misma razon: el
+// front los necesita en el arranque para no dibujar un menu que despues va a
+// rebotar con 403. Se resuelven contra la base en cada carga del shell, no desde
+// un claim del token (lib/acceso.php).
+//
+// SON PARA LA UI Y NADA MAS. El control de acceso real vive en el endpoint
+// (`requirePermisoPanel()`): un permiso que solo esconde el boton no es un
+// permiso, porque la URL se pega a mano.
+$sesion['permisos'] = panelPermisosDeSesion();
+
+// El agrupador "Cuenta" (Facturas / Recibos / Facturacion) es lo unico del panel
+// que gatea `facturacion`, y por eso el flag se saca a una variable: lo usa el
+// markup del sidebar de mas abajo.
+$verCuenta = $sesion['permisos']['facturacion'];
 
 $appName     = 'Reactor Panel';
 $versionFile = __DIR__ . '/version.txt';
@@ -131,6 +146,11 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                 </div>
             </div>
 
+            <?php // "Cuenta" ENTERO cuelga del permiso `facturacion`: las tres
+                  // pantallas son la misma llave. Se omite el agrupador
+                  // completo y no cada item -- una categoria vacia se lee como
+                  // un menu roto. ?>
+            <?php if ($verCuenta): ?>
             <div class="nav-group-wrap open" data-group="cuenta">
                 <button type="button" class="nav-item nav-group-toggle">
                     <i class="fa-solid fa-wallet nav-icon"></i>
@@ -149,6 +169,7 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     </a>
                 </div>
             </div>
+            <?php endif; ?>
         </nav>
     </aside>
 

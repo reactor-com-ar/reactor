@@ -79,6 +79,15 @@ if ($botonId <= 0) {
 
 try {
     $ctx = appContextoSesion($sesion);
+
+    // PERMISO `operacion`: es LA orden al equipo, así que acá el corte es duro.
+    // Va antes que el chequeo de dominio a propósito — un perfil sin permiso no
+    // opera ni aunque todo lo demás esté en orden — y es 403 y no lista vacía
+    // como en api/canales.php: esto no es un sondeo sino una acción que la
+    // persona pidió, y tiene que enterarse de que no salió.
+    if (!appPuede($ctx, 'operacion')) {
+        responder(403, ['ok' => false, 'error' => 'Tu perfil no tiene permiso para operar este panel.']);
+    }
     if ($ctx['dominio'] <= 0) {
         responder(409, ['ok' => false, 'error' => 'Tu cuenta no tiene un dominio activo.']);
     }

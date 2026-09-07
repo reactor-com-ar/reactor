@@ -58,3 +58,60 @@ reconoce.
   **No derivar una de la otra**: sería repartir permisos, no normalizar datos.
 - Si algún día se agrega un valor al `ENUM`, va **al final**: `ORDER BY tipo`
   ordena por el índice interno, no por el texto.
+
+## Los tres permisos del perfil: `operacion`, `invitacion`, `facturacion`
+
+Columnas de `perfiles` entre `tipo` y `panel`, creadas por
+[cloud/sql/migrations/20260907_1000_perfiles_permisos_operacion_invitacion_facturacion.sql](cloud/sql/migrations/20260907_1000_perfiles_permisos_operacion_invitacion_facturacion.sql).
+**Son banderas `habilitado` aunque no se llamen así** — `tinyint(1) NOT NULL
+DEFAULT 0`, dos valores y nada más — así que valen para ellas todas las reglas
+de la sección anterior: se leen con `esHabilitado()`, se escriben con
+`valorHabilitado()`, en SQL va el entero y "sin permiso" es `= 0`.
+
+| permiso | dónde vale | qué abre |
+|---|---|---|
+| `operacion` | `app.reactor.com.ar` | Ver y usar los paneles de operación (los controles del dominio). |
+| `invitacion` | `app.reactor.com.ar` | El ítem *Invitar un Usuario*. |
+| `facturacion` | `panel.reactor.com.ar` | El agrupador *Cuenta* entero (Facturas / Recibos / Facturación). |
+
+- **El catálogo vive en `lib/permisos.php`** de cada app —
+  [panel/lib/permisos.php](panel/lib/permisos.php),
+  [cloud/lib/permisos.php](cloud/lib/permisos.php),
+  [app/lib/permisos.php](app/lib/permisos.php) — son copias idénticas, igual que
+  `habilitado.php`, porque las tres apps no comparten docroot. `perfilPermisos()`
+  convierte una fila de `perfiles` en los tres booleanos; `perfilSinPermisos()`
+  los deja en `false`, que es lo que corresponde cuando no hay perfil.
+- **Son permisos DEL PERFIL, no de la cuenta.** La misma persona puede tener
+  facturación en un dominio y no tenerla en otro: decide el perfil con el que la
+  sesión está parada, igual que `habilitado`.
+- **No se derivan de `tipo` ni lo reemplazan.** `tipo` es lo que lee el legacy y
+  lo que gatea la *entrada* al panel; estos tres gatean pantallas concretas una
+  vez adentro. Un Administrador puede no tener facturación y un Operador puede
+  tener operación — es el caso normal. Adivinar un permiso mirando `tipo` es el
+  mismo error que ya documenta la sección anterior sobre `tipo` y el difunto
+  `rol`.
+- **Esconder el botón no es el control de acceso.** Cada permiso se aplica en
+  las dos capas: la UI no dibuja lo que no corresponde y el endpoint corta igual
+  (`requirePermisoPanel()` en [panel/lib/acceso.php](panel/lib/acceso.php),
+  `appPuede()` en [app/lib/contexto.php](app/lib/contexto.php)). Se resuelven
+  **contra la base en cada request**, nunca contra un claim del JWT: revocar un
+  permiso tiene efecto en el request siguiente y no al vencer el token.
+- **Ninguno de los tres se otorga sin tenerlo** — pero sólo en `panel`
+  ([panel/api/usuarios.php](panel/api/usuarios.php)), donde quien edita es un
+  cliente administrando su propio dominio. En `cloud` no hay esa restricción:
+  ahí quien edita es Reactor sobre el sistema entero, y es el único desbloqueo
+  cuando un dominio se queda sin nadie que pueda repartir un permiso. Hasta el
+  07/09/2026 la regla valía sólo para `facturacion`; los otros dos quedaban
+  libres por ser de `app`, y eso no es una diferencia: repartir lo que uno no
+  tiene es la misma escalada, se ejerza en la pantalla que se ejerza.
+  **En `panel` el permiso que la sesión no tiene ni siquiera se dibuja** — el
+  modal de editar perfil lo omite en vez de mostrarlo bloqueado —, y el endpoint
+  corta con 403 igual: la UI no es el control de acceso.
+  Por lo mismo el perfil que crea `panel/invitacion/aceptar.php` nace con
+  `facturacion = 0`: ese alta corre sin sesión, y con `1` cualquier administrador
+  tendría el camino servido para fabricarse el permiso.
+- **Quien crea un perfil tiene que darle permisos**, igual que con
+  `perfiles_paneles`: el default de la columna es `0` y un perfil sin
+  `operacion` no puede usar la app. Los dos caminos que los crean ya lo hacen
+  (el alta de cloud pre-tilda `operacion` e `invitacion`, la invitación los
+  inserta en `1`).

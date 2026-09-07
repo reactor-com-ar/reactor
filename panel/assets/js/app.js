@@ -34,13 +34,13 @@
         }
         let body = null;
         try { body = await res.json(); } catch (_) { body = null; }
-        // 403 con `motivo: 'rol'` = la sesion perdio el perfil de Administrador
+        // 403 con `motivo: 'perfil'` = la sesion perdio su perfil habilitado
         // (se lo revocaron con la sesion abierta). No es un error de la
         // pantalla que lo pidio, asi que no va como toast: se vuelve al login,
         // que explica por que no se puede entrar. Los demas 403 SI son de
         // negocio ("El usuario esta deshabilitado") y siguen su camino normal.
-        if (res.status === 403 && body && body.motivo === 'rol') {
-            window.location.href = 'login?motivo=rol';
+        if (res.status === 403 && body && body.motivo === 'perfil') {
+            window.location.href = 'login?motivo=perfil';
             throw new Error(body.error || 'Acceso denegado');
         }
         if (!res.ok || !body || body.ok === false) {
@@ -126,27 +126,58 @@
 
     /* Modal generico: recibe titulo + HTML del body y lo monta sobre un
        backdrop efimero que se destruye al cerrar.
+
+       FORMATO UNICO (skill `abm_design`): barra de titulo pintada en primario
+       + barra de acciones debajo con TODOS los botones, y SIN footer. La
+       salida va primera y es el unico boton neutro; el resto va en primario.
+       Los call sites siguen pasando su HTML por `footerHtml` / `primaryHtml`
+       (los nombres quedaron por compatibilidad) y la barra los normaliza al
+       tamano chico via CSS.
+
        opts.wide        -> modal ancho: true = 880px (dumps, tablas), 'xl' =
                            1040px, el doble del ancho base (fichas largas)
-       opts.footerHtml  -> botones extra, a la IZQUIERDA del boton Cerrar
-       opts.primaryHtml -> botones a la DERECHA del Cerrar (accion primaria)
-       opts.closeLabel  -> etiqueta del boton Cerrar (default "Cerrar")
+       opts.footerHtml  -> botones extra, entre la salida y la accion primaria
+       opts.primaryHtml -> accion(es) primaria(s), al final de la barra
+       opts.closeLabel  -> etiqueta de la salida (default "Cerrar"; "Cancelar"
+                           en formularios, filtros y confirmaciones)
+       opts.confirmacion-> true para el dialogo de confirmacion: conserva la
+                           forma vieja (cabecera neutra + botones abajo). Es la
+                           excepcion declarada del estandar -- una confirmacion
+                           es una pregunta, no una pantalla, y su boton rojo se
+                           queda lejos de la salida a proposito.
        opts.onClose     -> callback al cerrar por cualquier via */
     function openModal(title, bodyHtml, opts = {}) {
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
+        const salida = escapeHtml(opts.closeLabel || 'Cerrar');
+        const cabecera = opts.confirmacion
+            ? `<div class="modal-header">
+                   <div class="modal-title">${title}</div>
+                   <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+               </div>`
+            : `<div class="modal-header modal-header-primary">
+                   <div class="modal-title">${title}</div>
+                   <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+               </div>
+               <div class="modal-menubar" role="toolbar" aria-label="Acciones del modal">
+                   <button class="btn btn-ghost" data-act="close">
+                       <i class="fa-solid fa-xmark"></i> ${salida}
+                   </button>
+                   ${opts.footerHtml || ''}
+                   ${opts.primaryHtml || ''}
+               </div>`;
+        const pie = opts.confirmacion
+            ? `<div class="modal-footer">
+                   ${opts.footerHtml || ''}
+                   <button class="btn btn-ghost" data-act="close">${salida}</button>
+                   ${opts.primaryHtml || ''}
+               </div>`
+            : '';
         backdrop.innerHTML = `
             <div class="modal ${opts.wide === true ? 'modal-wide' : opts.wide ? `modal-${opts.wide}` : ''}" role="dialog" aria-modal="true">
-                <div class="modal-header">
-                    <div class="modal-title">${title}</div>
-                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
-                </div>
+                ${cabecera}
                 <div class="modal-body">${bodyHtml}</div>
-                <div class="modal-footer">
-                    ${opts.footerHtml || ''}
-                    <button class="btn btn-ghost" data-act="close">${escapeHtml(opts.closeLabel || 'Cerrar')}</button>
-                    ${opts.primaryHtml || ''}
-                </div>
+                ${pie}
             </div>
         `;
         document.body.appendChild(backdrop);
@@ -176,7 +207,7 @@
 
     /* ---------- modal de Cambiar dominio ----------
      * Lista los perfiles de la cuenta (api/dominios.php), uno por fila, con el
-     * dominio como titulo y el rol abajo. Al elegir uno, el POST asienta la
+     * dominio como titulo y el nombre del perfil abajo. Al elegir uno, el POST asienta la
      * seleccion en `usuarios` y reemite el JWT: la sesion arranca de nuevo en
      * ese dominio sin pedir credenciales, y el reload muestra el panel ya
      * filtrado. Porta reactor-panel/sesion/cambiar.php del legacy.
@@ -222,7 +253,7 @@
                 <span class="dominio-item-icon"><i class="fa-solid fa-building"></i></span>
                 <span class="dominio-item-body">
                     <span class="dominio-item-nombre">${escapeHtml(x.nombre || `#${x.dominio}`)}</span>
-                    <span class="dominio-item-meta">${escapeHtml(x.rol)}</span>
+                    <span class="dominio-item-meta">${escapeHtml(x.perfil_nombre || "")}</span>
                 </span>
                 <span class="dominio-item-tags">${tags.join('')}</span>
             </button>`;
@@ -264,7 +295,7 @@
             try {
                 const u = await api('api/perfil');
                 const m = openModal('Mi cuenta', viewGridPerfil(u), {
-                    footerHtml: '<button class="btn btn-secondary" data-act="entorno">Entorno</button>',
+                    footerHtml: '<button class="btn btn-primary" data-act="entorno"><i class="fa-solid fa-server"></i> Entorno</button>',
                 });
                 m.backdrop.querySelector('[data-act="entorno"]')
                     .addEventListener('click', openEntornoModal);
@@ -464,12 +495,31 @@
     /* ---------- contexto de sesion ----------
      * Lo inyecta index.php desde lib/sesion.php. `dominio` es el id de
      * `usuarios.dominio` capturado al iniciar sesion: TODA la informacion
-     * que muestra el panel se filtra por ese dominio. */
+     * que muestra el panel se filtra por ese dominio.
+     *
+     * `permisos` son los tres del perfil (`operacion` / `invitacion` /
+     * `facturacion`), resueltos contra la base en cada carga del shell. Solo
+     * sirven para NO DIBUJAR lo que el backend va a rechazar: el control de
+     * acceso real es `requirePermisoPanel()` en el endpoint. Si el tag no vino
+     * —pagina servida por una version vieja del shell— los tres quedan en
+     * `false`, que es el default seguro: sin dato no hay permiso. */
     const sesion = (() => {
         const tag = document.getElementById('panel-sesion');
-        if (!tag) return {};
-        try { return JSON.parse(tag.textContent || '{}') || {}; } catch (_) { return {}; }
+        let ctx = {};
+        if (tag) {
+            try { ctx = JSON.parse(tag.textContent || '{}') || {}; } catch (_) { ctx = {}; }
+        }
+        ctx.permisos = Object.assign(
+            { operacion: false, invitacion: false, facturacion: false },
+            ctx.permisos || {}
+        );
+        return ctx;
     })();
+
+    /** ¿La sesion tiene ese permiso? Unica lectura de `sesion.permisos`. */
+    function puede(permiso) {
+        return sesion.permisos[permiso] === true;
+    }
 
     /* ---------- ABM: menu contextual de fila ----------
      * Un unico menu flotante por pantalla. `anchor` puede ser un Element
@@ -529,6 +579,10 @@
     // que no son una baja (ej. Liberar un dispositivo).
     function confirmarBaja(texto, onConfirm, { label = 'Eliminar' } = {}) {
         const m = openModal('Confirmar', `<p style="font-size:.9rem;line-height:1.5">${texto}</p>`, {
+            // Excepcion del estandar de modales: una confirmacion es una
+            // pregunta, no una pantalla. Conserva cabecera neutra y los dos
+            // botones abajo, con el rojo lejos de la salida.
+            confirmacion: true,
             closeLabel:  'Cancelar',
             primaryHtml: `<button class="btn btn-danger" data-act="ok">${label}</button>`,
         });
@@ -553,20 +607,18 @@
      * solo se muestra de que dominio se trata.
      * ======================================================= */
 
-    const USUARIOS_DEFAULTS = { codigo: '', rol: 0, estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
+    const USUARIOS_DEFAULTS = { codigo: '', estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
 
     const usuarios = {
         q: '',
         ...USUARIOS_DEFAULTS,
         filas: [],
-        roles: [],
         resumen: null,
     };
 
     function usuariosFiltrosActivos() {
         let n = 0;
         if (String(usuarios.codigo) !== USUARIOS_DEFAULTS.codigo) n++;
-        if (usuarios.rol    !== USUARIOS_DEFAULTS.rol)            n++;
         if (usuarios.estado !== USUARIOS_DEFAULTS.estado)         n++;
         if (usuarios.limite !== USUARIOS_DEFAULTS.limite)         n++;
         if (usuarios.orden  !== USUARIOS_DEFAULTS.orden)          n++;
@@ -585,9 +637,8 @@
                     <div class="module-help-icon"><i class="fa-solid fa-users"></i></div>
                     <div style="font-size:.88rem;color:var(--muted);line-height:1.45">
                         Cada fila es un <strong>perfil</strong>: el acceso de una persona al dominio
-                        <strong>${dominio}</strong>, con el rol que define qué puede hacer. Una misma
-                        persona puede tener más de un perfil, y el estado que se muestra es el del
-                        perfil — no el de su cuenta.
+                        <strong>${dominio}</strong>. Una misma persona puede tener más de un perfil,
+                        y el estado que se muestra es el del perfil — no el de su cuenta.
                     </div>
                 </div>
 
@@ -624,14 +675,13 @@
                                 <th>Nombre</th>
                                 <th>Correo</th>
                                 <th>Celular</th>
-                                <th>Rol</th>
                                 <th>Estado</th>
                                 <th>Último ingreso</th>
                                 <th class="action-col">Acciones</th>
                             </tr>
                         </thead>
                         <tbody id="us-tbody">
-                            <tr><td colspan="9" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="8" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -665,12 +715,11 @@
     async function cargarUsuarios() {
         const tbody = document.getElementById('us-tbody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="9" class="table-empty">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Cargando…</td></tr>';
 
         const qs = new URLSearchParams({
             q:      usuarios.q,
             codigo: usuarios.codigo || '',
-            rol:    usuarios.rol || '',
             estado: usuarios.estado,
             limite: usuarios.limite,
             orden:  usuarios.orden,
@@ -680,10 +729,9 @@
         try {
             const data = await api(`api/usuarios?${qs}`);
             usuarios.filas   = data.perfiles || [];
-            usuarios.roles   = data.roles    || [];
             usuarios.resumen = data.resumen  || null;
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="9" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
         }
 
@@ -691,7 +739,7 @@
         pintarBadgeFiltrosUsuarios();
 
         if (usuarios.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="table-empty">No hay perfiles que coincidan con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No hay perfiles que coincidan con la búsqueda.</td></tr>';
             return;
         }
 
@@ -749,7 +797,6 @@
                 <td class="td-nombre">${u.nombre ? escapeHtml(u.nombre) : DASH}</td>
                 <td>${u.correo  ? escapeHtml(u.correo)  : DASH}</td>
                 <td>${u.celular ? escapeHtml(u.celular) : DASH}</td>
-                <td>${u.rol_nombre ? escapeHtml(u.rol_nombre) : DASH}</td>
                 <td>${estado}</td>
                 <td>${escapeHtml(formatDate(u.ingresado) || '') || DASH}</td>
                 <td class="action-col">
@@ -763,18 +810,23 @@
         `;
     }
 
-    // Menu contextual de fila: Consultar -> Habilitar/Deshabilitar ->
-    // separador -> Eliminar (destructiva, al final). Sin `Editar` —a
-    // diferencia del orden del skill abm_design—: el modulo no edita.
-    // Las tres acciones trabajan sobre el PERFIL de la fila, no sobre la cuenta.
+    // Menu contextual de fila, en el orden del skill abm_design: Consultar ->
+    // accion propia del recurso (Habilitar/Deshabilitar) -> separador ->
+    // Editar -> Eliminar (destructiva, al final). Todas trabajan sobre el
+    // PERFIL de la fila, no sobre la cuenta.
     //
-    // Sobre el perfil de la propia sesion queda solo `Consultar`: deshabilitarlo
-    // o borrarlo cierra el panel en el request siguiente, asi que el backend lo
-    // rechaza con 409 y ofrecerlo seria ofrecer un error.
+    // Sobre el perfil de la propia sesion quedan `Consultar` y `Editar`, sin las
+    // otras dos: deshabilitarlo o borrarlo cierra el panel en el request
+    // siguiente y el backend corta con 409, asi que ofrecerlas seria ofrecer un
+    // error. EDITARLO SI SE PUEDE: `tipo` y los paneles no gatean el panel —el
+    // gate solo mira `habilitado`— y el editor deja el switch de estado
+    // bloqueado, que es lo unico que podria cerrarle la puerta a la sesion.
     function menuUsuario(u) {
         if (u.es_propio) {
             return [
                 { label: 'Consultar', icon: 'fa-eye', onSelect: () => verUsuario(u.id) },
+                { sep: true },
+                { label: 'Editar',    icon: 'fa-pen', onSelect: () => formPerfil(u.id) },
             ];
         }
         return [
@@ -785,6 +837,7 @@
                 onSelect: () => toggleUsuario(u),
             },
             { sep: true },
+            { label: 'Editar',   icon: 'fa-pen',   onSelect: () => formPerfil(u.id) },
             { label: 'Eliminar', icon: 'fa-trash', danger: true, onSelect: () => eliminarUsuario(u) },
         ];
     }
@@ -803,16 +856,33 @@
             ? `<span class="badge badge-success">${si}</span>`
             : `<span class="badge badge-danger">${no}</span>`;
 
-        /* 12 tarjetas: la ficha abre por el acceso (`Perfil` + `Rol`, que es lo
+        /* 12 tarjetas: la ficha abre por el acceso (`Perfil` + `Tipo`, que es lo
            que la fila representa) y cierra por los dos estados, que son
            independientes entre si — una cuenta deshabilitada no entra ni con el
            perfil habilitado, y al reves el perfil deshabilitado solo cierra
            ESTE dominio. Todas van a media tarjeta, asi que los seis renglones
            cierran de a dos; agregar o quitar un campo deja la cuenta impar y
-           estira la ultima a todo el ancho. */
+           estira la ultima a todo el ancho.
+
+           `Tipo` ocupa la ranura que tenia `Rol` hasta el 06/09/2026, cuando se
+           elimino `perfiles`.`rol`. No es un reemplazo conceptual —`tipo` es la
+           columna A/O que lee el legacy, no un rol— pero es el unico atributo
+           del perfil que queda ademas del nombre, y la cuenta tenia que seguir
+           siendo par.
+
+           LOS TRES PERMISOS VAN EN UN SEGUNDO BLOQUE, detras de una divisoria
+           (`.view-sep`, como en Consultar invitacion): no son atributos de la
+           persona ni del acceso en general sino lo que ese perfil PUEDE HACER, y
+           mezclarlos con el correo y las fechas los perdia en la grilla. La
+           divisoria obliga a mirar la paridad POR BLOQUE: arriba doce medias
+           (seis renglones) y abajo tres, con la primera a todo el ancho — la
+           ranura impar — para que las dos que siguen cierren de a dos. */
+        const permiso = (ok, donde) => `${badge(ok, 'Habilitado', 'Deshabilitado')}
+            <span class="muted"> · ${donde}</span>`;
+
         const body = `<div class="view-grid">${[
             viewCard('Perfil',             u.perfil_nombre ? escapeHtml(u.perfil_nombre) : ''),
-            viewCard('Rol',                u.rol_nombre ? escapeHtml(u.rol_nombre) : (u.rol ? `<code>#${u.rol}</code>` : '')),
+            viewCard('Tipo',               u.tipo === 'A' ? 'Administrador' : (u.tipo === 'O' ? 'Operador' : '')),
             viewCard('Usuario',            u.usuario ? escapeHtml(u.usuario) : ''),
             viewCard('Nombre',             u.nombre  ? escapeHtml(u.nombre)  : ''),
             viewCard('Correo',             u.correo  ? escapeHtml(u.correo)  : ''),
@@ -823,12 +893,298 @@
             viewCard('Registrado por',     u.registrante_nombre ? escapeHtml(u.registrante_nombre) : ''),
             viewCard('Estado del perfil',  badge(u.habilitado, 'Habilitado', 'Deshabilitado')),
             viewCard('Estado de la cuenta', badge(u.usuario_habilitado, 'Habilitada', 'Deshabilitada')),
+            '<div class="view-sep"></div>',
+            viewCard('Operación',   permiso(u.operacion,   'Usar los paneles de operación en la app'), true),
+            viewCard('Invitación',  permiso(u.invitacion,  'Invitar usuarios desde la app')),
+            viewCard('Facturación', permiso(u.facturacion, 'Ver y abonar las facturas acá')),
         ].join('')}</div>`;
 
-        // Pie con `Cerrar` solo: sin boton ☰ de "Mas acciones" y sin accion
-        // primaria `Editar`. Las acciones del perfil viven en el menu
+        // La barra suma `Editar` como boton DIRECTO y no dentro de un
+        // desplegable `Acciones`: es la unica accion de la ficha, y un menu de
+        // un solo item no se justifica (misma regla que Consultar dispositivo).
+        // El resto de las acciones del perfil sigue viviendo en el menu
         // contextual de la fila del listado.
-        openModal(`Consultar perfil <span class="muted">#${u.id}</span>`, body, { wide: 'xl' });
+        const m = openModal(`Consultar perfil <span class="muted">#${u.id}</span>`, body, {
+            wide:        'xl',
+            primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
+        });
+
+        m.backdrop.querySelector('[data-act="editar"]').addEventListener('click', () => {
+            m.close();
+            formPerfil(u.id);
+        });
+    }
+
+    /* ---------- Editar perfil ----------
+     * Modal de edicion con dos pestañas, portado del editor de cloud
+     * (`openProfileModal()` + cloud/api/profiles.php): `General` con los campos
+     * de la entidad y `Paneles` con el selector de `perfiles_paneles`.
+     *
+     * SE EDITAN `tipo`, `habilitado`, LOS TRES PERMISOS y los paneles. Los datos
+     * de la persona (nombre, correo, celular, contraseña) son de su CUENTA y no
+     * de este modulo, y el `nombre` / `uuid` del perfil los escribe la
+     * invitacion que lo creo. Por eso el usuario va como campo deshabilitado:
+     * da el contexto de QUE acceso se esta editando, no es un campo del
+     * formulario.
+     *
+     * LOS PERMISOS TIENEN PESTAÑA PROPIA y no se agregan a `General`: dos de los
+     * tres no son del panel sino de `app`, asi que meterlos junto a `tipo` y
+     * `habilitado` los haria leer como atributos de ESTA pantalla. La pestaña
+     * los agrupa y le pone a cada uno donde vale.
+     *
+     * NINGUNO DE LOS TRES SE OTORGA SIN TENERLO, y el que no se puede otorgar NO
+     * SE DIBUJA. La lista sale de `PERMISOS_PERFIL` filtrada por `puede()`, asi
+     * que quien edita solo ve los permisos que su propio perfil tiene.
+     *
+     * ES LA EXCEPCION A "visible y bloqueado", que sigue valiendo para el
+     * `habilitado` del perfil propio. Ahi el switch queda porque el dato es del
+     * perfil que se esta mirando y esconderlo haria dudar de si falta el dato;
+     * aca lo que falta es del que MIRA, y un switch apagado que no se puede tocar
+     * solo invita a pelearse con el. El backend corta con 403 igual: la UI no es
+     * el control de acceso.
+     *
+     * SI NO PUEDE OTORGAR NINGUNO, LA PESTAÑA NO EXISTE. Una solapa vacia se lee
+     * como una pantalla rota, igual que un agrupador vacio en el sidebar.
+     *
+     * NO SE MUESTRA EL DOMINIO, a diferencia de cloud. Alla el listado cruza
+     * todos los dominios y el dato distingue una fila de otra; aca el panel
+     * filtra todo por el dominio de la sesion, asi que la columna solo puede
+     * tener un valor — el mismo criterio con el que se excluyo de la ficha de
+     * Consultar y de Dispositivos → General.
+     *
+     * LAS DOS PESTAÑAS SE LLAMAN IGUAL QUE EN CLOUD (`General` / `Paneles`): es
+     * la misma ficha en dos productos, y si los rotulos no coinciden se leen
+     * como pantallas distintas. */
+    async function formPerfil(id) {
+        let data;
+        try {
+            data = await api(`api/usuarios?id=${id}`);
+        } catch (err) {
+            toast(err.message, { error: true });
+            return;
+        }
+
+        const u        = data.perfil;
+        const catalogo = (data.catalogos && data.catalogos.paneles) || [];
+        const tipo     = u.tipo === 'A' ? 'A' : 'O';
+        // El estado del perfil de la sesion no se puede tocar: apagarlo cierra
+        // el panel en el request siguiente y el backend corta con 409. Se deja
+        // VISIBLE Y BLOQUEADO en vez de esconderlo — un campo que desaparece
+        // segun la fila hace dudar de si falta el dato o falta el permiso.
+        const propio = !!u.es_propio;
+        const quien  = u.usuario || u.nombre || u.perfil_nombre || `#${u.id}`;
+        // `perfiles.panel`: el ultimo panel que el perfil abrio en la app, y el
+        // que la app le reabre. No es un campo editable —lo escribe la app cada
+        // vez que la persona cambia de panel—, pero se marca en la lista porque
+        // destildar ESE panel borra la memoria (ver olvidarPanelSinPermiso en el
+        // endpoint), y eso hay que poder verlo antes de guardar.
+        const recordado = Number(u.panel) || 0;
+
+        // LOS PERMISOS QUE ESTA SESION NO TIENE NO SE DIBUJAN. Es la unica parte
+        // del modal que mira a QUIEN edita y no a la fila editada: nadie otorga
+        // lo que no tiene, asi que ofrecerlo (aunque sea bloqueado) es ofrecer
+        // algo que el backend va a rechazar.
+        const permisos = PERMISOS_PERFIL.filter((p) => puede(p.clave));
+
+        const body = `
+            <div class="modal-tabs" role="tablist">
+                <button type="button" class="modal-tab active" data-tab="general" role="tab" aria-selected="true">
+                    <i class="fa-solid fa-circle-info"></i> General
+                </button>
+                ${permisos.length ? `<button type="button" class="modal-tab" data-tab="permisos" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-key"></i> Permisos
+                </button>` : ''}
+                <button type="button" class="modal-tab" data-tab="paneles" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-table-columns"></i> Paneles
+                </button>
+            </div>
+            <div class="modal-tabpanel" data-panel="general" role="tabpanel">
+                <div class="form-group">
+                    <label for="up-quien">Usuario</label>
+                    <input type="text" id="up-quien" value="${escapeHtml(quien)}" disabled>
+                </div>
+                <div class="form-group">
+                    <label for="up-tipo">Tipo</label>
+                    <select id="up-tipo">
+                        <option value="A"${tipo === 'A' ? ' selected' : ''}>Administrador</option>
+                        <option value="O"${tipo === 'O' ? ' selected' : ''}>Operador</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Habilitado</label>
+                    <label class="toggle-switch" style="margin-top:6px">
+                        <input type="checkbox" id="up-habilitado"${u.habilitado ? ' checked' : ''}${propio ? ' disabled' : ''}>
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        <span class="toggle-label" id="up-habilitado-label">${u.habilitado ? 'Sí' : 'No'}</span>
+                    </label>
+                    ${propio ? `<div class="form-nota">Es el perfil con el que estás trabajando: si lo deshabilitaras, perderías el acceso al panel.</div>` : ''}
+                </div>
+            </div>
+            ${permisos.length ? `<div class="modal-tabpanel" data-panel="permisos" role="tabpanel" hidden>
+                <div class="paneles-lista">
+                    ${permisos.map((p) => permisoItemHtml(p.clave, p.etiqueta, p.detalle, u[p.clave])).join('')}
+                </div>
+            </div>` : ''}
+            <div class="modal-tabpanel" data-panel="paneles" role="tabpanel" hidden>
+                ${recordado > 0 ? `<div class="form-nota">
+                    El marcado como <strong>Último abierto</strong> es el que la app le reabre
+                    a este perfil; si le quitás el permiso, esa memoria se borra.
+                </div>` : ''}
+                <div id="up-paneles" class="paneles-wrap">${panelesListaHtml(catalogo, u.paneles, recordado)}</div>
+            </div>
+        `;
+
+        const m = openModal(`Editar perfil <span class="muted">#${u.id}</span>`, body, {
+            wide:        true,
+            closeLabel:  'Cancelar',
+            primaryHtml: '<button class="btn btn-primary" data-act="guardar"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>',
+        });
+
+        montarPestanas(m.backdrop);
+
+        const chk = m.backdrop.querySelector('#up-habilitado');
+        const lbl = m.backdrop.querySelector('#up-habilitado-label');
+        chk.addEventListener('change', () => { lbl.textContent = chk.checked ? 'Sí' : 'No'; });
+
+        // `Seleccionar todo` / `Deseleccionar todo` operan sobre TODA la lista:
+        // sin buscador no hay nada oculto que puedan pisar por sorpresa.
+        const wrap = m.backdrop.querySelector('#up-paneles');
+        wrap.querySelectorAll('[data-act^="paneles-"]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const valor = btn.dataset.act === 'paneles-todos';
+                wrap.querySelectorAll('.panel-item input').forEach((i) => { i.checked = valor; });
+            });
+        });
+
+        // VIAJAN SOLO LOS PERMISOS DIBUJADOS, y los que no estan no se tocan: el
+        // PUT relee de la fila lo que no viene. Antes iban los tres siempre —el
+        // bloqueado mandaba su valor sin cambios— para que el payload no
+        // dependiera de quien edita; desde que el switch no existe, ese valor lo
+        // inventaria el front en vez de elegirlo alguien, y si la fila cambio
+        // entre el GET y el PUT lo mandaria viejo y se comeria un 403 por un
+        // cambio que nadie pidio.
+        //
+        // Se arma DENTRO del handler: leer los controles al abrir el modal
+        // mandaria siempre los valores iniciales.
+        const armarPayload = () => {
+            const payload = {
+                id:   u.id,
+                tipo: m.backdrop.querySelector('#up-tipo').value,
+                // Sobre el perfil propio el checkbox va `disabled`, asi que esto
+                // manda el estado sin cambios y el backend lo deja pasar: solo
+                // rechaza el cambio, no el guardado.
+                habilitado: chk.checked,
+                paneles:    Array.from(wrap.querySelectorAll('.panel-item input:checked')).map((i) => +i.value),
+            };
+            permisos.forEach((p) => {
+                payload[p.clave] = m.backdrop.querySelector(`#up-perm-${p.clave}`).checked;
+            });
+            return payload;
+        };
+
+        const guardar = m.backdrop.querySelector('[data-act="guardar"]');
+        guardar.addEventListener('click', async () => {
+            guardar.disabled = true;
+            try {
+                await api('api/usuarios', {
+                    method:  'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify(armarPayload()),
+                });
+                toast('Perfil actualizado');
+                m.close();
+                cargarUsuarios();
+            } catch (err) {
+                // El modal NO se cierra: lo que rebota son validaciones del
+                // backend, y cerrarlo perderia lo que se acaba de elegir.
+                guardar.disabled = false;
+                toast(err.message, { error: true });
+            }
+        });
+    }
+
+    /* Los tres permisos del perfil, en el orden en que se dibujan. Las claves son
+       las columnas de `perfiles` y las mismas que valida `lib/permisos.php`: si
+       alguna vez se agrega una cuarta, va aca y en el catalogo de PHP.
+
+       El detalle dice DONDE vale cada uno, porque dos de los tres son de `app` y
+       sin eso se leen como permisos de esta pantalla. */
+    const PERMISOS_PERFIL = [
+        { clave: 'operacion',   etiqueta: 'Operación',   detalle: 'Ver y usar los paneles de operación en la app.' },
+        { clave: 'invitacion',  etiqueta: 'Invitación',  detalle: 'Invitar usuarios nuevos al dominio desde la app.' },
+        { clave: 'facturacion', etiqueta: 'Facturación', detalle: 'Ver y abonar las facturas del servicio en este panel.' },
+    ];
+
+    /* Una fila de la pestaña Permisos: switch + nombre + que abre.
+       Reusa el markup de la lista de paneles (`.paneles-lista` /
+       `.toggle-switch.panel-item`) porque es exactamente la misma forma —una
+       lista corta y cerrada de cosas que se prenden y se apagan— y duplicar el
+       CSS para tres filas no compra nada.
+
+       El `input` va PEGADO al `.toggle-track`: el CSS del switch pinta el estado
+       con `input:checked + .toggle-track`, y cualquier nodo entre los dos lo deja
+       siempre apagado.
+
+       NO HAY ESTADO BLOQUEADO: todo lo que llega aca se puede tocar. El permiso
+       que la sesion no tiene no se dibuja, asi que el filtro esta antes (ver
+       `formPerfil`) y no en esta funcion. */
+    function permisoItemHtml(clave, etiqueta, detalle, activo) {
+        return `
+            <label class="toggle-switch panel-item">
+                <span class="panel-item-nombre">
+                    ${escapeHtml(etiqueta)}
+                    <span class="muted">${escapeHtml(detalle)}</span>
+                </span>
+                <input type="checkbox" id="up-perm-${clave}"${activo ? ' checked' : ''}>
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+        `;
+    }
+
+    /* Lista de paneles del perfil: un switch por panel del dominio, sin
+       buscador. No reusa ningun selector con filtro a proposito — el catalogo
+       son los paneles de UN dominio y el mas grande de la base tiene 7, asi que
+       un buscador sobre siete filas es ruido, y el switch dice mejor que un
+       checkbox que se esta prendiendo o apagando un permiso.
+
+       El `input` va PEGADO al `.toggle-track`: el CSS del switch pinta el estado
+       con `input:checked + .toggle-track`, y cualquier nodo entre los dos lo
+       deja siempre apagado. Es el error facil de cometer al reordenar el markup.
+
+       `recordado` es `perfiles.panel` — el ultimo panel abierto en la app. Se
+       marca con un badge y NO es una tercera opcion del switch: es informacion
+       sobre lo que pasa si se destilda esa fila, no algo que se elija desde
+       aca. La app lo reescribe sola cada vez que la persona cambia de panel. */
+    function panelesListaHtml(catalogo, seleccion, recordado) {
+        if (catalogo.length === 0) {
+            return `<div class="paneles-lista">
+                <div class="paneles-vacio">Este dominio no tiene paneles habilitados.</div>
+            </div>`;
+        }
+
+        const sel   = new Set((seleccion || []).map(Number));
+        const filas = catalogo.map((p) => `
+            <label class="toggle-switch panel-item">
+                <span class="panel-item-nombre">${escapeHtml(p.nombre) || 'Sin nombre'} <code>#${p.id}</code>${
+                    Number(p.id) === Number(recordado)
+                        ? ' <span class="badge badge-info">Último abierto</span>'
+                        : ''}</span>
+                <input type="checkbox" value="${p.id}"${sel.has(Number(p.id)) ? ' checked' : ''}>
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+        `).join('');
+
+        return `
+            <div class="paneles-acciones">
+                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-todos">
+                    <i class="fa-solid fa-check-double"></i> Seleccionar todo
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-ninguno">
+                    <i class="fa-solid fa-xmark"></i> Deseleccionar todo
+                </button>
+            </div>
+            <div class="paneles-lista">${filas}</div>
+        `;
     }
 
     function copiar(texto) {
@@ -867,7 +1223,7 @@
             : `el perfil <strong>#${u.id}</strong>`;
         confirmarBaja(
             `¿Quitarle a ${quien} el acceso a este dominio? Se elimina el perfil
-             <strong>${escapeHtml(u.rol_nombre || u.perfil_nombre || `#${u.id}`)}</strong>;
+             <strong>${escapeHtml(u.perfil_nombre || `#${u.id}`)}</strong>;
              la cuenta y sus accesos a otros dominios no se tocan.
              Esta acción no se puede deshacer.`,
             async () => {
@@ -889,14 +1245,6 @@
         const snapshot = { ...usuarios };
         let aplicado   = false;
 
-        // El catalogo son los roles PRESENTES en el dominio (los sirve el
-        // backend), no la tabla `roles` entera: un rol sin ninguna fila aca
-        // solo puede dar un listado vacio.
-        const rolOpts = ['<option value="0">Todos</option>'].concat(
-            usuarios.roles.map((r) =>
-                `<option value="${r.id}"${r.id === usuarios.rol ? ' selected' : ''}>${escapeHtml(r.nombre)}</option>`)
-        ).join('');
-
         const chip = (val, label) =>
             `<button type="button" class="filter-chip${usuarios.estado === val ? ' active' : ''}" data-estado="${val}">${label}</button>`;
 
@@ -905,10 +1253,6 @@
                 <div class="form-group">
                     <label for="uf-f-codigo">Código</label>
                     <input type="number" min="1" id="uf-f-codigo" placeholder="ID del perfil" value="${escapeHtml(usuarios.codigo)}">
-                </div>
-                <div class="form-group">
-                    <label for="uf-f-rol">Rol</label>
-                    <select id="uf-f-rol">${rolOpts}</select>
                 </div>
             </div>
             <div class="form-group">
@@ -931,7 +1275,6 @@
                         <option value="usuario">Usuario</option>
                         <option value="nombre">Nombre</option>
                         <option value="correo">Correo</option>
-                        <option value="rol">Rol</option>
                         <option value="registrado">Registrado</option>
                         <option value="ingresado">Último ingreso</option>
                     </select>
@@ -947,9 +1290,10 @@
         `;
 
         const m = openModal('<i class="fa-solid fa-filter"></i> Filtros', body, {
+            closeLabel:  'Cancelar',
             primaryHtml: `
-                <button class="btn btn-ghost"   data-act="limpiar">Limpiar</button>
-                <button class="btn btn-primary" data-act="aplicar">Aplicar</button>`,
+                <button class="btn btn-primary" data-act="limpiar"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                <button class="btn btn-primary" data-act="aplicar"><i class="fa-solid fa-check"></i> Aplicar</button>`,
             onClose: () => {
                 // Cerrar / Esc / backdrop revierten; Aplicar no.
                 if (aplicado) return;
@@ -965,7 +1309,6 @@
         const aplicarEnVivo = () => { pintarBadgeFiltrosUsuarios(); cargarUsuarios(); };
 
         $('#uf-f-codigo').addEventListener('input',  (e) => { usuarios.codigo = e.target.value.trim(); aplicarEnVivo(); });
-        $('#uf-f-rol').addEventListener('change',    (e) => { usuarios.rol    = +e.target.value || 0;  aplicarEnVivo(); });
         $('#uf-f-limite').addEventListener('change', (e) => { usuarios.limite = +e.target.value || 100; aplicarEnVivo(); });
         $('#uf-f-orden').addEventListener('change',  (e) => { usuarios.orden  = e.target.value; aplicarEnVivo(); });
         $('#uf-f-dir').addEventListener('change',    (e) => { usuarios.dir    = e.target.value; aplicarEnVivo(); });
@@ -982,7 +1325,6 @@
         $('[data-act="limpiar"]').addEventListener('click', () => {
             Object.assign(usuarios, USUARIOS_DEFAULTS);
             $('#uf-f-codigo').value = '';
-            $('#uf-f-rol').value    = '0';
             $('#uf-f-limite').value = USUARIOS_DEFAULTS.limite;
             $('#uf-f-orden').value  = USUARIOS_DEFAULTS.orden;
             $('#uf-f-dir').value    = USUARIOS_DEFAULTS.dir;
@@ -1912,9 +2254,10 @@
         `;
 
         const m = openModal('<i class="fa-solid fa-filter"></i> Filtros', body, {
+            closeLabel:  'Cancelar',
             primaryHtml: `
-                <button class="btn btn-ghost"   data-act="limpiar">Limpiar</button>
-                <button class="btn btn-primary" data-act="aplicar">Aplicar</button>`,
+                <button class="btn btn-primary" data-act="limpiar"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                <button class="btn btn-primary" data-act="aplicar"><i class="fa-solid fa-check"></i> Aplicar</button>`,
             onClose: () => {
                 // Cerrar / Esc / backdrop revierten; Aplicar no.
                 if (aplicado) return;
@@ -2434,9 +2777,10 @@
         `;
 
         const m = openModal('<i class="fa-solid fa-filter"></i> Filtros', body, {
+            closeLabel:  'Cancelar',
             primaryHtml: `
-                <button class="btn btn-ghost"   data-act="limpiar">Limpiar</button>
-                <button class="btn btn-primary" data-act="aplicar">Aplicar</button>`,
+                <button class="btn btn-primary" data-act="limpiar"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                <button class="btn btn-primary" data-act="aplicar"><i class="fa-solid fa-check"></i> Aplicar</button>`,
             onClose: () => {
                 // Cerrar / Esc / backdrop revierten; Aplicar no.
                 if (aplicado) return;
@@ -2815,9 +3159,10 @@
         `;
 
         const m = openModal('<i class="fa-solid fa-filter"></i> Filtros', body, {
+            closeLabel:  'Cancelar',
             primaryHtml: `
-                <button class="btn btn-ghost"   data-act="limpiar">Limpiar</button>
-                <button class="btn btn-primary" data-act="aplicar">Aplicar</button>`,
+                <button class="btn btn-primary" data-act="limpiar"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                <button class="btn btn-primary" data-act="aplicar"><i class="fa-solid fa-check"></i> Aplicar</button>`,
             onClose: () => {
                 // Cerrar / Esc / backdrop revierten; Aplicar no.
                 if (aplicado) return;
@@ -3321,9 +3666,10 @@
         let debounceUuid = null;
 
         const m = openModal('<i class="fa-solid fa-filter"></i> Filtros', body, {
+            closeLabel:  'Cancelar',
             primaryHtml: `
-                <button class="btn btn-ghost"   data-act="limpiar">Limpiar</button>
-                <button class="btn btn-primary" data-act="aplicar">Aplicar</button>`,
+                <button class="btn btn-primary" data-act="limpiar"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                <button class="btn btn-primary" data-act="aplicar"><i class="fa-solid fa-check"></i> Aplicar</button>`,
             onClose: () => {
                 // Un tipeo reciente en Identificador no puede pisar el estado
                 // despues de revertir o de aplicar: se descarta el pendiente.
@@ -3716,16 +4062,21 @@
                 ${viewCard('Total',    `<strong>${escapeHtml(formatMoneda(r.total) || '—')}</strong>`, true)}
             </div>`;
 
-        // Footer sin "Editar": no hay modal de edicion para este recurso.
+        // Barra sin "Editar": no hay modal de edicion para este recurso. Las
+        // acciones extra van en el desplegable `Acciones`, que abre el mismo
+        // ctx-menu flotante del listado.
         const m = openModal(
             `${escapeHtml(r.numero)} <span class="muted">#${r.id}</span>`,
             body,
             {
                 wide: true,
-                footerHtml: '<button class="btn btn-ghost btn-icon" data-act="menu" title="Más acciones"><i class="fa-solid fa-bars"></i></button>',
-                primaryHtml: r.enlaces
+                footerHtml: r.enlaces
                     ? '<button class="btn btn-primary" data-act="abrir"><i class="fa-solid fa-up-right-from-square"></i> Abrir</button>'
                     : '',
+                primaryHtml: `<button class="btn btn-primary" data-act="menu">
+                    <i class="fa-solid fa-bolt"></i> Acciones
+                    <i class="fa-solid fa-caret-down menubar-caret"></i>
+                </button>`,
             }
         );
 
@@ -3840,9 +4191,10 @@
         let debounceNumero = null;
 
         const m = openModal('<i class="fa-solid fa-filter"></i> Filtros', body, {
+            closeLabel:  'Cancelar',
             primaryHtml: `
-                <button class="btn btn-ghost"   data-act="limpiar">Limpiar</button>
-                <button class="btn btn-primary" data-act="aplicar">Aplicar</button>`,
+                <button class="btn btn-primary" data-act="limpiar"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                <button class="btn btn-primary" data-act="aplicar"><i class="fa-solid fa-check"></i> Aplicar</button>`,
             onClose: () => {
                 // Un tipeo reciente en Número no puede pisar el estado despues
                 // de revertir o de aplicar: se descarta el pendiente.
@@ -4337,16 +4689,26 @@
      * fiscales y de contacto del cliente al que se le facturan los servicios
      * del dominio. No hay listado ni alta -- el registro lo resuelve el
      * backend desde `dominios.cliente` (api/facturacion.php), aca no viaja
-     * ningun id. Por eso la edicion es en pantalla y no en modal.
+     * ningun id.
      *
      * La ficha entera vive en UNA tarjeta (.form-card) y adentro cada campo
      * es una tarjeta chica mas oscura (.view-card), igual que el modal de
-     * Consultar de los ABM. Arranca en modo lectura; el boton "Editar" del
-     * pie cambia los valores por inputs SIN mover la distribucion (mismas
-     * tarjetas, mismos anchos) y ofrece Cancelar / Guardar.
+     * Consultar de los ABM. La pantalla es SIEMPRE de lectura: el boton
+     * "Editar" del pie abre un modal con el formulario, y la ficha se repinta
+     * al guardar.
+     *
+     * ANTES LA EDICION ERA EN LA PROPIA PANTALLA -- las mismas tarjetas
+     * cambiaban el valor por un input y el pie pasaba a Cancelar / Guardar.
+     * Se movio al modal para que editar se vea igual en todo el panel: en el
+     * resto de los modulos el formulario siempre llega en un modal, y una
+     * pantalla que en cambio se transformaba en formulario dejaba a la persona
+     * sin el limite visual que marca "esto es un formulario abierto, tiene que
+     * cerrarse". Ademas el modal empuja al gris el fondo, y con la ficha
+     * editandose en su lugar no habia nada que distinguiera lectura de
+     * edicion salvo la forma de los controles.
      * ======================================================= */
 
-    const facturacion = { cliente: null, condiciones: [], modo: 'ver' };
+    const facturacion = { cliente: null, condiciones: [] };
 
     function renderFacturacion(container) {
         const dominio = sesion.dominio_nombre
@@ -4387,7 +4749,6 @@
             const data = await api('api/facturacion');
             facturacion.cliente     = data.cliente     || null;
             facturacion.condiciones = data.condiciones || [];
-            facturacion.modo        = 'ver';
         } catch (err) {
             ficha.innerHTML = '';
             aviso.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
@@ -4395,16 +4756,6 @@
         }
 
         pintarFacturacion();
-    }
-
-    /* Tarjeta chica editable: mismo contenedor que viewCard() (mismo fondo
-       oscuro y mismo ancho), con un control en lugar del valor. Asi el paso
-       de lectura a edicion no mueve nada de lugar. */
-    function editCard(label, id, controlHtml, full = false) {
-        return `<div class="view-card ${full ? 'view-card-full' : 'view-card-half'}">
-            <label class="view-card-label" for="${id}">${escapeHtml(label)}</label>
-            ${controlHtml}
-        </div>`;
     }
 
     function fichaFacturacionLectura(c) {
@@ -4418,27 +4769,48 @@
         ].join('');
     }
 
+    /* El formulario usa `.form-group` / `.form-row`, el mismo markup que el
+       resto de los modales de edicion del panel (Editar dispositivo, Invitar
+       usuario). NO reusa las `.view-card` de la ficha de lectura: esa tarjeta
+       oscura es del modo consulta -- envolver un input en ella lo dejaba
+       dentro de una caja que ningun otro formulario tiene. */
     function fichaFacturacionEdicion(c) {
         const opciones = ['<option value="">— Sin especificar —</option>'].concat(
             facturacion.condiciones.map((o) =>
                 `<option value="${escapeHtml(o.valor)}"${o.valor === c.condicion ? ' selected' : ''}>${escapeHtml(o.texto)}</option>`)
         ).join('');
 
-        return [
-            editCard('Razón social *', 'fc-razon',
-                `<input type="text" id="fc-razon" maxlength="255" value="${escapeHtml(c.razon)}">`, true),
-            editCard('Condición fiscal', 'fc-condicion',
-                `<select id="fc-condicion">${opciones}</select>`),
-            editCard('CUIT', 'fc-cuit',
-                `<input type="text" id="fc-cuit" maxlength="13" inputmode="numeric"
-                        placeholder="11 dígitos" value="${escapeHtml(c.cuit)}">`),
-            editCard('Contacto', 'fc-contacto',
-                `<input type="text" id="fc-contacto" maxlength="255" value="${escapeHtml(c.contacto)}">`, true),
-            editCard('Correo', 'fc-correo',
-                `<input type="email" id="fc-correo" maxlength="255" value="${escapeHtml(c.correo)}">`),
-            editCard('Celular', 'fc-celular',
-                `<input type="tel" id="fc-celular" maxlength="255" value="${escapeHtml(c.celular)}">`),
-        ].join('');
+        return `
+            <div class="form-group">
+                <label for="fc-razon">Razón social *</label>
+                <input type="text" id="fc-razon" maxlength="255" value="${escapeHtml(c.razon)}">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="fc-condicion">Condición fiscal</label>
+                    <select id="fc-condicion">${opciones}</select>
+                </div>
+                <div class="form-group">
+                    <label for="fc-cuit">CUIT</label>
+                    <input type="text" id="fc-cuit" maxlength="13" inputmode="numeric"
+                           placeholder="11 dígitos" value="${escapeHtml(c.cuit)}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="fc-contacto">Contacto</label>
+                <input type="text" id="fc-contacto" maxlength="255" value="${escapeHtml(c.contacto)}">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="fc-correo">Correo</label>
+                    <input type="email" id="fc-correo" maxlength="255" value="${escapeHtml(c.correo)}">
+                </div>
+                <div class="form-group">
+                    <label for="fc-celular">Celular</label>
+                    <input type="tel" id="fc-celular" maxlength="255" value="${escapeHtml(c.celular)}">
+                </div>
+            </div>
+        `;
     }
 
     function pintarFacturacion() {
@@ -4456,23 +4828,9 @@
             return;
         }
 
-        const editando = facturacion.modo === 'editar';
-
-        // En edicion la tarjeta es un <form> para que Enter guarde, como el
-        // submit del legacy; en lectura alcanza un <div>.
-        const tag  = editando ? 'form' : 'div';
-        const pie  = editando
-            ? `<button type="button" class="btn btn-ghost" data-act="cancelar">Cancelar</button>
-               <button type="submit" class="btn btn-primary" data-act="guardar">
-                   <i class="fa-solid fa-floppy-disk"></i> Guardar
-               </button>`
-            : `<button type="button" class="btn btn-primary" data-act="editar">
-                   <i class="fa-solid fa-pen"></i> Editar
-               </button>`;
-
         aviso.innerHTML = '';
         ficha.innerHTML = `
-            <${tag} class="form-card" id="fc-card"${editando ? ' autocomplete="off"' : ''}>
+            <div class="form-card" id="fc-card">
                 <div class="form-card-head">
                     <h3 class="form-card-title">Datos de facturación</h3>
                     <span class="form-card-hint">
@@ -4481,52 +4839,75 @@
                 </div>
 
                 <div class="view-grid">
-                    ${editando ? fichaFacturacionEdicion(c) : fichaFacturacionLectura(c)}
+                    ${fichaFacturacionLectura(c)}
                 </div>
 
-                <div class="field-error" id="fc-error" style="display:none"></div>
-
-                <div class="form-card-foot">${pie}</div>
-            </${tag}>
+                <div class="form-card-foot">
+                    <button type="button" class="btn btn-primary" data-act="editar">
+                        <i class="fa-solid fa-pen"></i> Editar
+                    </button>
+                </div>
+            </div>
         `;
 
-        const card = ficha.querySelector('#fc-card');
-        if (editando) {
-            card.addEventListener('submit', (e) => {
-                e.preventDefault();
-                guardarFacturacion();
-            });
-            card.querySelector('[data-act="cancelar"]').addEventListener('click', () => {
-                facturacion.modo = 'ver';
-                pintarFacturacion();
-            });
-            card.querySelector('#fc-razon').focus();
-        } else {
-            card.querySelector('[data-act="editar"]').addEventListener('click', () => {
-                facturacion.modo = 'editar';
-                pintarFacturacion();
-            });
-        }
+        ficha.querySelector('[data-act="editar"]')
+             .addEventListener('click', abrirModalFacturacion);
     }
 
-    async function guardarFacturacion() {
-        const card = document.getElementById('fc-card');
-        if (!card || !facturacion.cliente) return;
+    /* Modal de edicion. El formulario vive en el cuerpo y el boton Guardar en
+       la barra de acciones, que openModal() dibuja FUERA del <form>: por eso
+       lleva `form="fc-form"` -- el atributo de HTML5 que le da dueno a un
+       control que esta afuera. Sin eso el submit no dispara y habria que
+       duplicar el guardado en un listener de click. Enter dentro de cualquier
+       campo entra por el mismo camino, como el submit del legacy. */
+    function abrirModalFacturacion() {
+        const c = facturacion.cliente;
+        if (!c) return;
 
-        const err   = card.querySelector('#fc-error');
-        const btn   = card.querySelector('[data-act="guardar"]');
-        const valor = (id) => card.querySelector(id).value.trim();
+        // El <form> lleva `.form-stack` porque es hijo unico del `.modal-body`:
+        // el gap del body separa a SUS hijos, y sin esto los form-group de
+        // adentro quedaban pegados entre si.
+        const body = `
+            <form id="fc-form" class="form-stack" autocomplete="off">
+                ${fichaFacturacionEdicion(c)}
+                <div class="field-error" id="fc-error" style="display:none"></div>
+            </form>
+        `;
+
+        const m = openModal('Editar datos de facturación', body, {
+            wide:       true,
+            closeLabel: 'Cancelar',
+            primaryHtml: `<button type="submit" form="fc-form" class="btn btn-primary" data-act="guardar">
+                              <i class="fa-solid fa-floppy-disk"></i> Guardar
+                          </button>`,
+        });
+
+        m.backdrop.querySelector('#fc-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            guardarFacturacion(m);
+        });
+        m.backdrop.querySelector('#fc-razon').focus();
+    }
+
+    async function guardarFacturacion(m) {
+        if (!facturacion.cliente) return;
+
+        const scope = m.backdrop;
+        const err   = scope.querySelector('#fc-error');
+        const btn   = scope.querySelector('[data-act="guardar"]');
+        const valor = (id) => scope.querySelector(id).value.trim();
 
         const payload = {
             razon:     valor('#fc-razon'),
-            condicion: card.querySelector('#fc-condicion').value,
+            condicion: scope.querySelector('#fc-condicion').value,
             cuit:      valor('#fc-cuit'),
             contacto:  valor('#fc-contacto'),
             celular:   valor('#fc-celular'),
             correo:    valor('#fc-correo'),
         };
 
-        btn.disabled = true;
+        btn.disabled      = true;
+        err.style.display = 'none';
         try {
             const data = await api('api/facturacion', {
                 method:  'PUT',
@@ -4536,10 +4917,13 @@
             // Se repinta con lo que devolvio el backend: el CUIT vuelve
             // normalizado a digitos y los vacios como cadena vacia.
             facturacion.cliente = data.cliente || facturacion.cliente;
-            facturacion.modo    = 'ver';
+            m.close();
             pintarFacturacion();
             toast('Datos de facturación actualizados');
         } catch (e) {
+            // El error se muestra DENTRO del modal y el modal queda abierto:
+            // lo que rebota son validaciones del backend (CUIT, razon social)
+            // y cerrarlo perderia lo tipeado.
             err.textContent   = e.message;
             err.style.display = '';
             btn.disabled      = false;
@@ -4691,6 +5075,20 @@
             render: renderFacturacion,
         },
     };
+
+    /* Las tres pantallas del agrupador "Cuenta" cuelgan del permiso
+       `facturacion`. Sin el se BORRAN DEL ROUTER en vez de renderizar un cartel
+       de "no tenes permiso": el sidebar tampoco las dibuja (index.php), asi que
+       la unica forma de llegar es pegando el hash a mano, y ahi `currentRoute()`
+       ya cae solo en Dashboard porque la clave no existe. Un cartel dedicado
+       seria una pantalla nueva para un caso al que no se llega navegando.
+
+       El backend corta igual con 403 (`requirePermisoPanel()`): esto es UI. */
+    if (!puede('facturacion')) {
+        delete routes.facturas;
+        delete routes.recibos;
+        delete routes.facturacion;
+    }
 
     function currentRoute() {
         const hash = window.location.hash || '#/dashboard';

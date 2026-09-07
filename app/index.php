@@ -34,19 +34,71 @@ $panelActivo  = appPanelesDelDominio($contexto['dominio'], $contexto['panel']);
 $dominioNombre = $contexto['nombre'] !== '' ? $contexto['nombre'] : '—';
 $panelNombre   = $panelActivo['nombre'];
 
-// Detalles del dominio activo para el modal del mismo nombre. `Perfil` es el
+// SIN PERFIL HABILITADO NO HAY DOMINIO. `appContextoSesion()` devuelve todo en
+// cero cuando el usuario no tiene ni un `perfiles` habilitado (ver el `$vacio`
+// de `appDominioActivo()`), asi que `perfil = 0` es la senal de "esta cuenta no
+// esta parada en ningun dominio".
+//
+// Con eso, los dos agrupadores que cuelgan del dominio no se dibujan:
+//
+//   - "Mi Dominio" (Detalles / Actividad / Invitar un Usuario) porque no hay
+//     dominio del que mostrar nada: Detalles saldria con nombre "—" y los tres
+//     contadores en 0, y Actividad pediria el historial de `dominio = 0`.
+//   - "Ajustes" porque sus dos items tampoco aplican: las notificaciones son
+//     del dominio, y la Mesa de Ayuda sigue estando en la topbar.
+//
+// Queda a la vista "Mi Cuenta" (para ver el usuario y salir) e "Instalar": son
+// lo unico que no depende del dominio, y sin ellos la pantalla seria un callejon
+// sin salida.
+$sinPerfil = $contexto['perfil'] <= 0;
+
+// PERMISOS DEL PERFIL (`perfiles`.`operacion` / `.invitacion`, migracion
+// 20260907_1000). De la app gatean dos cosas, y son las dos que se piden aca:
+//
+//   - `operacion` -> LOS PANELES DE OPERACION: la franja con el nombre del
+//     panel, los controles con sus botones y el boton "Cambiar de Panel" de la
+//     topbar. Sin el permiso la app se abre igual —"Mi Cuenta", "Mi Dominio",
+//     "Ajustes" e "Instalar" siguen ahi— pero no se dibuja ni un control.
+//
+//     SE GATEA LA OPERACION, NO LA ENTRADA. Cerrar la app entera dejaria a la
+//     persona sin poder ver su cuenta ni cerrar sesion, que es un callejon sin
+//     salida; y el pedido nombra explicitamente "ver los paneles de operacion"
+//     como lo que abre el permiso.
+//
+//   - `invitacion` -> el item "Invitar un Usuario" de "Mi Dominio".
+//
+// Los endpoints los revalidan por su cuenta (api/paneles.php, api/canales.php,
+// api/boton.php): esconder un boton no es un control de acceso.
+$puedeOperar   = appPuede($contexto, 'operacion');
+$puedeInvitar  = appPuede($contexto, 'invitacion');
+
+// Detalles del dominio activo para el modal del mismo nombre. `Mi Perfil` es el
 // rol del usuario EN ESTE dominio (Administrador / Operador / ...), que sale
 // del perfil activo; los tres contadores son columnas denormalizadas de
 // `dominios`. El legacy (`dominio/detalles.php`) mostraba solo nombre,
-// usuarios y dispositivos: perfil y chips se suman aca.
-$contadores = appDominioContadores($contexto['dominio']);
+// usuarios y dispositivos: perfil, chips y administradores se suman aca.
+//
+// "Mi Perfil" y no "Perfil" porque abajo esta "Administradores", que son los
+// perfiles DE LOS DEMAS: sin el posesivo las dos filas parecerian hablar de lo
+// mismo.
+//
+// ADMINISTRADORES ES UNA LISTA, no un contador: es a quien pedirle algo que uno
+// no puede hacer (permisos, invitaciones, facturacion). Van solo los nombres
+// —sin correo ni celular— porque esta pantalla la ve cualquier operador del
+// dominio y publicar el contacto de todos no hace falta para saber a quien
+// buscar.
+$contadores      = appDominioContadores($contexto['dominio']);
+$administradores = appDominioAdministradores($contexto['dominio']);
 
 $dominioDetalles = [
-    'Nombre'       => $dominioNombre,
-    'Perfil'       => $contexto['rol'] !== '' ? $contexto['rol'] : '—',
-    'Usuarios'     => (string) $contadores['usuarios'],
-    'Dispositivos' => (string) $contadores['dispositivos'],
-    'Chips'        => (string) $contadores['chips'],
+    'Nombre'           => $dominioNombre,
+    'Mi Perfil'        => $contexto['rol'] !== '' ? $contexto['rol'] : '—',
+    'Usuarios'         => (string) $contadores['usuarios'],
+    'Dispositivos'     => (string) $contadores['dispositivos'],
+    'Chips'            => (string) $contadores['chips'],
+    // Sin ninguno queda el mismo guion que usan el resto de los campos vacios,
+    // no una pildora en blanco.
+    'Administradores'  => $administradores !== [] ? implode(', ', $administradores) : '—',
 ];
 
 // Situacion del dominio, tal cual la usa el legacy en `panel/index.php`:
@@ -103,6 +155,13 @@ $entornoSesion = [
     'Rol en el dominio'           => $contexto['rol'] !== '' ? $contexto['rol'] : '—',
     'Panel (sesionPanel)'         => (string) $contexto['panel'],
     'Nombre del panel'            => $panelNombre !== '' ? $panelNombre : '—',
+    // Los tres permisos del perfil. Van al diagnostico porque son lo primero que
+    // hay que mirar cuando alguien reporta "no me aparecen los controles" o "no
+    // me sale el boton de invitar": las dos pantallas se esconden en silencio, y
+    // sin esto la unica forma de saber por que es entrar a la base.
+    'Permiso operación'           => $puedeOperar  ? 'Si' : 'No',
+    'Permiso invitación'          => $puedeInvitar ? 'Si' : 'No',
+    'Permiso facturación'         => appPuede($contexto, 'facturacion') ? 'Si' : 'No',
     // De donde salio el alcance de arriba: 'token' = lo traia el JWT (el caso
     // normal), 'db' = el token no lo traia o quedo viejo y se resolvio contra
     // la base. Es el mismo indicador que expone `sessionContext()` en panel/.
@@ -124,7 +183,11 @@ $entornoServidor = $entornoSesion + $entornoCookies;
 // lib/controles.php porque `api/canales.php` la reusa para el sondeo del
 // estado. Ojo: `canales.estado` lo escribe el motor Python cuando el equipo
 // reporta; esta pantalla sólo lo lee.
-$controles = appControlesDelPanel($contexto['panel'], $contexto['dominio']);
+// Sin permiso de operacion no se consulta: la lista no se va a dibujar, y es
+// la consulta mas cara de la pantalla (controles + canales + botones del panel).
+$controles = $puedeOperar
+    ? appControlesDelPanel($contexto['panel'], $contexto['dominio'])
+    : [];
 
 $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
 ?>
@@ -191,10 +254,14 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
         <div class="topbar-spacer"></div>
 
         <nav class="topbar-actions">
+            <?php // "Cambiar de Panel" no tiene sentido sin permiso de
+                  // operacion: no hay panel que abrir. ?>
+            <?php if ($puedeOperar): ?>
             <button type="button" class="topbar-action" title="Cambiar de Panel"
                     data-nav="panel" data-modal="modal-panel">
                 <i class="fa-solid fa-pager"></i>
             </button>
+            <?php endif; ?>
             <button type="button" class="topbar-action" title="Cambiar de Dominio"
                     data-nav="dominio" data-modal="modal-dominio">
                 <i class="fa-solid fa-location-dot"></i>
@@ -237,6 +304,8 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                         </a>
                     </div>
                 </div>
+                <?php // Los dos agrupadores del dominio: sin perfil habilitado no se dibujan. ?>
+                <?php if (!$sinPerfil): ?>
                 <div class="nav-group">
                     <a href="#/dominio" class="nav-item nav-toggle" data-route="dominio"
                        role="button" aria-expanded="false" aria-controls="submenu-dominio">
@@ -252,10 +321,13 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                            data-modal="modal-actividad">
                             <i class="fa-solid fa-clock-rotate-left"></i> Actividad
                         </a>
+                        <?php // Item gateado por el permiso `invitacion`. ?>
+                        <?php if ($puedeInvitar): ?>
                         <a href="#/dominio/invitar" class="nav-subitem" data-route="dominio-invitar"
                            data-modal="modal-invitar">
                             <i class="fa-solid fa-user-plus"></i> Invitar un Usuario
                         </a>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="nav-group">
@@ -276,6 +348,7 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                         </a>
                     </div>
                 </div>
+                <?php endif; ?>
                 <a href="#/instalar" class="nav-item" data-route="instalar" id="btn-install">
                     <i class="fa-solid fa-download"></i> Instalar
                 </a>
@@ -289,7 +362,9 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
 
             <div class="dominio-nombre">
                 <?= htmlspecialchars($dominioNombre) ?>
-                <?php if ($panelNombre !== ''): ?>
+                <?php // El nombre del panel abierto solo se muestra si hay panel
+                      // que abrir: sin permiso de operacion no lo hay. ?>
+                <?php if ($puedeOperar && $panelNombre !== ''): ?>
                     <br>
                     <span class="panel-nombre"><?= htmlspecialchars($panelNombre) ?></span>
                 <?php endif; ?>
@@ -310,8 +385,20 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                     </div>
                 <?php endif; ?>
 
+                <?php // SIN PERMISO DE OPERACION no se dibuja ningun control, y
+                      // se dice por que: una pantalla vacia no distingue "tu
+                      // perfil no puede operar" de "el panel esta vacio" ni de
+                      // "se rompio algo", y las tres se arreglan distinto. El
+                      // aviso manda a quien administra el dominio, que es quien
+                      // puede darle el permiso desde panel.reactor.com.ar. ?>
+                <?php if (!$puedeOperar): ?>
+                    <p class="lista-aviso">
+                        Tu perfil no tiene permiso para operar los paneles de este dominio.
+                        Ped&iacute;selo a quien administra <?= htmlspecialchars($dominioNombre) ?>.
+                    </p>
+
                 <?php // Con el servicio suspendido el legacy no dibuja ni un control. ?>
-                <?php if (!$servicioSuspendido): ?>
+                <?php elseif (!$servicioSuspendido): ?>
 
                     <?php if (!$controles): ?>
                         <p class="lista-aviso">Este panel no tiene controles.</p>
@@ -412,6 +499,14 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
     </div>
 </div>
 
+<!-- Los cuatro modales que cuelgan de "Mi Dominio" y "Ajustes" van dentro del
+     mismo `if` que sus items del menu, igual que el de Entorno: sin perfil
+     habilitado no hay como abrirlos, y "Detalles de Dominio" ademas imprime
+     `$dominioDetalles` en el HTML — servirlo con el dominio en "—" y los
+     contadores en 0 seria mandar al navegador una ficha vacia de un dominio que
+     el usuario no tiene. -->
+<?php if (!$sinPerfil): ?>
+
 <!-- Modal "Actividad": ultimos 50 registros del dominio. El contenido lo trae
      api/actividad.php al abrir (datos reales, no mock). -->
 <div class="modal-fondo" id="modal-actividad">
@@ -506,6 +601,8 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
         </div>
     </div>
 </div>
+
+<?php endif; ?>
 
 <!-- Modal "Cambiar de Dominio": mismo formato que el de panel, pero la lista
      suele ser bastante mas larga (un boton por perfil del usuario). -->

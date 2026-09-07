@@ -31,6 +31,13 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+// PERMISO `facturacion`: es la puerta del agrupador "Cuenta" entero. Va aca y no
+// dentro de cada handler para que el corte sea el mismo en GET y en PUT — y para
+// que si maniana se agrega un metodo, nazca cerrado. El menu ya no dibuja el
+// item sin el permiso, pero la UI no es el control de acceso: la URL del
+// endpoint se puede pegar a mano.
+requirePermisoPanel('facturacion');
+
 /** Clave de `combos` con los textos de `clientes.condicion`. */
 const COMBO_CONDICION = '$xCliente->condicion';
 

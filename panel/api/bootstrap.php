@@ -30,7 +30,7 @@ header('Cache-Control: no-store');
 // antes del require para optar fuera de los dos.
 if (!defined('PANEL_API_PUBLIC')) {
     requireAuth();
-    requireAdministrador();
+    requirePerfilValido();
 }
 
 // db() vive en lib/db.php: la comparten los endpoints, index.php y lib/sesion.php.

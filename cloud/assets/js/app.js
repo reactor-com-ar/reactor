@@ -46,6 +46,9 @@
         adopciones: { title: 'Adopciones',          render: renderAdopciones, group: 'registros' },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'propiedad'  },
         profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'propiedad'  },
+        controladores: { title: 'Controladores', render: renderControladores, group: 'seguridad' },
+        roles:         { title: 'Roles',         render: renderRoles,         group: 'seguridad' },
+        permisos:      { title: 'Permisos',      render: renderPermisos,      group: 'seguridad' },
         tools:     { title: 'Herramientas',  render: renderTools,     group: 'administracion' },
     };
 
@@ -389,7 +392,12 @@
         `;
     }
 
-    // Abre el Modal de Filtros (ABM.md §3). Recibe:
+    // Abre el Modal de Filtros (ABM.md §3), con el formato estándar de modal:
+    // título en primario + barra de acciones `Cancelar / Limpiar / Aplicar`,
+    // sin footer (DESIGN.md §21-bis). Es un helper compartido: lo usan los
+    // nueve módulos, así que todos los modales de Filtros del sistema salen
+    // iguales de acá y no hay una versión por módulo que se pueda desalinear.
+    // Recibe:
     //   - title:      siempre "Filtros" (lo dejamos parametrizable por las dudas).
     //   - bodyHtml:   HTML de la grilla de campos (form-rows o .filters-grid).
     //                 Las ids deben empezar con `${idPrefix}-fm-…` para evitar choques.
@@ -402,16 +410,22 @@
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="filters-title">
-                <div class="modal-header">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title" id="filters-title">Filtros</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
-                <div class="modal-body">${bodyHtml}</div>
-                <div class="modal-footer">
-                    <button class="btn btn-ghost"     data-act="clear">Limpiar</button>
-                    <button class="btn btn-secondary" data-act="close">Cancelar</button>
-                    <button class="btn btn-primary"   data-act="apply">Aplicar</button>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de los filtros">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="clear">
+                        <i class="fa-solid fa-eraser"></i> Limpiar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="apply">
+                        <i class="fa-solid fa-check"></i> Aplicar
+                    </button>
                 </div>
+                <div class="modal-body">${bodyHtml}</div>
             </div>
         `;
         document.body.appendChild(backdrop);
@@ -433,6 +447,33 @@
         });
 
         return modal;
+    }
+
+    /* Pestañas de un modal (DESIGN.md §25). El markup son `.modal-tabs` con
+       `.modal-tab[data-tab]` y un `.modal-tabpanel[data-panel]` por cada una;
+       todos los paneles menos el primero nacen con `hidden`.
+
+       Devuelve `mostrar(nombre)` para poder cambiar de pestaña por código — lo
+       necesita el formulario de perfil, que tiene que saltar a `General` cuando
+       la validación falla en un campo que está en esa pestaña y el operador
+       está parado en otra: sin eso el error se marca en un campo invisible y el
+       modal parece no responder al Guardar.
+
+       `onShow(nombre)` es opcional y corre en cada cambio: lo usa Consultar
+       usuario para cargar la solapa Perfiles recién al abrirla. */
+    function wireModalTabs(scope, onShow) {
+        const tabs   = scope.querySelectorAll('.modal-tab');
+        const panels = scope.querySelectorAll('.modal-tabpanel');
+
+        function mostrar(nombre) {
+            tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === nombre));
+            panels.forEach(p => { p.hidden = p.dataset.panel !== nombre; });
+            if (typeof onShow === 'function') onShow(nombre);
+        }
+
+        tabs.forEach(t => t.addEventListener('click', () => mostrar(t.dataset.tab)));
+
+        return mostrar;
     }
 
     /* ---------- Views: Dashboard ---------- */
@@ -2860,7 +2901,20 @@
         );
     }
 
-    function confirmDialog(title, message, onConfirm) {
+    /* Diálogo de confirmación (DESIGN.md §15).
+     *
+     * `opts.label` es el rótulo del botón de confirmar y `opts.tono` su clase.
+     * Los defaults son `Eliminar` / `btn-danger` porque durante mucho tiempo
+     * este diálogo sólo se usó para bajas — y estaban HARDCODEADOS, así que la
+     * primera acción no destructiva que lo usó (generar un enlace de acceso)
+     * apareció con un botón rojo que decía "Eliminar".
+     *
+     * El rojo se reserva para lo destructivo: una acción que no borra nada pasa
+     * `tono: 'primary'`. Que exista la confirmación ya comunica el peso. */
+    function confirmDialog(title, message, onConfirm, opts = {}) {
+        const label = opts.label || 'Eliminar';
+        const tono  = opts.tono  || 'danger';
+
         const backdrop = document.createElement('div');
         backdrop.className = 'confirm-backdrop';
         backdrop.innerHTML = `
@@ -2869,7 +2923,7 @@
                 <div class="confirm-msg">${escape(message)}</div>
                 <div class="confirm-actions">
                     <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
-                    <button class="btn btn-danger" data-act="ok">Eliminar</button>
+                    <button class="btn btn-${escape(tono)}" data-act="ok">${escape(label)}</button>
                 </div>
             </div>
         `;
@@ -2890,24 +2944,17 @@
     }
 
     /* ---------- Views: Usuarios ---------- */
-    const ROLES_USER = [
-        { value: 'admin',    label: 'Administrador', badge: 'badge-danger' },
-        { value: 'operador', label: 'Operador',      badge: 'badge-info'   },
-        { value: 'lectura',  label: 'Solo lectura',  badge: 'badge-warn'   },
-    ];
-
     const ORDEN_USUARIOS = [
         { value: 'id',            label: 'Código'        },
         { value: 'nombre',        label: 'Nombre'        },
         { value: 'email',         label: 'Email'         },
-        { value: 'rol',           label: 'Rol'           },
         { value: 'last_login_at', label: 'Último login'  },
         { value: 'created_at',    label: 'Creado'        },
     ];
 
     function usuariosDefaults() {
         return {
-            codigo: '', texto: '', rol: '', estado: '',
+            codigo: '', texto: '', estado: '',
             orden:  'id', dir: 'desc', limit: 100,
         };
     }
@@ -2920,7 +2967,7 @@
             const state = usuariosDefaults();
 
             root.innerHTML = `
-                ${moduleHeader('Usuarios', 'Personas con acceso a la plataforma: credenciales, rol y estado.')}
+                ${moduleHeader('Usuarios', 'Personas con acceso a la plataforma: sus credenciales y su estado. A qué dominios entra cada una lo definen sus perfiles.')}
                 <div class="stats-bar">
                     <div class="stat-card">
                         <span class="stat-label">Total</span>
@@ -2931,8 +2978,8 @@
                         <span class="stat-value green">${r.activos}</span>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-label">Administradores</span>
-                        <span class="stat-value orange">${r.admins}</span>
+                        <span class="stat-label">Inactivos</span>
+                        <span class="stat-value red">${r.inactivos}</span>
                     </div>
                 </div>
                 ${abmToolbar({
@@ -2960,7 +3007,6 @@
                 <td class="td-nombre">${escape(u.nombre)}</td>
                 <td>${escape(u.email)}</td>
                 <td>${u.celular ? escape(u.celular) : '<span class="muted">—</span>'}</td>
-                <td>${rolBadge(u.rol)}</td>
                 <td>${u.activo
                     ? '<span class="badge badge-success">Activo</span>'
                     : '<span class="badge badge-danger">Inactivo</span>'}</td>
@@ -2978,7 +3024,6 @@
                         <th>Nombre</th>
                         <th>Email</th>
                         <th>Celular</th>
-                        <th>Rol</th>
                         <th>Estado</th>
                         <th>Último login</th>
                         <th>Creado</th>
@@ -2988,11 +3033,6 @@
                 <tbody>${rows}</tbody>
             </table>
         `;
-    }
-
-    function rolBadge(rol) {
-        const r = ROLES_USER.find(x => x.value === rol) || { label: rol, badge: 'badge-info' };
-        return `<span class="badge ${r.badge}">${escape(r.label)}</span>`;
     }
 
     function wireUsersView(state, allUsuarios) {
@@ -3008,7 +3048,6 @@
 
             let filtered = allUsuarios.filter(u => {
                 if (Number.isFinite(codigo) && u.id !== codigo) return false;
-                if (state.rol && u.rol !== state.rol) return false;
                 if (state.estado === 'activo'   && !u.activo) return false;
                 if (state.estado === 'inactivo' &&  u.activo) return false;
                 if (q && !(u.email + ' ' + u.nombre + ' ' + (u.celular || '')).toLowerCase().includes(q)) return false;
@@ -3068,11 +3107,6 @@
     }
 
     function openUsersFiltersModal(state, onApply) {
-        const rolOpts = ['<option value="">Todos los roles</option>'].concat(
-            ROLES_USER.map(r =>
-                `<option value="${r.value}"${r.value === state.rol ? ' selected' : ''}>${escape(r.label)}</option>`
-            )
-        ).join('');
         const estOpts = [
             `<option value=""${state.estado === '' ? ' selected' : ''}>Todos</option>`,
             `<option value="activo"${state.estado === 'activo' ? ' selected' : ''}>Activos</option>`,
@@ -3091,10 +3125,6 @@
                 <div class="form-group">
                     <label for="usr-fm-texto">Buscar (nombre / email / celular)</label>
                     <input type="search" id="usr-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
-                </div>
-                <div class="form-group">
-                    <label for="usr-fm-rol">Rol</label>
-                    <select id="usr-fm-rol">${rolOpts}</select>
                 </div>
                 <div class="form-group">
                     <label for="usr-fm-estado">Estado</label>
@@ -3124,7 +3154,6 @@
             onApply(modal) {
                 state.codigo = modal.querySelector('#usr-fm-codigo').value.trim();
                 state.texto  = modal.querySelector('#usr-fm-texto').value.trim();
-                state.rol    = modal.querySelector('#usr-fm-rol').value;
                 state.estado = modal.querySelector('#usr-fm-estado').value;
                 state.orden  = modal.querySelector('#usr-fm-orden').value;
                 state.dir    = modal.querySelector('#usr-fm-dir').value;
@@ -3135,7 +3164,6 @@
                 const d = usuariosDefaults();
                 modal.querySelector('#usr-fm-codigo').value = d.codigo;
                 modal.querySelector('#usr-fm-texto').value  = d.texto;
-                modal.querySelector('#usr-fm-rol').value    = d.rol;
                 modal.querySelector('#usr-fm-estado').value = d.estado;
                 modal.querySelector('#usr-fm-orden').value  = d.orden;
                 modal.querySelector('#usr-fm-dir').value    = d.dir;
@@ -3175,7 +3203,6 @@
                             viewCardHalf('Nombre',        escape(usr.nombre)),
                             viewCardHalf('Email',         escape(usr.email)),
                             viewCardHalf('Celular',       usr.celular ? escape(usr.celular) : `<span class="muted">—</span>`),
-                            viewCardHalf('Rol',           rolBadge(usr.rol)),
                             viewCardHalf('Estado',        estadoVal),
                             viewCardHalf('Último login',  escape(formatDate(usr.last_login_at))),
                             viewCardHalf('Creado',        escape(formatDate(usr.created_at))),
@@ -3223,6 +3250,15 @@
             { act: 'edit', label: 'Editar usuario', icon: 'fa-pencil',
               onSelect: () => { close(); openUserModal(usr); } },
             { divider: true },
+            // Enlaces mágicos: abren sesión COMO esta persona, sin su
+            // contraseña. Van con `danger` aunque no borren nada — es una
+            // suplantación de identidad y no debería confundirse con copiar
+            // un dato.
+            { act: 'magic-panel', label: 'Generar acceso a Panel', icon: 'fa-wand-magic-sparkles', danger: true,
+              onSelect: () => generarEnlaceAcceso(usr, 'panel') },
+            { act: 'magic-app',   label: 'Generar acceso a App',   icon: 'fa-wand-magic-sparkles', danger: true,
+              onSelect: () => generarEnlaceAcceso(usr, 'app') },
+            { divider: true },
             { act: 'copy-email', label: 'Copiar email', icon: 'fa-regular fa-copy',
               onSelect: () => copyToClipboard(usr.email) },
             { act: 'copy-id',    label: 'Copiar ID',    icon: 'fa-hashtag',
@@ -3232,8 +3268,6 @@
               onSelect: () => { close(); confirmDeleteUser(usr); } },
         ]);
 
-        const tabs    = backdrop.querySelectorAll('.modal-tab');
-        const panels  = backdrop.querySelectorAll('.modal-tabpanel');
         const perfBody = backdrop.querySelector('[data-role="perfiles-body"]');
         let perfLoaded = false;
 
@@ -3256,12 +3290,7 @@
             }
         }
 
-        tabs.forEach(t => t.addEventListener('click', () => {
-            const target = t.dataset.tab;
-            tabs.forEach(x => x.classList.toggle('active', x === t));
-            panels.forEach(p => p.hidden = p.dataset.panel !== target);
-            if (target === 'perfiles') loadPerfiles();
-        }));
+        wireModalTabs(backdrop, nombre => { if (nombre === 'perfiles') loadPerfiles(); });
     }
 
     function perfilesUsuarioTableBody(perfiles) {
@@ -3272,8 +3301,10 @@
             <tr class="row-clickable" data-id="${p.id}">
                 <td><span class="td-id">#${p.id}</span></td>
                 <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
-                <td>${perfilRolBadge(p.rol)}</td>
-                <td>${formatDate(p.created_at)}</td>
+                <td>${perfilTipoBadge(p.tipo)}</td>
+                <td>${p.activo
+                    ? '<span class="badge badge-success">Habilitado</span>'
+                    : '<span class="badge badge-danger">Deshabilitado</span>'}</td>
             </tr>
         `).join('');
         return `
@@ -3283,8 +3314,8 @@
                         <tr>
                             <th>Código</th>
                             <th>Dominio</th>
-                            <th>Rol</th>
-                            <th>Creado</th>
+                            <th>Tipo</th>
+                            <th>Estado</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
@@ -3295,10 +3326,6 @@
 
     function openUserModal(usr) {
         const isEdit  = !!usr;
-        const rolOpts = ROLES_USER.map(r =>
-            `<option value="${r.value}" ${usr?.rol === r.value ? 'selected' : ''}>${escape(r.label)}</option>`
-        ).join('');
-
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
@@ -3328,18 +3355,12 @@
                             <div class="field-error" id="usr-email-err" style="display:none"></div>
                         </div>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="usr-celular">Celular</label>
-                            <input type="tel" id="usr-celular" maxlength="30"
-                                   value="${escape(usr?.celular ?? '')}"
-                                   placeholder="+54 9 11 1234-5678">
-                            <div class="field-error" id="usr-celular-err" style="display:none"></div>
-                        </div>
-                        <div class="form-group">
-                            <label for="usr-rol">Rol</label>
-                            <select id="usr-rol">${rolOpts}</select>
-                        </div>
+                    <div class="form-group">
+                        <label for="usr-celular">Celular</label>
+                        <input type="tel" id="usr-celular" maxlength="30"
+                               value="${escape(usr?.celular ?? '')}"
+                               placeholder="+54 9 11 1234-5678">
+                        <div class="field-error" id="usr-celular-err" style="display:none"></div>
                     </div>
                     <div class="form-group">
                         <label>Estado</label>
@@ -3381,7 +3402,6 @@
         const nombreInput  = backdrop.querySelector('#usr-nombre');
         const emailInput   = backdrop.querySelector('#usr-email');
         const celularInput = backdrop.querySelector('#usr-celular');
-        const rolSel       = backdrop.querySelector('#usr-rol');
         const activoChk    = backdrop.querySelector('#usr-activo');
         const activoLbl    = backdrop.querySelector('#usr-activo-label');
         const passInput    = backdrop.querySelector('#usr-pass');
@@ -3427,7 +3447,6 @@
             const nombre  = nombreInput.value.trim();
             const email   = emailInput.value.trim().toLowerCase();
             const celular = celularInput.value.trim();
-            const rol     = rolSel.value;
             const activo  = activoChk.checked;
             const pass    = passInput.value;
 
@@ -3466,7 +3485,7 @@
             }
             if (firstInvalid) { firstInvalid.focus(); return; }
 
-            const payload = { email, nombre, celular, rol, activo };
+            const payload = { email, nombre, celular, activo };
             if (pass !== '') payload.password = pass;
 
             saveBtn.disabled = true;
@@ -3484,6 +3503,99 @@
                 saveBtn.disabled = false;
                 toast(e.message, 'error');
             }
+        });
+    }
+
+    /* Enlace mágico: pide a la API una URL de un solo uso que abre sesión en
+       `panel` o en `app` COMO este usuario, sin su contraseña.
+
+       SE CONFIRMA ANTES DE PEDIRLO. No es una acción de consulta: quien reciba
+       la URL entra a la cuenta ajena con todo lo que esa cuenta puede hacer, y
+       queda registrado en `enlaces_acceso` a nombre de quien lo generó.
+
+       EL TOKEN SE VE UNA SOLA VEZ. En la base va su SHA-256, así que si se
+       cierra el modal sin copiarlo hay que generar otro — el modal lo dice. */
+    function generarEnlaceAcceso(usr, destino) {
+        const rotulo = destino === 'panel' ? 'Panel' : 'App';
+
+        confirmDialog(
+            `Generar acceso a ${rotulo}`,
+            `Se va a generar un enlace que abre sesión en ${rotulo} COMO "${usr.nombre}", ` +
+            `sin pedirle su contraseña. Dura 15 minutos, sirve una sola vez y queda registrado a tu nombre.`,
+            async () => {
+                try {
+                    const r = await api('enlaces_acceso', {
+                        method: 'POST',
+                        body:   { usuario_id: usr.id, destino },
+                    });
+                    openEnlaceAccesoModal(usr, rotulo, r);
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 6000 });
+                }
+            },
+            // No borra nada: el rojo queda reservado para las bajas.
+            { label: `Generar acceso a ${rotulo}`, tono: 'primary' }
+        );
+    }
+
+    function openEnlaceAccesoModal(usr, rotulo, datos) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Acceso a ${escape(rotulo)}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del enlace">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="copiar">
+                        <i class="fa-regular fa-copy"></i> Copiar enlace
+                    </button>
+                    <a class="btn btn-sm btn-primary" data-act="abrir" href="${escape(datos.url)}" target="_blank" rel="noopener">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir
+                    </a>
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Abre sesión en <strong>${escape(rotulo)}</strong> como
+                        <strong>${escape(usr.nombre)}</strong> <code>#${usr.id}</code>.
+                    </div>
+                    <div class="form-group">
+                        <label for="enlace-url">Enlace</label>
+                        <textarea id="enlace-url" class="json-editor" rows="3" readonly>${escape(datos.url)}</textarea>
+                    </div>
+                    <div class="del-blocker">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <div>
+                            <strong>Se muestra una sola vez.</strong>
+                            En la base se guarda sólo un hash, así que no se puede volver a ver:
+                            si cerrás sin copiarlo, generá otro.
+                            Vence el <strong>${escape(formatDate(datos.expira))}</strong>
+                            (${datos.minutos} minutos) y sirve una sola vez.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const campo = backdrop.querySelector('#enlace-url');
+        campo.focus();
+        campo.select();
+
+        backdrop.querySelector('[data-act="copiar"]').addEventListener('click', () => {
+            copyToClipboard(datos.url);
         });
     }
 
@@ -3606,22 +3718,83 @@
     }
 
     /* ---------- Views: Perfiles ---------- */
-    const ROLES_PERFIL = [
-        { value: 'admin',    label: 'Administrador', badge: 'badge-danger' },
-        { value: 'operador', label: 'Operador',      badge: 'badge-info'   },
+    /* `perfiles` ya no tiene rol: la columna se eliminó el 06/09/2026
+       (`20260906_1500_perfiles_sin_rol.sql`) y los roles pasaron a colgar de los
+       controladores, no de los clientes. Lo que el módulo administra ahora es
+       `tipo`, el ENUM('A','O') que la tabla ya tenía y que lee el legacy.
+       NO es un rol y no reparte permisos — hoy no gatea nada. */
+    const TIPOS_PERFIL = [
+        { value: 'A', label: 'Administrador', badge: 'badge-danger' },
+        { value: 'O', label: 'Operador',      badge: 'badge-info'   },
     ];
+
+    /* Los TRES permisos del perfil (`perfiles`.`operacion` / `invitacion` /
+       `facturacion`, migración `20260907_1000`). Son banderas `habilitado`
+       —tinyint(1) 0/1— y el endpoint ya las manda como booleanos en
+       `perfil.permisos`.
+
+       ESTOS SÍ REPARTEN PERMISOS, a diferencia de `tipo`: cada uno abre algo
+       concreto en una de las otras dos apps del repo. Por eso cada fila dice
+       DÓNDE vale — sin eso, "Operación" y "Facturación" en la misma lista se
+       leen como si las dos fueran de cloud.
+
+       El orden es el de las columnas en la tabla, que además es el del pedido:
+       operación, invitación, facturación.
+
+       `icono` es el que muestra la columna Permisos del listado, y cada uno
+       dibuja lo que el permiso ABRE, no el permiso en abstracto: los controles
+       del panel de operación, el alta de una persona, el comprobante. Con tres
+       iconos grises en la misma celda, esa es la única pista de cuál es cuál
+       antes de leer el tooltip. */
+    const PERMISOS_PERFIL = [
+        {
+            clave:   'operacion',
+            label:   'Operación',
+            icono:   'fa-sliders',
+            donde:   'app.reactor.com.ar',
+            detalle: 'Ver y usar los paneles de operación.',
+        },
+        {
+            clave:   'invitacion',
+            label:   'Invitación',
+            icono:   'fa-user-plus',
+            donde:   'app.reactor.com.ar',
+            detalle: 'Invitar usuarios nuevos al dominio.',
+        },
+        {
+            clave:   'facturacion',
+            label:   'Facturación',
+            icono:   'fa-file-invoice-dollar',
+            donde:   'panel.reactor.com.ar',
+            detalle: 'Ver y abonar las facturas del servicio.',
+        },
+    ];
+
+    /* Un perfil viejo servido por una versión anterior del endpoint no trae
+       `permisos`. Los tres quedan en `false`: sin dato no hay permiso, el mismo
+       default cerrado que usa la columna. */
+    function permisosDelPerfil(prf) {
+        const p = (prf && prf.permisos) || {};
+        return PERMISOS_PERFIL.reduce((acc, x) => {
+            acc[x.clave] = p[x.clave] === true;
+            return acc;
+        }, {});
+    }
+
+    /* Catálogo de paneles (con su dominio) para el selector del editor. Lo deja
+       el render del listado, que ya lo trae en el mismo GET. */
+    let perfilesCtx = { catalogos: { paneles: [] } };
 
     const ORDEN_PERFILES = [
         { value: 'id',             label: 'Código'   },
         { value: 'usuario_nombre', label: 'Usuario'  },
         { value: 'dominio_nombre', label: 'Dominio'  },
-        { value: 'rol',            label: 'Rol'      },
-        { value: 'created_at',     label: 'Creado'   },
+        { value: 'tipo_texto',     label: 'Tipo'     },
     ];
 
     function perfilesDefaults() {
         return {
-            codigo: '', texto: '', usuario: '', dominio: '', rol: '',
+            codigo: '', texto: '', usuario: '', dominio: '', tipo: '', estado: '',
             orden:  'id', dir: 'desc', limit: 100,
         };
     }
@@ -3638,6 +3811,8 @@
             const usuarios  = usrData.usuarios;
             const dominios  = domData.dominios;
             const state     = perfilesDefaults();
+            perfilesCatalogos = { usuarios, dominios };
+            perfilesCtx       = { catalogos: data.catalogos };
 
             // "Listar → Perfiles" desde Usuarios deja el id acá antes de navegar.
             const usrPedido = tomarFiltroUsuario('profiles');
@@ -3646,19 +3821,23 @@
             if (domPedido) state.dominio = domPedido;
 
             root.innerHTML = `
-                ${moduleHeader('Perfiles', 'Relación entre usuarios y dominios: qué rol tiene cada usuario sobre cada dominio.')}
+                ${moduleHeader('Perfiles', 'El acceso de un usuario a un dominio: su tipo, su estado y a qué paneles de ese dominio puede entrar desde la app.')}
                 <div class="stats-bar">
                     <div class="stat-card">
                         <span class="stat-label">Total</span>
                         <span class="stat-value">${r.total}</span>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-label">Administradores</span>
-                        <span class="stat-value orange">${r.admin}</span>
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.habilitados}</span>
                     </div>
                     <div class="stat-card">
-                        <span class="stat-label">Operadores</span>
-                        <span class="stat-value green">${r.operador}</span>
+                        <span class="stat-label">Administradores</span>
+                        <span class="stat-value orange">${r.administradores}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con paneles acotados</span>
+                        <span class="stat-value">${r.con_paneles}</span>
                     </div>
                 </div>
                 ${abmToolbar({
@@ -3688,8 +3867,12 @@
                     <div class="td-id">${escape(p.usuario_email)}</div>
                 </td>
                 <td><span class="badge badge-info">${escape(p.dominio_nombre)}</span></td>
-                <td>${perfilRolBadge(p.rol)}</td>
-                <td>${formatDate(p.created_at)}</td>
+                <td>${perfilTipoBadge(p.tipo)}</td>
+                <td>${perfilPermisosCelda(p)}</td>
+                <td>${perfilPanelesCelda(p.paneles)}</td>
+                <td>${p.activo
+                    ? '<span class="badge badge-success">Habilitado</span>'
+                    : '<span class="badge badge-danger">Deshabilitado</span>'}</td>
                 ${actionCells()}
             </tr>
         `).join('');
@@ -3701,8 +3884,10 @@
                         <th>Código</th>
                         <th>Usuario</th>
                         <th>Dominio</th>
-                        <th>Rol</th>
-                        <th>Creado</th>
+                        <th>Tipo</th>
+                        <th>Permisos</th>
+                        <th>Paneles</th>
+                        <th>Estado</th>
                         ${actionHeaderCells()}
                     </tr>
                 </thead>
@@ -3711,9 +3896,62 @@
         `;
     }
 
-    function perfilRolBadge(rol) {
-        const r = ROLES_PERFIL.find(x => x.value === rol) || { label: rol, badge: 'badge-info' };
-        return `<span class="badge ${r.badge}">${escape(r.label)}</span>`;
+    /* El permiso es explícito: sin filas en `perfiles_paneles` el perfil no ve
+       NINGÚN panel en la app. La celda lo marca en `warn` y no en gris, porque
+       es un estado que casi siempre es un error de carga — la siembra de
+       `20260906_1700` dejó a los 2225 perfiles existentes con todos los de su
+       dominio, y las dos altas (cloud e invitación) los asignan al crear. */
+    function perfilPanelesCelda(paneles) {
+        const n = (paneles || []).length;
+        return n
+            ? `<span class="badge badge-info">${n}</span>`
+            : '<span class="badge badge-warn">Ninguno</span>';
+    }
+
+    /* Los tres permisos como iconos, uno por permiso OTORGADO. El permiso que
+       no está no dibuja nada: la ausencia es el dato, igual que en la ficha del
+       modal de Consultar, sólo que acá comprimido a un vistazo por fila.
+
+       Van en `--muted`, el gris de `.td-id`, y no en los colores de los badges
+       vecinos (Tipo, Dominio, Estado): la fila ya tiene tres badges de color y
+       un cuarto bloque coloreado la vuelve ilegible. El `title` de cada icono
+       dice permiso + dónde vale, que es el mismo par que muestra la ficha —
+       sin eso, un icono suelto no distingue si abre `app` o `panel`. */
+    function perfilPermisosCelda(prf) {
+        const activos = permisosDelPerfil(prf);
+        const iconos  = PERMISOS_PERFIL
+            .filter(p => activos[p.clave])
+            .map(p => `<i class="fa-solid ${p.icono}" title="${escape(p.label)} — ${escape(p.donde)}"></i>`)
+            .join('');
+
+        return iconos
+            ? `<span class="td-permisos">${iconos}</span>`
+            : '<span class="muted">—</span>';
+    }
+
+    function perfilTipoBadge(tipo) {
+        const t = TIPOS_PERFIL.find(x => x.value === tipo);
+        return t ? `<span class="badge ${t.badge}">${escape(t.label)}</span>`
+                 : '<span class="muted">—</span>';
+    }
+
+    /* Ficha de los tres permisos (pestaña Permisos de Consultar perfil).
+
+       Va una tarjeta FULL por permiso y no tres medias: con tres, la grilla flex
+       estira la última a todo el ancho y se lee como un destaque deliberado
+       (ABM.md, sección Consultar). Y las tres full además dejan lugar para decir
+       en la misma línea qué abre cada una y en qué app — que es el dato que
+       vuelve entendible una lista de permisos de OTRO producto. */
+    function perfilPermisosFicha(prf) {
+        const activos = permisosDelPerfil(prf);
+
+        return PERMISOS_PERFIL.map(p => viewCardFull(
+            p.label,
+            `${activos[p.clave]
+                ? '<span class="badge badge-success">Habilitado</span>'
+                : '<span class="badge badge-danger">Deshabilitado</span>'}
+             <span class="muted">— ${escape(p.detalle)} (${escape(p.donde)})</span>`
+        ));
     }
 
     function wireProfilesView(state, allPerfiles, allUsuarios, allDominios) {
@@ -3729,7 +3967,9 @@
 
             let filtered = allPerfiles.filter(p => {
                 if (Number.isFinite(codigo) && p.id !== codigo) return false;
-                if (state.rol     && p.rol !== state.rol) return false;
+                if (state.tipo    && p.tipo !== state.tipo) return false;
+                if (state.estado === 'activo'   && !p.activo) return false;
+                if (state.estado === 'inactivo' &&  p.activo) return false;
                 if (state.usuario && String(p.usuario_id) !== state.usuario) return false;
                 if (state.dominio && String(p.dominio_id) !== state.dominio) return false;
                 if (q && !(p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
@@ -3792,9 +4032,9 @@
         const domOpts = ['<option value="">Todos los dominios</option>'].concat(
             allDominios.map(d => `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`)
         ).join('');
-        const rolOpts = ['<option value="">Todos los roles</option>'].concat(
-            ROLES_PERFIL.map(r =>
-                `<option value="${r.value}"${r.value === state.rol ? ' selected' : ''}>${escape(r.label)}</option>`
+        const tipoOpts = ['<option value="">Todos los tipos</option>'].concat(
+            TIPOS_PERFIL.map(t =>
+                `<option value="${t.value}"${t.value === state.tipo ? ' selected' : ''}>${escape(t.label)}</option>`
             )
         ).join('');
         const ordOpts = ORDEN_PERFILES.map(o =>
@@ -3820,8 +4060,16 @@
                     <select id="prf-fm-dominio">${domOpts}</select>
                 </div>
                 <div class="form-group">
-                    <label for="prf-fm-rol">Rol</label>
-                    <select id="prf-fm-rol">${rolOpts}</select>
+                    <label for="prf-fm-tipo">Tipo</label>
+                    <select id="prf-fm-tipo">${tipoOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="prf-fm-estado">Estado</label>
+                    <select id="prf-fm-estado">
+                        <option value=""${state.estado === '' ? ' selected' : ''}>Todos</option>
+                        <option value="activo"${state.estado === 'activo' ? ' selected' : ''}>Habilitados</option>
+                        <option value="inactivo"${state.estado === 'inactivo' ? ' selected' : ''}>Deshabilitados</option>
+                    </select>
                 </div>
                 <div class="form-group"></div>
                 <div class="form-group">
@@ -3850,7 +4098,8 @@
                 state.texto   = modal.querySelector('#prf-fm-texto').value.trim();
                 state.usuario = modal.querySelector('#prf-fm-usuario').value;
                 state.dominio = modal.querySelector('#prf-fm-dominio').value;
-                state.rol     = modal.querySelector('#prf-fm-rol').value;
+                state.tipo    = modal.querySelector('#prf-fm-tipo').value;
+                state.estado  = modal.querySelector('#prf-fm-estado').value;
                 state.orden   = modal.querySelector('#prf-fm-orden').value;
                 state.dir     = modal.querySelector('#prf-fm-dir').value;
                 state.limit   = readLimit(modal.querySelector('#prf-fm-limit'), 100);
@@ -3862,7 +4111,8 @@
                 modal.querySelector('#prf-fm-texto').value   = d.texto;
                 modal.querySelector('#prf-fm-usuario').value = d.usuario;
                 modal.querySelector('#prf-fm-dominio').value = d.dominio;
-                modal.querySelector('#prf-fm-rol').value     = d.rol;
+                modal.querySelector('#prf-fm-tipo').value    = d.tipo;
+                modal.querySelector('#prf-fm-estado').value  = d.estado;
                 modal.querySelector('#prf-fm-orden').value   = d.orden;
                 modal.querySelector('#prf-fm-dir').value     = d.dir;
                 modal.querySelector('#prf-fm-limit').value   = String(d.limit);
@@ -3870,29 +4120,132 @@
         });
     }
 
+    // Catálogos que necesita el modal de Alta/Edición de perfiles. Los deja
+    // renderProfiles al cargar el módulo; si Consultar perfil se abrió desde la
+    // solapa Perfiles de Consultar usuario, el módulo nunca se renderizó y hay
+    // que pedirlos en el momento.
+    let perfilesCatalogos = { usuarios: null, dominios: null };
+
+    async function catalogosPerfiles() {
+        if (perfilesCatalogos.usuarios && perfilesCatalogos.dominios) return perfilesCatalogos;
+        const [usrData, domData] = await Promise.all([api('users'), api('dominios')]);
+        perfilesCatalogos = { usuarios: usrData.usuarios, dominios: domData.dominios };
+        return perfilesCatalogos;
+    }
+
+    /* Paneles en la ficha. Sin filas el perfil no ve ninguno, y eso hay que
+       decirlo con todas las letras: es lo que un listado vacío no comunica. */
+    function perfilPanelesFicha(prf) {
+        const ids = prf.paneles || [];
+        if (!ids.length) {
+            return '<span class="badge badge-warn">Ninguno</span> <span class="muted">— este perfil no ve ningún panel en la app</span>';
+        }
+        const porId = new Map((perfilesCtx.catalogos.paneles || []).map(x => [x.id, x.nombre]));
+        return ids.map(id =>
+            `<span class="badge badge-info">${escape(porId.get(id) || ('#' + id))}</span>`
+        ).join(' ');
+    }
+
+    /* Pastilla clickeable de la ficha de perfil. Sin id no hay a dónde ir —el
+       perfil puede apuntar a un usuario borrado o traer el centinela 0—, así
+       que ahí se degrada a texto plano en vez de dejar un botón muerto. */
+    function badgeFicha(accion, nombre, id) {
+        const texto = (nombre || '').trim();
+        if (!id || id <= 0) {
+            return texto ? escape(texto) : '<span class="muted">—</span>';
+        }
+        return `<button type="button" class="badge badge-info badge-link"
+                        data-act="${escape(accion)}" data-id="${id}"
+                        title="Ver ficha">${escape(texto || ('#' + id))}</button>`;
+    }
+
+    /* Abre la ficha de usuario o de dominio APILADA sobre la del perfil: el
+       `.modal-backdrop` comparte z-index, así que el último montado queda
+       arriba y al cerrarlo se vuelve al perfil (DESIGN.md §25).
+
+       Los objetos salen de `catalogosPerfiles()`, que ya los tiene cargados si
+       se entró por el módulo Perfiles y los pide si se llegó desde otro lado
+       (Consultar usuario → solapa Perfiles → una fila). Por eso el handler es
+       async: la primera vez puede haber un fetch. */
+    function wireFichaPerfilLinks(backdrop, prf) {
+        const abrir = async (accion) => {
+            try {
+                const cat = await catalogosPerfiles();
+                if (accion === 'ver-usuario') {
+                    const u = (cat.usuarios || []).find(x => x.id === prf.usuario_id);
+                    if (!u) return toast('Ese usuario ya no existe', { error: true });
+                    openUserViewModal(u);
+                } else {
+                    const d = (cat.dominios || []).find(x => x.id === prf.dominio_id);
+                    if (!d) return toast('Ese dominio ya no existe', { error: true });
+                    openDomainViewModal(d);
+                }
+            } catch (e) {
+                toast(e.message, { error: true });
+            }
+        };
+
+        backdrop.querySelectorAll('[data-act="ver-usuario"], [data-act="ver-dominio"]')
+                .forEach(b => b.addEventListener('click', e => {
+                    e.stopPropagation();
+                    abrir(b.dataset.act);
+                }));
+    }
+
     function openProfileViewModal(prf) {
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
             <div class="modal modal-wide" role="dialog" aria-modal="true">
-                <div class="modal-header">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title">Consultar perfil</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
-                <div class="modal-body">
-                    ${viewGrid([
-                        viewCardHalf('Código',       `<code>#${prf.id}</code>`),
-                        viewCardHalf('Rol',          perfilRolBadge(prf.rol)),
-                        viewCardHalf('Usuario',      escape(prf.usuario_nombre)),
-                        viewCardHalf('Email',        escape(prf.usuario_email)),
-                        viewCardHalf('Dominio',      `<span class="badge badge-info">${escape(prf.dominio_nombre)}</span>`),
-                        viewCardHalf('Código dominio', `<code>#${prf.dominio_id}</code>`),
-                        viewCardHalf('Creado',       escape(formatDate(prf.created_at))),
-                        viewCardHalf('Actualizado',  escape(formatDate(prf.updated_at))),
-                    ])}
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del perfil">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('listar',   'Listar',   'fa-list')}
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                <div class="modal-body">
+                    <div class="modal-tabs" role="tablist">
+                        <button class="modal-tab active" data-tab="general"  role="tab">General</button>
+                        <button class="modal-tab"        data-tab="permisos" role="tab">Permisos</button>
+                        <button class="modal-tab"        data-tab="paneles"  role="tab">Paneles</button>
+                    </div>
+                    <!-- Ocho tarjetas media: cuatro renglones que cierran de a
+                         dos. Al mudarse Paneles a su propia pestana la cuenta
+                         quedo par sola; agregar un campo aca la rompe
+                         (ABM.md, seccion Consultar). -->
+                    <div class="modal-tabpanel" data-panel="general">
+                        ${viewGrid([
+                            viewCardHalf('Código',       `<code>#${prf.id}</code>`),
+                            viewCardHalf('Tipo',         perfilTipoBadge(prf.tipo)),
+                            viewCardHalf('Usuario',      badgeFicha('ver-usuario', prf.usuario_nombre, prf.usuario_id)),
+                            viewCardHalf('Email',        escape(prf.usuario_email)),
+                            viewCardHalf('Dominio',      badgeFicha('ver-dominio', prf.dominio_nombre, prf.dominio_id)),
+                            viewCardHalf('Código dominio', `<code>#${prf.dominio_id}</code>`),
+                            viewCardHalf('Nombre del perfil', prf.perfil_nombre ? escape(prf.perfil_nombre) : `<span class="muted">—</span>`),
+                            viewCardHalf('Estado',       prf.activo
+                                ? '<span class="badge badge-success">Habilitado</span>'
+                                : '<span class="badge badge-danger">Deshabilitado</span>'),
+                        ])}
+                    </div>
+                    <!-- Los permisos tienen pestaña propia y no se suman a
+                         General: dos de los tres son de la app y el tercero del
+                         panel, así que mezclarlos con el usuario y el dominio
+                         los haría leer como atributos de cloud. Además General
+                         tiene ocho tarjetas justo por paridad y cualquier
+                         agregado la rompe. -->
+                    <div class="modal-tabpanel" data-panel="permisos" hidden>
+                        ${viewGrid(perfilPermisosFicha(prf))}
+                    </div>
+                    <div class="modal-tabpanel" data-panel="paneles" hidden>
+                        ${viewGrid([
+                            viewCardFull(`Paneles en la app (${(prf.paneles || []).length})`, perfilPanelesFicha(prf)),
+                        ])}
+                    </div>
                 </div>
             </div>
         `;
@@ -3904,6 +4257,158 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireModalTabs(backdrop);
+        wireFichaPerfilLinks(backdrop, prf);
+
+        const menubar = backdrop.querySelector('.modal-menubar');
+
+        // El perfil es la fila que une un usuario con un dominio, así que
+        // "Listar" tiene dos familias: lo que cuelga de la persona y lo que
+        // cuelga del dominio. El divisor las separa.
+        wireMenubarMenu(menubar, 'listar', () => [
+            { act: 'perfiles-usuario', label: 'Otros perfiles del usuario', icon: 'fa-id-card',
+              onSelect: () => { close(); pedirFiltroUsuario('profiles', 'usuario', prf.usuario_id); } },
+            { act: 'adopciones-usuario', label: 'Adopciones del usuario', icon: 'fa-handshake',
+              onSelect: () => { close(); pedirFiltroUsuario('adopciones', 'adoptador', prf.usuario_id); } },
+            { divider: true },
+            { act: 'dispositivos-dominio', label: 'Dispositivos del dominio', icon: 'fa-microchip',
+              onSelect: () => { close(); pedirFiltroDominio('dispositivos', prf.dominio_id); } },
+            { act: 'chips-dominio', label: 'Chips del dominio', icon: 'fa-sim-card',
+              onSelect: () => { close(); pedirFiltroDominio('chips', prf.dominio_id); } },
+            { act: 'perfiles-dominio', label: 'Perfiles del dominio', icon: 'fa-flag',
+              onSelect: () => { close(); pedirFiltroDominio('profiles', prf.dominio_id); } },
+        ]);
+
+        wireMenubarMenu(menubar, 'acciones', () => [
+            { act: 'edit', label: 'Editar perfil', icon: 'fa-pencil',
+              onSelect: async () => {
+                  close();
+                  try {
+                      const cat = await catalogosPerfiles();
+                      openProfileModal(prf, cat.usuarios, cat.dominios);
+                  } catch (e) {
+                      toast(e.message, 'error');
+                  }
+              } },
+            { divider: true },
+            { act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(prf.id)) },
+            { act: 'copy-email', label: 'Copiar email del usuario', icon: 'fa-regular fa-copy',
+              onSelect: () => copyToClipboard(prf.usuario_email) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar perfil', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); confirmDeleteProfile(prf); } },
+        ]);
+    }
+
+    /* Ids de los paneles habilitados de un dominio. Lo usa el alta para
+       pre-tildarlos todos: la migración `20260906_1700` dejó a los 2225 perfiles
+       existentes con acceso a todos los paneles de su dominio, y un perfil nuevo
+       tiene que nacer igual o sería el único que arranca acotado. */
+    function panelesDelDominio(dominioId) {
+        return (perfilesCtx.catalogos.paneles || [])
+            .filter(p => p.dominio === dominioId)
+            .map(p => p.id);
+    }
+
+    /* Lista de paneles del formulario de perfil: un switch por panel, sin
+       buscador. NO usa `idPickerHtml()` a propósito — ese control existe para
+       catálogos de decenas de opciones (115 permisos, 122 menús) y por eso trae
+       buscador y contador. Acá lo que se lista son los paneles de UN dominio: el
+       más grande de la base tiene 7, así que un buscador sobre siete filas es
+       ruido, y el switch dice mejor que un checkbox que se está prendiendo o
+       apagando un permiso.
+
+       Acotada al dominio: los paneles de otro dominio no son opciones válidas y
+       el backend los rechaza con 422. Mientras no haya dominio elegido (alta
+       recién abierta) no hay nada que ofrecer, y se dice por qué en vez de
+       mostrar una caja vacía. */
+    function panelesListaHtml(dominioId, seleccion) {
+        const caja = (mensaje) =>
+            `<div class="paneles-lista"><div class="paneles-vacio">${escape(mensaje)}</div></div>`;
+
+        if (!dominioId) return caja('Elegí primero un dominio.');
+
+        const delDominio = (perfilesCtx.catalogos.paneles || []).filter(p => p.dominio === dominioId);
+        if (!delDominio.length) return caja('Este dominio no tiene paneles habilitados.');
+
+        const sel = new Set((seleccion || []).map(Number));
+
+        // El `input` va pegado al `.toggle-track` porque el CSS del switch (§17)
+        // pinta el estado con `input:checked + .toggle-track`: cualquier nodo en
+        // el medio lo deja siempre apagado.
+        const filas = delDominio.map(p => `
+            <label class="toggle-switch panel-item">
+                <span class="panel-item-nombre">${escape(p.nombre)} <code>#${p.id}</code></span>
+                <input type="checkbox" value="${p.id}"${sel.has(Number(p.id)) ? ' checked' : ''}>
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+        `).join('');
+
+        return `
+            <div class="paneles-acciones">
+                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-todos">
+                    <i class="fa-solid fa-check-double"></i> Seleccionar todo
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-ninguno">
+                    <i class="fa-solid fa-xmark"></i> Deseleccionar todo
+                </button>
+            </div>
+            <div class="paneles-lista">${filas}</div>
+        `;
+    }
+
+    /* Cablea los dos botones. Van sobre TODA la lista y no sobre "lo visible"
+       como en el selector de ids: sin buscador no hay nada oculto que puedan
+       pisar por sorpresa. */
+    function wirePanelesLista(scope) {
+        const wrap = scope.querySelector('#prf-paneles-wrap');
+        if (!wrap) return;
+
+        wrap.querySelectorAll('[data-act^="paneles-"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const valor = btn.dataset.act === 'paneles-todos';
+                wrap.querySelectorAll('.panel-item input').forEach(i => { i.checked = valor; });
+            });
+        });
+    }
+
+    function readPanelesLista(scope) {
+        return Array.from(scope.querySelectorAll('#prf-paneles-wrap .panel-item input:checked'))
+                    .map(i => +i.value);
+    }
+
+    /* Lista de switches de la pestaña Permisos del formulario. Reusa el markup
+       de la lista de paneles (`.paneles-lista` / `.toggle-switch.panel-item`):
+       es la misma forma —una lista corta y cerrada de cosas que se prenden y se
+       apagan— y duplicar CSS para tres filas no compra nada.
+
+       El `input` va PEGADO al `.toggle-track`, como en `panelesListaHtml()`: el
+       CSS del switch (§17) pinta el estado con `input:checked + .toggle-track` y
+       cualquier nodo en el medio lo deja siempre apagado. */
+    function permisosListaHtml(activos) {
+        const filas = PERMISOS_PERFIL.map(p => `
+            <label class="toggle-switch panel-item">
+                <span class="panel-item-nombre">
+                    ${escape(p.label)}
+                    <span class="muted">${escape(p.detalle)} · ${escape(p.donde)}</span>
+                </span>
+                <input type="checkbox" data-permiso="${p.clave}"${activos[p.clave] ? ' checked' : ''}>
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+        `).join('');
+
+        return `<div class="paneles-lista">${filas}</div>`;
+    }
+
+    function readPermisosLista(scope) {
+        const out = {};
+        PERMISOS_PERFIL.forEach(p => {
+            const el = scope.querySelector(`#prf-permisos-wrap [data-permiso="${p.clave}"]`);
+            out[p.clave] = !!(el && el.checked);
+        });
+        return out;
     }
 
     function openProfileModal(prf, allUsuarios, allDominios) {
@@ -3921,37 +4426,82 @@
             )
         ).join('');
 
-        const rolOpts = ROLES_PERFIL.map(r =>
-            `<option value="${r.value}" ${prf?.rol === r.value ? 'selected' : ''}>${escape(r.label)}</option>`
+        const tipoOpts = TIPOS_PERFIL.map(t =>
+            `<option value="${t.value}" ${(prf?.tipo ?? 'O') === t.value ? 'selected' : ''}>${escape(t.label)}</option>`
         ).join('');
+        const activoInicial  = prf ? !!prf.activo : true;
+        // En edición el dominio está fijo (el select va disabled); en el alta
+        // arranca vacío y el selector de paneles se rearma al elegirlo.
+        const dominioInicial = prf ? prf.dominio_id : 0;
+
+        /* Permisos iniciales. EL ALTA PRE-TILDA `operacion` E `invitacion` y deja
+           `facturacion` apagada, que es exactamente el reparto con el que la
+           migración `20260907_1000` sembró los 2.227 perfiles que ya existían:
+           todos operan la app y todos invitan, y las facturas las ve quien se lo
+           gane. Un perfil nuevo que naciera sin ningún permiso sería un perfil
+           que no puede usar la app — el mismo razonamiento por el que el alta
+           pre-tilda todos los paneles del dominio. */
+        const permisosIniciales = isEdit
+            ? permisosDelPerfil(prf)
+            : { operacion: true, invitacion: true, facturacion: false };
 
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal" role="dialog" aria-modal="true">
-                <div class="modal-header">
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
                     <div class="modal-title">${isEdit ? 'Editar perfil' : 'Nuevo perfil'}</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="prf-usuario">Usuario</label>
-                        <select id="prf-usuario" ${isEdit ? 'disabled' : ''}>${usrOpts}</select>
-                        <div class="field-error" id="prf-usuario-err" style="display:none"></div>
-                    </div>
-                    <div class="form-group">
-                        <label for="prf-dominio">Dominio</label>
-                        <select id="prf-dominio" ${isEdit ? 'disabled' : ''}>${domOpts}</select>
-                        <div class="field-error" id="prf-dominio-err" style="display:none"></div>
-                    </div>
-                    <div class="form-group">
-                        <label for="prf-rol">Rol en el dominio</label>
-                        <select id="prf-rol">${rolOpts}</select>
-                    </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-ghost"   data-act="close">Cancelar</button>
-                    <button class="btn btn-primary" data-act="save">${isEdit ? 'Guardar cambios' : 'Crear perfil'}</button>
+                <div class="modal-body">
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general"  role="tab">General</button>
+                        <button type="button" class="modal-tab"        data-tab="permisos" role="tab">Permisos</button>
+                        <button type="button" class="modal-tab"        data-tab="paneles"  role="tab">Paneles</button>
+                    </div>
+                    <div class="modal-tabpanel" data-panel="general">
+                        <div class="form-group">
+                            <label for="prf-usuario">Usuario</label>
+                            <select id="prf-usuario" ${isEdit ? 'disabled' : ''}>${usrOpts}</select>
+                            <div class="field-error" id="prf-usuario-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="prf-dominio">Dominio</label>
+                            <select id="prf-dominio" ${isEdit ? 'disabled' : ''}>${domOpts}</select>
+                            <div class="field-error" id="prf-dominio-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="prf-tipo">Tipo</label>
+                            <select id="prf-tipo">${tipoOpts}</select>
+                        </div>
+                        <div class="form-group">
+                            <label>Habilitado</label>
+                            <label class="toggle-switch" style="margin-top:6px">
+                                <input type="checkbox" id="prf-activo" ${activoInicial ? 'checked' : ''}>
+                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                <span class="toggle-label" id="prf-activo-label">${activoInicial ? 'Sí' : 'No'}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="modal-tabpanel" data-panel="permisos" hidden>
+                        <div class="form-nota">
+                            Qué puede hacer este perfil, además de entrar. Son independientes
+                            del tipo y del estado: un Operador puede tener permisos y un
+                            Administrador puede no tenerlos.
+                        </div>
+                        <div id="prf-permisos-wrap" class="paneles-wrap">${permisosListaHtml(permisosIniciales)}</div>
+                    </div>
+                    <div class="modal-tabpanel" data-panel="paneles" hidden>
+                        <div id="prf-paneles-wrap" class="paneles-wrap">${panelesListaHtml(dominioInicial, prf?.paneles ?? [])}</div>
+                    </div>
                 </div>
             </div>
         `;
@@ -3968,23 +4518,59 @@
 
         const usrSel     = backdrop.querySelector('#prf-usuario');
         const domSel     = backdrop.querySelector('#prf-dominio');
-        const rolSel     = backdrop.querySelector('#prf-rol');
+        // `mostrarPestana` se guarda porque el Guardar la necesita: si la
+        // validación falla en un campo de General y el operador está parado en
+        // Paneles, hay que traerlo de vuelta o el error queda invisible.
+        const mostrarPestana = wireModalTabs(backdrop);
+
+        // El selector de paneles depende del dominio: en el alta hay que rearmarlo
+        // cada vez que cambia, porque los paneles de un dominio no son los de
+        // otro. Se re-renderiza entero y se vuelve a cablear — es más simple y
+        // más difícil de romper que ir tachando opciones.
+        const panelesWrap = backdrop.querySelector('#prf-paneles-wrap');
+        function montarPaneles(dominioId, seleccion) {
+            panelesWrap.innerHTML = panelesListaHtml(dominioId, seleccion || []);
+            wirePanelesLista(backdrop);
+        }
+        montarPaneles(dominioInicial, prf?.paneles ?? []);
+
+        const tipoSel    = backdrop.querySelector('#prf-tipo');
+        const activoChk  = backdrop.querySelector('#prf-activo');
+        const activoLbl  = backdrop.querySelector('#prf-activo-label');
         const usrErr     = backdrop.querySelector('#prf-usuario-err');
         const domErr     = backdrop.querySelector('#prf-dominio-err');
         const saveBtn    = backdrop.querySelector('[data-act="save"]');
 
-        (isEdit ? rolSel : usrSel).focus();
+        activoChk.addEventListener('change', () => {
+            activoLbl.textContent = activoChk.checked ? 'Sí' : 'No';
+        });
+
+        // Al cambiar el dominio la selección previa deja de valer: los paneles
+        // eran de otro dominio y el backend los rechazaría con 422.
+        if (!isEdit) {
+            // Todos tildados por defecto, no ninguno: es lo que hace que un perfil
+            // nuevo tenga el mismo acceso que los que sembró la migración.
+            domSel.addEventListener('change', () => {
+                const d = +domSel.value || 0;
+                montarPaneles(d, panelesDelDominio(d));
+            });
+        }
+
+        (isEdit ? tipoSel : usrSel).focus();
 
         saveBtn.addEventListener('click', async () => {
-            const rol = rolSel.value;
+            const tipo   = tipoSel.value;
+            const activo = activoChk.checked;
 
             [usrErr, domErr].forEach(el => el.style.display = 'none');
             [usrSel, domSel].forEach(el => el.classList.remove('input-invalid'));
 
+            const permisos = readPermisosLista(backdrop);
+
             if (isEdit) {
                 saveBtn.disabled = true;
                 try {
-                    await api('profiles', { method: 'PUT', body: { id: prf.id, rol } });
+                    await api('profiles', { method: 'PUT', body: { id: prf.id, tipo, activo, ...permisos, paneles: readPanelesLista(backdrop) } });
                     toast('Perfil actualizado');
                     close();
                     navigate();
@@ -4011,11 +4597,18 @@
                 domSel.classList.add('input-invalid');
                 firstInvalid = firstInvalid || domSel;
             }
-            if (firstInvalid) { firstInvalid.focus(); return; }
+            // Los dos campos que pueden fallar viven en General: si el foco
+            // está en Paneles, primero se muestra la pestaña y recién después
+            // se enfoca — enfocar un input oculto no hace nada.
+            if (firstInvalid) {
+                mostrarPestana('general');
+                firstInvalid.focus();
+                return;
+            }
 
             saveBtn.disabled = true;
             try {
-                await api('profiles', { method: 'POST', body: { usuario_id, dominio_id, rol } });
+                await api('profiles', { method: 'POST', body: { usuario_id, dominio_id, tipo, activo, ...permisos, paneles: readPanelesLista(backdrop) } });
                 toast('Perfil creado');
                 close();
                 navigate();
@@ -5594,6 +6187,1700 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
     }
+
+    /* ---------- Views: Controladores ----------
+     * Quiénes pueden entrar a Reactor Cloud. NO es el módulo Usuarios: los
+     * usuarios son los clientes finales, que entran a `app` y a `panel`; los
+     * controladores operan la plataforma y entran sólo acá. Son dos tablas
+     * separadas a propósito y ninguna deriva de la otra (ver el encabezado de
+     * cloud/api/controladores.php).
+     *
+     * A diferencia de Usuarios, el modal de edición NO precarga la contraseña
+     * vigente: `controladores.contrasena` guarda un hash bcrypt y no se puede
+     * deshacer. El campo abre vacío y vacío significa "no cambiarla".
+     */
+    const ORDEN_CONTROLADORES = [
+        { value: 'id',         label: 'Código'         },
+        { value: 'nombre',     label: 'Nombre'         },
+        { value: 'correo',     label: 'Correo'         },
+        { value: 'ingresado',  label: 'Último ingreso' },
+        { value: 'registrado', label: 'Registrado'     },
+    ];
+
+    function controladoresDefaults() {
+        return {
+            codigo: '', texto: '', estado: '', rol: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    // Catálogo de roles y combo que lo agrupa. Lo deja el render del listado,
+    // que ya los trae en el mismo GET, y lo consumen el modal de Alta/Edición y
+    // el de Filtros.
+    let controladoresCtx = { catalogos: { roles: [] } };
+
+    async function renderControladores(root) {
+        try {
+            const data = await api('controladores');
+            const r    = data.resumen;
+            const controladores = data.controladores;
+            controladoresCtx = { catalogos: data.catalogos };
+            const state = controladoresDefaults();
+
+            root.innerHTML = `
+                ${moduleHeader('Controladores', 'Las únicas personas que pueden ingresar a Reactor Cloud. No son los usuarios de app ni de panel: son dos listas separadas.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.activos}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Deshabilitados</span>
+                        <span class="stat-value red">${r.inactivos}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Nunca ingresaron</span>
+                        <span class="stat-value orange">${r.sin_acceso}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Sin roles</span>
+                        <span class="stat-value orange">${r.sin_roles}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'ctl',
+                    quickPlaceholder: 'Buscar nombre, correo o celular…',
+                    newLabel:         'Nuevo controlador',
+                })}
+                <div class="table-card" id="ctl-table"></div>
+            `;
+
+            wireControladoresView(state, controladores);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function controladorEstadoBadge(activo) {
+        return activo
+            ? '<span class="badge badge-success">Habilitado</span>'
+            : '<span class="badge badge-danger">Deshabilitado</span>';
+    }
+
+    function controladoresTableBody(controladores) {
+        if (!controladores.length) {
+            return `<div class="table-empty">Todavía no hay controladores. Creá el primero con "Nuevo controlador".</div>`;
+        }
+
+        const rows = controladores.map(c => `
+            <tr class="row-clickable" data-id="${c.id}">
+                <td><span class="td-id">#${c.id}</span></td>
+                <td class="td-nombre">${escape(c.nombre)}</td>
+                <td>${escape(c.correo)}</td>
+                <td>${c.celular ? escape(c.celular) : '<span class="muted">—</span>'}</td>
+                <td>${controladorRolesCelda(c.roles)}</td>
+                <td>${controladorEstadoBadge(c.activo)}</td>
+                <td>${c.ingresado ? formatDate(c.ingresado) : '<span class="muted">Nunca</span>'}</td>
+                <td>${formatDate(c.registrado)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Correo</th>
+                        <th>Celular</th>
+                        <th>Roles</th>
+                        <th>Estado</th>
+                        <th>Último ingreso</th>
+                        <th>Registrado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    /* Roles de la fila. Se muestran los nombres y no un contador: quién es cada
+       controlador se lee del rol, y un "3" obliga a abrir la ficha para saberlo.
+       Un rol deshabilitado va en `badge-warn` — la asignación existe pero el rol
+       está apagado, y esos dos estados son independientes. */
+    function controladorRolesCelda(roles) {
+        if (!roles || !roles.length) return '<span class="badge badge-warn">Sin roles</span>';
+
+        const TOPE = 3;
+        const vistos = roles.slice(0, TOPE).map(r =>
+            `<span class="badge ${r.activo ? 'badge-info' : 'badge-warn'}">${escape(r.nombre)}</span>`
+        ).join(' ');
+        const resto = roles.length > TOPE ? ` <span class="muted">+${roles.length - TOPE}</span>` : '';
+
+        return vistos + resto;
+    }
+
+    function wireControladoresView(state, allControladores) {
+        const tableWrap = document.getElementById('ctl-table');
+        const quick     = document.getElementById('ctl-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('ctl-filters');
+        const btnNew    = document.getElementById('ctl-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allControladores.filter(c => {
+                if (Number.isFinite(codigo) && c.id !== codigo) return false;
+                if (state.estado === 'activo'   && !c.activo) return false;
+                if (state.estado === 'inactivo' &&  c.activo) return false;
+                // `sin-rol` es su propia opción y no la ausencia de filtro:
+                // "quién quedó sin acceso" es la pregunta que más se hace acá.
+                if (state.rol === 'sin-rol' && (c.roles || []).length) return false;
+                if (state.rol && state.rol !== 'sin-rol' &&
+                    !(c.roles || []).some(r => String(r.id) === state.rol)) return false;
+                if (q && !(c.nombre + ' ' + c.correo + ' ' + (c.celular || ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = controladoresTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(c) {
+            return standardRowMenuItems({
+                view:   true, onView:   () => openControladorViewModal(c),
+                edit:   true, onEdit:   () => openControladorModal(c),
+                delete: true, onDelete: () => confirmDeleteControlador(c),
+                extra: [
+                    { act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-copy',
+                      onSelect: () => copyToClipboard(c.correo) },
+                ],
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const c  = allControladores.find(x => x.id === id);
+                if (!c) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(c), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openControladorViewModal(c));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openControladoresFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openControladorModal(null));
+
+        applyAndRender();
+    }
+
+    function openControladoresFiltersModal(state, onApply) {
+        const estOpts = [
+            `<option value=""${state.estado === '' ? ' selected' : ''}>Todos</option>`,
+            `<option value="activo"${state.estado === 'activo' ? ' selected' : ''}>Habilitados</option>`,
+            `<option value="inactivo"${state.estado === 'inactivo' ? ' selected' : ''}>Deshabilitados</option>`,
+        ].join('');
+        const ordOpts = ORDEN_CONTROLADORES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+        const rolOpts = [
+            `<option value=""${state.rol === '' ? ' selected' : ''}>Todos los roles</option>`,
+            `<option value="sin-rol"${state.rol === 'sin-rol' ? ' selected' : ''}>Sin roles asignados</option>`,
+        ].concat((controladoresCtx.catalogos.roles || []).map(r =>
+            `<option value="${r.id}"${String(r.id) === state.rol ? ' selected' : ''}>${escape(r.nombre)}</option>`
+        )).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="ctl-fm-codigo">Código</label>
+                    <input type="number" id="ctl-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="ctl-fm-texto">Buscar (nombre / correo / celular)</label>
+                    <input type="search" id="ctl-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="ctl-fm-estado">Estado</label>
+                    <select id="ctl-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ctl-fm-rol">Rol</label>
+                    <select id="ctl-fm-rol">${rolOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ctl-fm-limit">Límite</label>
+                    <input type="number" id="ctl-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="ctl-fm-orden">Ordenar por</label>
+                    <select id="ctl-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="ctl-fm-dir">Dirección</label>
+                    <select id="ctl-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo = modal.querySelector('#ctl-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#ctl-fm-texto').value.trim();
+                state.estado = modal.querySelector('#ctl-fm-estado').value;
+                state.rol    = modal.querySelector('#ctl-fm-rol').value;
+                state.orden  = modal.querySelector('#ctl-fm-orden').value;
+                state.dir    = modal.querySelector('#ctl-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#ctl-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = controladoresDefaults();
+                modal.querySelector('#ctl-fm-codigo').value = d.codigo;
+                modal.querySelector('#ctl-fm-texto').value  = d.texto;
+                modal.querySelector('#ctl-fm-estado').value = d.estado;
+                modal.querySelector('#ctl-fm-rol').value    = d.rol;
+                modal.querySelector('#ctl-fm-orden').value  = d.orden;
+                modal.querySelector('#ctl-fm-dir').value    = d.dir;
+                modal.querySelector('#ctl-fm-limit').value  = String(d.limit);
+            },
+        });
+    }
+
+    /* Roles en la ficha: la lista entera, sin tope — el modal de Consultar
+       muestra el registro completo. Los deshabilitados llevan el aviso al lado
+       en vez de un color distinto: acá hay espacio para decirlo con palabras. */
+    function controladorRolesFicha(roles) {
+        if (!roles || !roles.length) {
+            return `<span class="muted">Sin roles asignados — no va a poder operar cuando el login lea esta tabla</span>`;
+        }
+        return roles.map(r =>
+            `<span class="badge ${r.activo ? 'badge-info' : 'badge-warn'}">${escape(r.nombre)}${
+                r.activo ? '' : ' · rol deshabilitado'
+            }</span>`
+        ).join(' ');
+    }
+
+    function openControladorViewModal(ctl) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar controlador</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del controlador">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',         `<code>#${ctl.id}</code>`),
+                        viewCardHalf('Nombre',         escape(ctl.nombre)),
+                        viewCardHalf('Correo',         escape(ctl.correo)),
+                        viewCardHalf('Celular',        ctl.celular ? escape(ctl.celular) : `<span class="muted">—</span>`),
+                        viewCardHalf('Estado',         controladorEstadoBadge(ctl.activo)),
+                        // La contraseña es un hash bcrypt: el campo existe en la
+                        // tabla, así que la tarjeta va (ABM.md §Consultar pide
+                        // TODOS los campos), pero no hay valor que mostrar.
+                        viewCardHalf('Contraseña',     `<span class="muted">Guardada con hash — no se puede mostrar</span>`),
+                        viewCardHalf('Último ingreso', ctl.ingresado ? escape(formatDate(ctl.ingresado)) : `<span class="muted">Nunca ingresó</span>`),
+                        viewCardHalf('Registrado',     escape(formatDate(ctl.registrado))),
+                        // Las ocho de arriba son `half` y cierran cuatro
+                        // renglones parejos; ésta va `full` al final porque la
+                        // lista de roles no entra en media tarjeta (ABM.md
+                        // §Consultar). Agregar un campo obliga a rehacer la cuenta.
+                        viewCardFull(`Roles (${(ctl.roles || []).length})`, controladorRolesFicha(ctl.roles)),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const menubar = backdrop.querySelector('.modal-menubar');
+
+        // Sin menú "Listar": `controladores` no tiene relaciones con otras
+        // tablas — es una isla del esquema, a propósito.
+        wireMenubarMenu(menubar, 'acciones', () => [
+            { act: 'edit', label: 'Editar controlador', icon: 'fa-pencil',
+              onSelect: () => { close(); openControladorModal(ctl); } },
+            { divider: true },
+            { act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-copy',
+              onSelect: () => copyToClipboard(ctl.correo) },
+            { act: 'copy-id',     label: 'Copiar ID',     icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(ctl.id)) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar controlador', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); confirmDeleteControlador(ctl); } },
+        ]);
+    }
+
+    function openControladorModal(ctl) {
+        const isEdit = !!ctl;
+        // En el alta el toggle arranca en Habilitado: quien carga un controlador
+        // lo está cargando para que entre. La columna igual tiene DEFAULT 0, así
+        // que una fila insertada por fuera del ABM nace sin acceso.
+        const activoInicial = isEdit ? !!ctl.activo : true;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar controlador' : 'Nuevo controlador'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ctl-nombre">Nombre</label>
+                            <input type="text" id="ctl-nombre" maxlength="100" value="${escape(ctl?.nombre ?? '')}" required>
+                            <div class="field-error" id="ctl-nombre-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="ctl-correo">Correo</label>
+                            <input type="email" id="ctl-correo" maxlength="100" value="${escape(ctl?.correo ?? '')}" required>
+                            <div class="field-error" id="ctl-correo-err" style="display:none"></div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ctl-celular">Celular</label>
+                            <input type="tel" id="ctl-celular" maxlength="30"
+                                   value="${escape(ctl?.celular ?? '')}"
+                                   placeholder="+54 9 11 1234-5678">
+                            <div class="field-error" id="ctl-celular-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Habilitado</label>
+                            <label class="toggle-switch" style="margin-top:6px">
+                                <input type="checkbox" id="ctl-activo" ${activoInicial ? 'checked' : ''}>
+                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                <span class="toggle-label" id="ctl-activo-label">${activoInicial ? 'Sí' : 'No'}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="ctl-pass">
+                            Contraseña
+                            ${isEdit ? '<span class="muted" style="font-weight:400">(dejar vacío para no cambiarla)</span>' : ''}
+                        </label>
+                        <div class="input-password">
+                            <input type="password" id="ctl-pass" minlength="8" autocomplete="new-password"
+                                   placeholder="${isEdit ? 'Sin cambios' : 'Mínimo 8 caracteres'}">
+                            <button type="button" class="pass-toggle" data-act="toggle-pass"
+                                    aria-label="Mostrar contraseña" title="Mostrar contraseña">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
+                        <div class="field-error" id="ctl-pass-err" style="display:none"></div>
+                    </div>
+                    ${idPickerHtml({
+                        id:          'ctl-roles',
+                        label:       'Roles asignados',
+                        items:       controladoresCtx.catalogos.roles,
+                        selected:    (ctl?.roles ?? []).map(r => r.id),
+                        placeholder: 'Buscar rol…',
+                    })}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireIdPicker(backdrop, 'ctl-roles');
+
+        const nombreInput  = backdrop.querySelector('#ctl-nombre');
+        const correoInput  = backdrop.querySelector('#ctl-correo');
+        const celularInput = backdrop.querySelector('#ctl-celular');
+        const activoChk    = backdrop.querySelector('#ctl-activo');
+        const activoLbl    = backdrop.querySelector('#ctl-activo-label');
+        const passInput    = backdrop.querySelector('#ctl-pass');
+        const nombreErr    = backdrop.querySelector('#ctl-nombre-err');
+        const correoErr    = backdrop.querySelector('#ctl-correo-err');
+        const celularErr   = backdrop.querySelector('#ctl-celular-err');
+        const passErr      = backdrop.querySelector('#ctl-pass-err');
+        const saveBtn      = backdrop.querySelector('[data-act="save"]');
+
+        activoChk.addEventListener('change', () => {
+            activoLbl.textContent = activoChk.checked ? 'Sí' : 'No';
+        });
+
+        // Ojo del campo contraseña: alterna entre puntos y texto plano. Acá sólo
+        // sirve para revisar lo que se está tipeando — a diferencia de Usuarios,
+        // no hay contraseña vigente que revelar.
+        const passToggle = backdrop.querySelector('[data-act="toggle-pass"]');
+        passToggle.addEventListener('click', () => {
+            const mostrar = passInput.type === 'password';
+            passInput.type = mostrar ? 'text' : 'password';
+            passToggle.querySelector('i').className = mostrar ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+            const rotulo = mostrar ? 'Ocultar contraseña' : 'Mostrar contraseña';
+            passToggle.setAttribute('aria-label', rotulo);
+            passToggle.title = rotulo;
+            passInput.focus();
+        });
+
+        nombreInput.focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const nombre  = nombreInput.value.trim();
+            const correo  = correoInput.value.trim().toLowerCase();
+            const celular = celularInput.value.trim();
+            const activo  = activoChk.checked;
+            const pass    = passInput.value;
+
+            [nombreErr, correoErr, celularErr, passErr].forEach(el => el.style.display = 'none');
+            [nombreInput, correoInput, celularInput, passInput].forEach(el => el.classList.remove('input-invalid'));
+
+            let firstInvalid = null;
+            if (!nombre) {
+                nombreErr.textContent = 'El nombre es obligatorio';
+                nombreErr.style.display = 'block';
+                nombreInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || nombreInput;
+            }
+            if (!correo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+                correoErr.textContent = 'Ingresá un correo válido';
+                correoErr.style.display = 'block';
+                correoInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || correoInput;
+            }
+            if (celular !== '' && !/^[+0-9\s().-]+$/.test(celular)) {
+                celularErr.textContent = 'Solo números, espacios y los signos + ( ) - .';
+                celularErr.style.display = 'block';
+                celularInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || celularInput;
+            }
+            // El mínimo son 8 caracteres (más que los 6 de Usuarios): estas
+            // credenciales abren el backoffice entero. El máximo se cuenta en
+            // bytes y lo valida el backend — bcrypt ignora todo lo que pase de 72.
+            if (!isEdit && pass.length < 8) {
+                passErr.textContent = 'Mínimo 8 caracteres';
+                passErr.style.display = 'block';
+                passInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || passInput;
+            } else if (isEdit && pass !== '' && pass.length < 8) {
+                passErr.textContent = 'Si la cambiás, mínimo 8 caracteres';
+                passErr.style.display = 'block';
+                passInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || passInput;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = { nombre, correo, celular, activo, roles: readIdPicker(backdrop, 'ctl-roles') };
+            if (pass !== '') payload.password = pass;
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('controladores', { method: 'PUT', body: { id: ctl.id, ...payload } });
+                    toast('Controlador actualizado');
+                } else {
+                    await api('controladores', { method: 'POST', body: payload });
+                    toast('Controlador creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    // La baja no arrastra nada: `controladores` no es el lado padre de ninguna
+    // FK, así que alcanza el confirmDialog estándar (ABM.md §4.3) y no hace
+    // falta el modal de impacto que usa Usuarios. Lo único que puede rechazar
+    // el backend es dejar a cloud sin ningún controlador habilitado.
+    function confirmDeleteControlador(ctl) {
+        confirmDialog(
+            'Eliminar controlador',
+            `¿Eliminar a "${ctl.nombre}" (${ctl.correo})? Perderá el acceso a Reactor Cloud y se borrarán sus ${(ctl.roles || []).length} rol(es) asignado(s). Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('controladores?id=' + ctl.id, { method: 'DELETE' });
+                    toast('Controlador eliminado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
+    }
+
+    /* ---------- Selector de ids ----------
+     * Elegir un subconjunto de un catálogo de decenas de opciones, con buscador
+     * y contador. Lo usan dos modales de Alta/Edición: Roles (permisos, 115
+     * opciones) y Controladores (roles, 10). CSS en §34 de DESIGN.md.
+     *
+     * ES UNA LISTA PLANA, SIN GRUPOS. Los tuvo hasta el 06/09/2026, cuando
+     * agrupaba por `sistema` — la columna que repartía roles y permisos entre
+     * los tres productos del sistema histórico. Al desaparecer ese concepto
+     * (migración `20260906_1300_permisos_solo_cloud.sql`) no quedó ningún eje
+     * por el cual agrupar: los permisos son de cloud y de nadie más.
+     *
+     * Tampoco hay ya grupo `Sin catálogo`: las dos listas viven en tablas
+     * puente con FK (`roles_permisos`, `controladores_roles`), así que un id
+     * que no existe no puede estar asignado.
+     */
+    function idPickerHtml({ id, items, selected, placeholder, label, extraKey = 'extra' }) {
+        const sel = new Set((selected || []).map(Number));
+
+        const filas = (items || []).map(it => {
+            const extra = it[extraKey] || '';
+            return `
+            <label class="id-picker-item"
+                   data-busca="${escape((it.nombre + ' ' + extra + ' ' + it.id).toLowerCase())}">
+                <input type="checkbox" value="${it.id}"${sel.has(Number(it.id)) ? ' checked' : ''}>
+                <span class="id-picker-item-text">${escape(it.nombre)} <code>#${it.id}</code>${
+                    extra ? ` <span class="muted">· ${escape(extra)}</span>` : ''
+                }</span>
+            </label>`;
+        }).join('');
+
+        const cuerpo = filas
+            ? `<div class="id-picker-group">
+                   <span>${escape(label)}</span>
+                   <span class="id-picker-group-actions">
+                       <button type="button" class="btn btn-sm btn-ghost" data-act="grupo-todos">Todos</button>
+                       <button type="button" class="btn btn-sm btn-ghost" data-act="grupo-ninguno">Ninguno</button>
+                   </span>
+               </div>${filas}`
+            : `<div class="id-picker-empty">No hay opciones disponibles.</div>`;
+
+        return `
+            <div class="form-group">
+                <label for="${id}-search">${escape(label)}</label>
+                <div class="id-picker" id="${id}">
+                    <div class="id-picker-toolbar">
+                        <input type="search" id="${id}-search" placeholder="${escape(placeholder)}">
+                        <span class="id-picker-count" data-role="count"></span>
+                        <button type="button" class="btn btn-sm btn-ghost" data-act="ninguno">Limpiar</button>
+                    </div>
+                    <div class="id-picker-list">${cuerpo}</div>
+                </div>
+            </div>`;
+    }
+
+    function wireIdPicker(scope, id) {
+        const picker = scope.querySelector('#' + id);
+        if (!picker) return;
+
+        const lista  = picker.querySelector('.id-picker-list');
+        const buscar = picker.querySelector('input[type="search"]');
+        const cuenta = picker.querySelector('[data-role="count"]');
+        const items  = () => Array.from(lista.querySelectorAll('.id-picker-item'));
+
+        function refrescarCuenta() {
+            const todos  = items();
+            const activo = todos.filter(el => el.querySelector('input').checked).length;
+            cuenta.textContent = `${activo} de ${todos.length}`;
+        }
+
+        function filtrar() {
+            const q = buscar.value.trim().toLowerCase();
+            items().forEach(el => {
+                el.hidden = q !== '' && !el.dataset.busca.includes(q);
+            });
+        }
+
+        // "Todos" / "Ninguno" operan sólo sobre lo VISIBLE: con un filtro
+        // activo, tildar lo que no se ve sería una sorpresa.
+        lista.addEventListener('click', e => {
+            const btn = e.target.closest('[data-act]');
+            if (!btn) return;
+            e.preventDefault();
+            const valor = btn.dataset.act === 'grupo-todos';
+            items().filter(el => !el.hidden)
+                   .forEach(el => { el.querySelector('input').checked = valor; });
+            refrescarCuenta();
+        });
+        lista.addEventListener('change', refrescarCuenta);
+
+        picker.querySelector('[data-act="ninguno"]').addEventListener('click', () => {
+            items().forEach(el => { el.querySelector('input').checked = false; });
+            refrescarCuenta();
+        });
+
+        buscar.addEventListener('input', filtrar);
+        refrescarCuenta();
+    }
+
+    function readIdPicker(scope, id) {
+        const picker = scope.querySelector('#' + id);
+        if (!picker) return [];
+        return Array.from(picker.querySelectorAll('.id-picker-item input:checked')).map(i => +i.value);
+    }
+
+    /* ---------- Views: Roles ----------
+     * ABM de `roles`: id, nombre, habilitado, descripcion. Los permisos del rol
+     * viven en `roles_permisos` y se editan con el selector de arriba.
+     *
+     * La tabla adelgazó el 06/09/2026: `sistema`, `nivel`, `menus`, `accesos` y
+     * el varchar `permisos` se eliminaron (migración
+     * `20260906_1300_permisos_solo_cloud.sql`). Con ellas se fue la maquinaria
+     * de los ids colgados — `roles_permisos` tiene FK, así que un permiso que
+     * no existe no puede estar asignado.
+     *
+     * Borrar un rol lo bloquean `perfiles`.`rol` y `controladores_roles`.`rol`,
+     * las dos FK RESTRICT.
+     */
+    const ORDEN_ROLES = [
+        { value: 'id',                  label: 'Código'        },
+        { value: 'nombre',              label: 'Nombre'        },
+        { value: 'controladores_count', label: 'Controladores' },
+    ];
+
+    function rolesDefaults() {
+        return {
+            codigo: '', texto: '', estado: '',
+            orden: 'id', dir: 'asc', limit: 100,
+        };
+    }
+
+    // Catálogo de permisos para el modal de Alta/Edición. Lo deja el render del
+    // listado, que ya lo trae en el mismo GET.
+    let rolesCtx = { catalogos: { permisos: [] } };
+
+    async function renderRoles(root) {
+        try {
+            const data = await api('roles');
+            const r     = data.resumen;
+            const roles = data.roles;
+            rolesCtx = { catalogos: data.catalogos };
+
+            const state = rolesDefaults();
+
+            root.innerHTML = `
+                ${moduleHeader('Roles', 'Conjuntos de permisos de Reactor Cloud. Un rol agrupa lo que una persona puede ver y hacer, y se asigna a los controladores.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.habilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Deshabilitados</span>
+                        <span class="stat-value red">${r.deshabilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Sin permisos</span>
+                        <span class="stat-value orange">${r.sin_permisos}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'rol',
+                    quickPlaceholder: 'Buscar nombre o descripción…',
+                    newLabel:         'Nuevo rol',
+                })}
+                <div class="table-card" id="rol-table"></div>
+            `;
+
+            wireRolesView(state, roles);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function rolEstadoBadge(activo) {
+        return activo
+            ? '<span class="badge badge-success">Habilitado</span>'
+            : '<span class="badge badge-danger">Deshabilitado</span>';
+    }
+
+    function rolesTableBody(roles) {
+        if (!roles.length) {
+            return `<div class="table-empty">No hay roles que coincidan con el filtro.</div>`;
+        }
+
+        const rows = roles.map(r => `
+            <tr class="row-clickable" data-id="${r.id}">
+                <td><span class="td-id">#${r.id}</span></td>
+                <td class="td-nombre">${escape(r.nombre)}</td>
+                <td>${r.descripcion ? escape(r.descripcion) : '<span class="muted">—</span>'}</td>
+                <td><span class="badge ${r.permisos.length ? 'badge-info' : 'badge-warn'}">${r.permisos.length}</span></td>
+                <td><span class="badge ${r.controladores_count ? 'badge-warn' : 'badge-info'}">${r.controladores_count}</span></td>
+                <td>${rolEstadoBadge(r.activo)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Descripción</th>
+                        <th>Permisos</th>
+                        <th>Controladores</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireRolesView(state, allRoles) {
+        const tableWrap = document.getElementById('rol-table');
+        const quick     = document.getElementById('rol-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('rol-filters');
+        const btnNew    = document.getElementById('rol-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allRoles.filter(r => {
+                if (Number.isFinite(codigo) && r.id !== codigo) return false;
+                if (state.estado === 'activo'   && !r.activo) return false;
+                if (state.estado === 'inactivo' &&  r.activo) return false;
+                if (q && !(r.nombre + ' ' + (r.descripcion || '')).toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = rolesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(r) {
+            return standardRowMenuItems({
+                view:   true, onView:   () => openRolViewModal(r),
+                edit:   true, onEdit:   () => openRolModal(r),
+                delete: true, onDelete: () => confirmDeleteRol(r),
+                extra: [
+                    { act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                      onSelect: () => copyToClipboard(String(r.id)) },
+                ],
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const r  = allRoles.find(x => x.id === id);
+                if (!r) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(r), e.currentTarget);
+                });
+                tr.addEventListener('click', () => openRolViewModal(r));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(r), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openRolesFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openRolModal(null));
+
+        applyAndRender();
+    }
+
+    function openRolesFiltersModal(state, onApply) {
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="rol-fm-codigo">Código</label>
+                    <input type="number" id="rol-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="rol-fm-texto">Buscar (nombre / descripción)</label>
+                    <input type="search" id="rol-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="rol-fm-estado">Estado</label>
+                    <select id="rol-fm-estado">
+                        <option value=""${state.estado === '' ? ' selected' : ''}>Todos</option>
+                        <option value="activo"${state.estado === 'activo' ? ' selected' : ''}>Habilitados</option>
+                        <option value="inactivo"${state.estado === 'inactivo' ? ' selected' : ''}>Deshabilitados</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rol-fm-limit">Límite</label>
+                    <input type="number" id="rol-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="rol-fm-orden">Ordenar por</label>
+                    <select id="rol-fm-orden">${ORDEN_ROLES.map(o =>
+                        `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+                    ).join('')}</select>
+                </div>
+                <div class="form-group">
+                    <label for="rol-fm-dir">Dirección</label>
+                    <select id="rol-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo = modal.querySelector('#rol-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#rol-fm-texto').value.trim();
+                state.estado = modal.querySelector('#rol-fm-estado').value;
+                state.orden  = modal.querySelector('#rol-fm-orden').value;
+                state.dir    = modal.querySelector('#rol-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#rol-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = rolesDefaults();
+                modal.querySelector('#rol-fm-codigo').value = d.codigo;
+                modal.querySelector('#rol-fm-texto').value  = d.texto;
+                modal.querySelector('#rol-fm-estado').value = d.estado;
+                modal.querySelector('#rol-fm-orden').value  = d.orden;
+                modal.querySelector('#rol-fm-dir').value    = d.dir;
+                modal.querySelector('#rol-fm-limit').value  = String(d.limit);
+            },
+        });
+    }
+
+    /* Resumen de los permisos del rol para el modal de Consultar: los primeros
+       nombres resueltos contra el catálogo + cuántos quedaron. La lista entera
+       no entra en una tarjeta (los roles del legacy traen 67 permisos). */
+    function permisosResumen(ids, catalogo) {
+        if (!ids.length) return `<span class="muted">Sin permisos asignados</span>`;
+
+        const porId = new Map(catalogo.map(x => [x.id, x.nombre]));
+        const TOPE  = 12;
+        const vistos = ids.slice(0, TOPE).map(id =>
+            `<span class="badge badge-info">${escape(porId.get(id) || ('#' + id))}</span>`
+        ).join(' ');
+        const resto = ids.length > TOPE ? `<span class="muted"> +${ids.length - TOPE} más</span>` : '';
+
+        return `<div>${vistos}${resto}</div>`;
+    }
+
+    function openRolViewModal(rol) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar rol</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del rol">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código', `<code>#${rol.id}</code>`),
+                        viewCardHalf('Estado', rolEstadoBadge(rol.activo)),
+                        // Ranura impar a propósito: la tarjeta ancha acá deja los
+                        // bloques de arriba y de abajo cerrando de a dos
+                        // (ABM.md §Consultar).
+                        viewCardFull('Nombre', escape(rol.nombre)),
+                        viewCardHalf('Controladores con este rol', `<span class="badge ${rol.controladores_count ? 'badge-warn' : 'badge-info'}">${rol.controladores_count}</span>`),
+                        viewCardHalf('Permisos', `<span class="badge ${rol.permisos.length ? 'badge-info' : 'badge-warn'}">${rol.permisos.length}</span>`),
+                        viewCardFull('Descripción', rol.descripcion ? escape(rol.descripcion) : `<span class="muted">Sin descripción</span>`),
+                        viewCardFull(`Permisos (${rol.permisos.length})`, permisosResumen(rol.permisos, rolesCtx.catalogos.permisos)),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => [
+            { act: 'edit', label: 'Editar rol', icon: 'fa-pencil',
+              onSelect: () => { close(); openRolModal(rol); } },
+            { divider: true },
+            { act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(rol.id)) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar rol', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); confirmDeleteRol(rol); } },
+        ]);
+    }
+
+    function openRolModal(rol) {
+        const isEdit = !!rol;
+        const activoInicial = isEdit ? !!rol.activo : true;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar rol' : 'Nuevo rol'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rol-nombre">Nombre</label>
+                            <input type="text" id="rol-nombre" maxlength="255" value="${escape(rol?.nombre ?? '')}" required>
+                            <div class="field-error" id="rol-nombre-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Habilitado</label>
+                            <label class="toggle-switch" style="margin-top:6px">
+                                <input type="checkbox" id="rol-activo" ${activoInicial ? 'checked' : ''}>
+                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                <span class="toggle-label" id="rol-activo-label">${activoInicial ? 'Sí' : 'No'}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="rol-descripcion">Descripción</label>
+                        <textarea id="rol-descripcion" maxlength="1000" placeholder="Opcional">${escape(rol?.descripcion ?? '')}</textarea>
+                    </div>
+                    ${idPickerHtml({
+                        id:          'rol-permisos',
+                        label:       'Permisos',
+                        items:       rolesCtx.catalogos.permisos,
+                        selected:    rol?.permisos ?? [],
+                        placeholder: 'Buscar permiso…',
+                    })}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireIdPicker(backdrop, 'rol-permisos');
+
+        const nombreInput = backdrop.querySelector('#rol-nombre');
+        const descInput   = backdrop.querySelector('#rol-descripcion');
+        const activoChk   = backdrop.querySelector('#rol-activo');
+        const activoLbl   = backdrop.querySelector('#rol-activo-label');
+        const nombreErr   = backdrop.querySelector('#rol-nombre-err');
+        const saveBtn     = backdrop.querySelector('[data-act="save"]');
+
+        activoChk.addEventListener('change', () => {
+            activoLbl.textContent = activoChk.checked ? 'Sí' : 'No';
+        });
+
+        nombreInput.focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const nombre = nombreInput.value.trim();
+
+            nombreErr.style.display = 'none';
+            nombreInput.classList.remove('input-invalid');
+
+            if (!nombre) {
+                nombreErr.textContent = 'El nombre es obligatorio';
+                nombreErr.style.display = 'block';
+                nombreInput.classList.add('input-invalid');
+                nombreInput.focus();
+                return;
+            }
+
+            const payload = {
+                nombre,
+                descripcion: descInput.value.trim(),
+                activo:      activoChk.checked,
+                permisos:    readIdPicker(backdrop, 'rol-permisos'),
+            };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('roles', { method: 'PUT', body: { id: rol.id, ...payload } });
+                    toast('Rol actualizado');
+                } else {
+                    await api('roles', { method: 'POST', body: payload });
+                    toast('Rol creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    // `perfiles`.`rol` y `controladores_roles`.`rol` son FK RESTRICT que no
+    // resolvemos por nuestra cuenta, así que el borrado se puede bloquear: se
+    // pide el desglose al backend y se muestra un modal que, si hay bloqueo, NO
+    // ofrece el botón de confirmar (ABM.md §Eliminar / DESIGN.md §15.1).
+    async function confirmDeleteRol(rol) {
+        let impacto;
+        try {
+            impacto = await api('roles?impacto=1&id=' + encodeURIComponent(rol.id));
+        } catch (e) {
+            toast(e.message, 'error');
+            return;
+        }
+
+        const bloqueos = impacto.bloqueos || [];
+
+        if (!bloqueos.length) {
+            confirmDialog(
+                'Eliminar rol',
+                `¿Eliminar el rol "${rol.nombre}" (#${rol.id})? Ningún controlador lo tiene asignado. Esta acción no se puede deshacer.`,
+                async () => {
+                    try {
+                        await api('roles?id=' + rol.id, { method: 'DELETE' });
+                        toast('Rol eliminado');
+                        navigate();
+                    } catch (e) {
+                        toast(e.message, { error: true, duration: 6000 });
+                    }
+                }
+            );
+            return;
+        }
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Eliminar rol</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se intentó eliminar el rol <strong>${escape(rol.nombre)}</strong> <code>#${rol.id}</code>.
+                    </div>
+                    <div class="del-blocker">
+                        <i class="fa-solid fa-ban"></i>
+                        <div>
+                            <strong>No se puede eliminar todavía.</strong>
+                            <ul class="del-list">${bloqueos.map(b => `
+                                <li class="del-item">
+                                    <span class="del-item-label">${escape(b.etiqueta)}</span>
+                                    <span class="badge badge-danger">${b.cantidad}</span>
+                                </li>`).join('')}</ul>
+                            Sacale este rol a esos controladores desde el módulo Controladores
+                            y volvé a intentar.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cerrar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+    }
+
+    /* ---------- Views: Permisos ----------
+     * ABM de `permisos`: id, nombre, descripcion. `nombre` es la ruta del
+     * permiso dentro del menú, con ` > ` de separador — no es una etiqueta
+     * libre.
+     *
+     * La columna `sistema` (A/C/P) se eliminó el 06/09/2026: los permisos son de
+     * cloud y de nadie más, así que no hay nada que repartir entre productos.
+     *
+     * Quien los consume es `roles_permisos`, con FK y `ON DELETE CASCADE`: al
+     * borrar un permiso sus asignaciones se van solas. El modal de baja igual
+     * lista a qué roles va a tocar, porque perder un permiso les cambia el
+     * alcance.
+     */
+    const ORDEN_PERMISOS = [
+        { value: 'slug',        label: 'Slug'   },
+        { value: 'id',          label: 'Código' },
+        { value: 'nombre',      label: 'Nombre' },
+        { value: 'roles_count', label: 'Roles'  },
+    ];
+
+    /* Slug propuesto a partir del nombre, con la MISMA regla que sembró la
+       migración `20260906_1400_permisos_slug.sql`: minúsculas, ` > ` a `.`,
+       espacios a `-`, acentos a ASCII. Si las dos reglas se separan, un permiso
+       creado desde el ABM no se parece a los 113 que ya están.
+       Es sólo una propuesta: el slug es editable y en edición no se recalcula. */
+    function slugificar(nombre) {
+        return (nombre || '')
+            // \u0300-\u036f son las marcas diacríticas que NFD separa de su
+            // letra. Van escapadas y no como literales: pegadas en el archivo
+            // son caracteres invisibles que cualquier editor puede comerse.
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/\s*>\s*/g, '.')
+            .trim()
+            .replace(/[^a-z0-9.]+/g, '-')
+            .replace(/^[.-]+|[.-]+$/g, '');
+    }
+
+    function permisosDefaults() {
+        return {
+            codigo: '', texto: '', uso: '',
+            orden: 'id', dir: 'asc', limit: 100,
+        };
+    }
+
+    async function renderPermisos(root) {
+        try {
+            const data = await api('permisos');
+            const r        = data.resumen;
+            const permisos = data.permisos;
+
+            const state = permisosDefaults();
+
+            root.innerHTML = `
+                ${moduleHeader('Permisos', 'Cada permiso es una acción o una pantalla de Reactor Cloud que un rol puede habilitar.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">En uso</span>
+                        <span class="stat-value green">${r.en_uso}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Sin uso en roles</span>
+                        <span class="stat-value orange">${r.sin_uso}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'per',
+                    quickPlaceholder: 'Buscar slug, nombre o descripción…',
+                    newLabel:         'Nuevo permiso',
+                })}
+                <div class="table-card" id="per-table"></div>
+            `;
+
+            wirePermisosView(state, permisos);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function permisosTableBody(permisos) {
+        if (!permisos.length) {
+            return `<div class="table-empty">No hay permisos que coincidan con el filtro.</div>`;
+        }
+
+        const rows = permisos.map(p => `
+            <tr class="row-clickable" data-id="${p.id}">
+                <td><span class="td-id">#${p.id}</span></td>
+                <td><code>${escape(p.slug)}</code></td>
+                <td class="td-nombre">${escape(p.nombre)}</td>
+                <td>${p.descripcion ? escape(p.descripcion) : '<span class="muted">—</span>'}</td>
+                <td><span class="badge ${p.roles_count ? 'badge-info' : 'badge-warn'}">${p.roles_count}</span></td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Slug</th>
+                        <th>Nombre</th>
+                        <th>Descripción</th>
+                        <th>Roles</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wirePermisosView(state, allPermisos) {
+        const tableWrap = document.getElementById('per-table');
+        const quick     = document.getElementById('per-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('per-filters');
+        const btnNew    = document.getElementById('per-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allPermisos.filter(p => {
+                if (Number.isFinite(codigo) && p.id !== codigo) return false;
+                if (state.uso === 'usado'   && p.roles_count === 0) return false;
+                if (state.uso === 'sin-uso' && p.roles_count > 0)   return false;
+                if (q && !(p.slug + ' ' + p.nombre + ' ' + (p.descripcion || '')).toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = permisosTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(p) {
+            return standardRowMenuItems({
+                view:   true, onView:   () => openPermisoViewModal(p),
+                edit:   true, onEdit:   () => openPermisoModal(p),
+                delete: true, onDelete: () => confirmDeletePermiso(p),
+                extra: [
+                    { act: 'copy-id',     label: 'Copiar ID',     icon: 'fa-hashtag',
+                      onSelect: () => copyToClipboard(String(p.id)) },
+                    { act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                      onSelect: () => copyToClipboard(p.nombre) },
+                ],
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const p  = allPermisos.find(x => x.id === id);
+                if (!p) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(p), e.currentTarget);
+                });
+                tr.addEventListener('click', () => openPermisoViewModal(p));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(p), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openPermisosFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openPermisoModal(null));
+
+        applyAndRender();
+    }
+
+    function openPermisosFiltersModal(state, onApply) {
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="per-fm-codigo">Código</label>
+                    <input type="number" id="per-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="per-fm-texto">Buscar (slug / nombre / descripción)</label>
+                    <input type="search" id="per-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="per-fm-uso">Uso en roles</label>
+                    <select id="per-fm-uso">
+                        <option value=""${state.uso === '' ? ' selected' : ''}>Todos</option>
+                        <option value="usado"${state.uso === 'usado' ? ' selected' : ''}>Usados por algún rol</option>
+                        <option value="sin-uso"${state.uso === 'sin-uso' ? ' selected' : ''}>Sin uso</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="per-fm-limit">Límite</label>
+                    <input type="number" id="per-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="per-fm-orden">Ordenar por</label>
+                    <select id="per-fm-orden">${ORDEN_PERMISOS.map(o =>
+                        `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+                    ).join('')}</select>
+                </div>
+                <div class="form-group">
+                    <label for="per-fm-dir">Dirección</label>
+                    <select id="per-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo = modal.querySelector('#per-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#per-fm-texto').value.trim();
+                state.uso    = modal.querySelector('#per-fm-uso').value;
+                state.orden  = modal.querySelector('#per-fm-orden').value;
+                state.dir    = modal.querySelector('#per-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#per-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = permisosDefaults();
+                modal.querySelector('#per-fm-codigo').value = d.codigo;
+                modal.querySelector('#per-fm-texto').value  = d.texto;
+                modal.querySelector('#per-fm-uso').value    = d.uso;
+                modal.querySelector('#per-fm-orden').value  = d.orden;
+                modal.querySelector('#per-fm-dir').value    = d.dir;
+                modal.querySelector('#per-fm-limit').value  = String(d.limit);
+            },
+        });
+    }
+
+    function openPermisoViewModal(per) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar permiso</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del permiso">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código', `<code>#${per.id}</code>`),
+                        viewCardHalf('Roles que lo usan', `<span class="badge ${per.roles_count ? 'badge-info' : 'badge-warn'}">${per.roles_count}</span>`),
+                        // Ranura impar a propósito (ABM.md §Consultar): con la
+                        // ancha acá, los bloques de arriba y de abajo cierran de
+                        // a dos.
+                        viewCardFull('Slug', `<code>${escape(per.slug)}</code>`),
+                        viewCardFull('Nombre', escape(per.nombre)),
+                        viewCardFull('Descripción', per.descripcion ? escape(per.descripcion) : `<span class="muted">Sin descripción</span>`),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => [
+            { act: 'edit', label: 'Editar permiso', icon: 'fa-pencil',
+              onSelect: () => { close(); openPermisoModal(per); } },
+            { divider: true },
+            { act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+              onSelect: () => copyToClipboard(per.nombre) },
+            { act: 'copy-id',     label: 'Copiar ID',     icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(per.id)) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar permiso', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); confirmDeletePermiso(per); } },
+        ]);
+    }
+
+    function openPermisoModal(per) {
+        const isEdit = !!per;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar permiso' : 'Nuevo permiso'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="per-nombre">
+                            Nombre
+                            <span class="muted" style="font-weight:400">(ruta en el menú, con <code>&gt;</code> de separador)</span>
+                        </label>
+                        <input type="text" id="per-nombre" maxlength="255"
+                               value="${escape(per?.nombre ?? '')}"
+                               placeholder="Usuarios &gt; Consultar" required>
+                        <div class="field-error" id="per-nombre-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="per-slug">
+                            Slug
+                            <span class="muted" style="font-weight:400">${isEdit
+                                ? '(lo usa el código para pedir este permiso: cambiarlo rompe las condiciones que ya lo referencian)'
+                                : '(lo usa el código para pedir este permiso; se propone desde el nombre)'}</span>
+                        </label>
+                        <input type="text" id="per-slug" maxlength="150"
+                               style="font-family:monospace"
+                               value="${escape(per?.slug ?? '')}"
+                               placeholder="usuarios.consultar" required>
+                        <div class="field-error" id="per-slug-err" style="display:none"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="per-descripcion">Descripción</label>
+                        <textarea id="per-descripcion" maxlength="255" placeholder="Opcional">${escape(per?.descripcion ?? '')}</textarea>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const nombreIn  = backdrop.querySelector('#per-nombre');
+        const slugIn    = backdrop.querySelector('#per-slug');
+        const descIn    = backdrop.querySelector('#per-descripcion');
+        const nombreErr = backdrop.querySelector('#per-nombre-err');
+        const slugErr   = backdrop.querySelector('#per-slug-err');
+        const saveBtn   = backdrop.querySelector('[data-act="save"]');
+
+        // El slug se propone desde el nombre SÓLO en el alta y SÓLO mientras el
+        // operador no lo haya tocado. En edición no se recalcula nunca: es un
+        // identificador, y regenerarlo al corregir una tilde del nombre rompería
+        // en silencio todas las condiciones que ya lo referencian.
+        let slugTocado = isEdit || (per?.slug ?? '') !== '';
+        slugIn.addEventListener('input', () => { slugTocado = true; });
+        nombreIn.addEventListener('input', () => {
+            if (!slugTocado) slugIn.value = slugificar(nombreIn.value);
+        });
+
+        nombreIn.focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const nombre = nombreIn.value.trim();
+            const slug   = slugIn.value.trim().toLowerCase();
+
+            [nombreErr, slugErr].forEach(el => el.style.display = 'none');
+            [nombreIn, slugIn].forEach(el => el.classList.remove('input-invalid'));
+
+            let firstInvalid = null;
+            if (!nombre) {
+                nombreErr.textContent = 'El nombre es obligatorio';
+                nombreErr.style.display = 'block';
+                nombreIn.classList.add('input-invalid');
+                firstInvalid = firstInvalid || nombreIn;
+            }
+            // Mismo patrón que valida el backend: minúsculas, dígitos, `.` y `-`,
+            // sin empezar ni terminar en separador.
+            if (!/^[a-z0-9]+([.-][a-z0-9]+)*$/.test(slug)) {
+                slugErr.textContent = slug
+                    ? 'Sólo minúsculas, números, puntos y guiones (ej.: usuarios.consultar)'
+                    : 'El slug es obligatorio';
+                slugErr.style.display = 'block';
+                slugIn.classList.add('input-invalid');
+                firstInvalid = firstInvalid || slugIn;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = { slug, nombre, descripcion: descIn.value.trim() };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('permisos', { method: 'PUT', body: { id: per.id, ...payload } });
+                    toast('Permiso actualizado');
+                } else {
+                    await api('permisos', { method: 'POST', body: payload });
+                    toast('Permiso creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    // Borrar un permiso lo limpia de `roles_permisos` la propia FK (CASCADE),
+    // pero el modal igual lista a qué roles va a tocar: perder un permiso les
+    // cambia el alcance (ABM.md §Eliminar).
+    async function confirmDeletePermiso(per) {
+        let impacto;
+        try {
+            impacto = await api('permisos?impacto=1&id=' + encodeURIComponent(per.id));
+        } catch (e) {
+            toast(e.message, 'error');
+            return;
+        }
+
+        const roles = impacto.roles || [];
+
+        if (!roles.length) {
+            confirmDialog(
+                'Eliminar permiso',
+                `¿Eliminar el permiso "${per.nombre}" (#${per.id})? Ningún rol lo usa. Esta acción no se puede deshacer.`,
+                () => borrarPermiso(per)
+            );
+            return;
+        }
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header">
+                    <div class="modal-title">Eliminar permiso</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el permiso
+                        <strong>${escape(per.nombre)}</strong> <code>#${per.id}</code>.
+                    </div>
+                    <div class="del-section">
+                        <div class="del-section-title del-warn">
+                            <i class="fa-solid fa-link-slash"></i> Se conservarán, sin este permiso
+                        </div>
+                        <ul class="del-list">${roles.map(r => `
+                            <li class="del-item">
+                                <span class="del-item-label">${escape(r.nombre)} <code>#${r.id}</code></span>
+                                <span class="badge badge-warn">rol</span>
+                            </li>`).join('')}</ul>
+                    </div>
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" data-act="close">Cancelar</button>
+                    <button class="btn btn-danger" data-act="ok">Eliminar permiso</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.querySelector('[data-act="ok"]').addEventListener('click', e => {
+            e.currentTarget.disabled = true;
+            close();
+            borrarPermiso(per);
+        });
+    }
+
+    async function borrarPermiso(per) {
+        try {
+            await api('permisos?id=' + per.id, { method: 'DELETE' });
+            toast('Permiso eliminado');
+            navigate();
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
 
     /* ---------- Views: Herramientas ---------- */
     // Orden alfabético por título (crear_modulo_herramientas). Cuando agregues

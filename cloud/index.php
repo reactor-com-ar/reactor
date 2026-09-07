@@ -152,6 +152,25 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                 </div>
             </div>
 
+            <div class="nav-group-wrap" data-group="seguridad">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <i class="fa-solid fa-shield-halved nav-icon"></i>
+                    <span class="nav-group-label">Seguridad</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/controladores" data-route="controladores" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-user-shield nav-icon"></i> Controladores
+                    </a>
+                    <a href="#/roles" data-route="roles" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-user-tag nav-icon"></i> Roles
+                    </a>
+                    <a href="#/permisos" data-route="permisos" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-key nav-icon"></i> Permisos
+                    </a>
+                </div>
+            </div>
+
             <div class="nav-group-wrap" data-group="administracion">
                 <button type="button" class="nav-item nav-group-toggle">
                     <i class="fa-solid fa-screwdriver-wrench nav-icon"></i>

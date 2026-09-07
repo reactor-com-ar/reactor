@@ -319,6 +319,9 @@ textarea { resize: vertical; min-height: 60px; }
 .form-row    { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-row-3  { grid-template-columns: repeat(3, 1fr); }
 .form-row-4  { grid-template-columns: repeat(4, 1fr); }
+/* Un <form> dentro del `.modal-body` es hijo unico, asi que el gap del body no
+ * separa nada: el form tiene que repartir el aire entre sus propios grupos. */
+.form-stack  { display: flex; flex-direction: column; gap: 16px; }
 .form-group  { display: flex; flex-direction: column; gap: 5px; }
 .form-group label { font-size: .8rem; font-weight: 600; color: var(--muted); }
 .form-group input,
@@ -535,6 +538,52 @@ th.action-col, td.action-col {
     display: flex; align-items: center; justify-content: space-between;
 }
 .modal-title  { font-size: 1rem; font-weight: 700; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+
+/* Barra de titulo pintada en primario: identifica la ficha con el mismo rojo
+ * del chrome (sidebar + topbar). Los hijos pasan a blanco y opacidades de
+ * blanco -- NO a --text / --muted / --border, que estan calibrados contra el
+ * gris del modal y sobre el rojo se ensucian. El radio superior lo repite el
+ * header porque es el que ahora pinta esa esquina, y es mas baja que el header
+ * clasico (20/16) porque arriba solo hay texto. */
+.modal-header-primary {
+    background: var(--primary); border-bottom: none; color: #fff;
+    border-radius: 14px 14px 0 0;
+    padding: 10px 24px;
+}
+.modal-header-primary .modal-title       { color: #fff; }
+.modal-header-primary .muted             { color: rgba(255,255,255,.75); }
+.modal-header-primary .btn-icon-sm       { color: #fff; }
+.modal-header-primary .btn-icon-sm:hover { background: rgba(255,255,255,.18); color: #fff; }
+
+/* Barra de acciones bajo el titulo: reemplaza al footer. Todos los botones del
+ * modal viven aca. Los desplegables se abren con el ctx-menu flotante
+ * (`position: fixed`), no con un dropdown absoluto: el `.modal` lleva
+ * `overflow: hidden` y recortaria cualquier hijo absoluto que se pase. */
+.modal-menubar {
+    flex: 0 0 auto;
+    /* 14px arriba y abajo: con `btn-sm` (~30px) los botones quedaban tocando
+     * el rojo de arriba y la divisoria de abajo. La separacion ENTRE botones
+     * es el `gap`, que no cambia. */
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
+    /* Gris intermedio entre los dos tokens que ya conviven en el modal --bg y
+     * --surface. La mezcla es ENTRE TOKENS, no contra #000: si cambia el tema,
+     * el tono intermedio lo sigue solo. */
+    background: color-mix(in srgb, var(--surface) 40%, var(--bg));
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+/* Los call sites pasan sus botones sin `btn-sm`: la barra los normaliza sola,
+ * asi ninguno se olvida de achicarlos y quedan todos del mismo alto. */
+.modal-menubar .btn {
+    white-space: nowrap;
+    padding: 5px 12px; font-size: .8rem;
+}
+/* La salida va rellena con el gris del cuerpo (--surface), no transparente: la
+ * franja es mas oscura y un ghost sin fondo se leia como un hueco al lado de
+ * los rojos. El hover sube un escalon en vez de bajar al color de la franja. */
+.modal-menubar .btn-ghost       { background: var(--surface); color: var(--text); }
+.modal-menubar .btn-ghost:hover { background: var(--row-hover); color: var(--text); }
+.modal-menubar-end  { margin-left: auto; }
+.menubar-caret      { font-size: .7em; opacity: .65; margin-left: 2px; }
 .modal-body   {
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
     padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;
@@ -698,6 +747,69 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 /* Contenedor que un panel rellena por AJAX: repite la columna con gap del
    panel para que el contenido cargado no quede pegado entre sí. */
 .modal-tabpanel-body { display: flex; flex-direction: column; gap: 16px; }
+
+/* ---------- 11g. Nota al pie de un campo ----------
+ * Aclaracion tenue debajo de un control de formulario, para lo que el label no
+ * alcanza a decir (que `tipo` no reparte permisos, que sin paneles tildados el
+ * perfil no ve ninguno). NO es `.field-error`: eso es rojo y aparece solo
+ * cuando algo fallo; esto esta siempre y es contexto, no alarma.
+ * Vive dentro del `.form-group`, que ya reparte 5px de gap. */
+.form-nota { font-size: .78rem; color: var(--muted); line-height: 1.45; }
+.form-nota strong { color: var(--text); font-weight: 600; }
+
+/* ---------- 11h. Toggle switch ----------
+ * Portado de cloud (§17 de su hoja) para el editor de perfiles. El `input` esta
+ * oculto y el estado lo pinta el HERMANO INMEDIATO `.toggle-track`: por eso el
+ * markup es siempre `input` + `.toggle-track` pegados, sin ningun nodo en el
+ * medio, o el switch queda siempre apagado. */
+.toggle-switch { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; }
+.toggle-switch input { display: none; }
+.toggle-track  {
+    width: 44px; height: 24px; border-radius: 12px;
+    background: var(--border); position: relative; transition: background .2s;
+    flex: 0 0 auto;
+}
+.toggle-switch input:checked + .toggle-track { background: var(--primary); }
+.toggle-thumb  {
+    position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; transition: transform .2s;
+    box-shadow: 0 1px 4px rgba(0,0,0,.2);
+}
+.toggle-switch input:checked + .toggle-track .toggle-thumb { transform: translateX(20px); }
+.toggle-label { font-size: .9rem; color: var(--text); }
+/* Un switch deshabilitado se ve pero no se toca (el perfil de la propia
+   sesion): se atenua entero y pierde el cursor de mano. */
+.toggle-switch:has(input:disabled) { opacity: .55; cursor: not-allowed; }
+
+/* ---------- 11i. Lista de paneles del perfil ----------
+ * Pestaña `Paneles` del editor de perfiles: un switch por panel del dominio,
+ * sin buscador. El catalogo son los paneles de UN dominio —el mas grande de la
+ * base tiene 7—, asi que un buscador sobre siete filas seria ruido.
+ *
+ * La fila ES el `.toggle-switch`: el `label` envuelve nombre + input + track, y
+ * asi hereda el flex, el cursor y el pintado de arriba. Lo unico que agrega
+ * esta seccion es el reparto horizontal — `flex: 1` en el nombre es lo que
+ * empuja el switch contra el borde derecho. */
+.paneles-wrap     { display: flex; flex-direction: column; gap: 12px; }
+.paneles-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.paneles-lista    {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); overflow: hidden;
+}
+.paneles-lista .panel-item               { padding: 9px 12px; }
+.paneles-lista .panel-item + .panel-item { border-top: 1px solid var(--border); }
+.paneles-lista .panel-item:hover         { background: var(--row-hover); }
+/* `min-width: 0` deja que un nombre largo corte en vez de desbordar la caja. */
+.panel-item-nombre      { flex: 1 1 auto; min-width: 0; font-size: .88rem;
+                          color: var(--text); word-break: break-word; }
+.panel-item-nombre code { font-size: .76rem; color: var(--muted); margin-left: 6px; }
+/* La misma fila la reusa la pestaña Permisos de Editar perfil, donde el
+   segundo renglon no es un `<code>` con el id sino la frase que dice QUE abre
+   el permiso: va en bloque abajo, no colgada al lado del nombre. */
+.panel-item-nombre .muted { display: block; margin-top: 2px; font-size: .78rem; }
+.paneles-vacio    { padding: 16px 12px; text-align: center;
+                    color: var(--muted); font-size: .85rem; }
 
 /* ---------- 11f. Grafico de nivel de señal (Consultar dispositivo) ----------
  * Serie temporal: eje X = tiempo en horas, eje Y = nivel en dBm sobre la

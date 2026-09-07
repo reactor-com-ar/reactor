@@ -5,9 +5,11 @@ declare(strict_types=1);
 /**
  * Modulo Usuarios: ABM de los PERFILES del dominio (esquema en db/schema.sql).
  *
- *   GET    api/usuarios.php            -> listado + resumen + roles del dominio
- *   GET    api/usuarios.php?id=N       -> un perfil (con los datos de su cuenta)
- *   PUT    api/usuarios.php            -> {id, habilitado}: habilita / deshabilita
+ *   GET    api/usuarios.php            -> listado + resumen
+ *   GET    api/usuarios.php?id=N       -> un perfil (con los datos de su cuenta,
+ *                                         sus paneles y el catalogo del dominio)
+ *   PUT    api/usuarios.php            -> {id, tipo?, habilitado?, paneles?,
+ *                                          operacion?, invitacion?, facturacion?}
  *   DELETE api/usuarios.php?id=N       -> elimina el PERFIL (el acceso), no la cuenta
  *
  * LA FILA ES UN PERFIL, NO UN USUARIO, y esa es la decision de fondo. Lo que el
@@ -36,9 +38,48 @@ declare(strict_types=1);
  * guarda con el cifrado historico (reactor_legacy_encriptar), que es
  * reversible con la clave global — exponerla seria filtrarla en claro.
  *
- * NO HAY ALTA NI EDICION. El alta es una invitacion (POST api/invitaciones.php:
- * la cuenta y el perfil los crea el propio invitado al aceptar) y los datos de
- * la persona los administra su cuenta, no este modulo.
+ * NO HAY ALTA. El alta es una invitacion (POST api/invitaciones.php: la cuenta y
+ * el perfil los crea el propio invitado al aceptar).
+ *
+ * LA EDICION NO TOCA NINGUN DATO DE LA PERSONA: `tipo`, `habilitado`, los tres
+ * permisos (`operacion` / `invitacion` / `facturacion`) y los paneles. Los datos
+ * personales (nombre, correo, celular, contrasena) son de la CUENTA y los
+ * administra su duenio; el `nombre` y el `uuid` del perfil los escribe quien lo
+ * crea (la invitacion) y no se reeditan. Por eso el PUT no reescribe la fila
+ * entera: no hay ningun otro campo que el guardado pueda pisar.
+ *
+ * TODOS LOS CAMPOS SON OPCIONALES E INDEPENDIENTES. `toggleUsuario()` del front
+ * sigue mandando solo `{id, habilitado}` desde el menu de la fila, y el editor
+ * manda el resto. Lo que no viene, no se toca -- por eso se distingue con
+ * `array_key_exists` y no con `isset`: `null` tiene que llegar como "vino vacio"
+ * y no como "no vino".
+ *
+ * LOS TRES PERMISOS SOLO LOS OTORGA QUIEN YA LOS TIENE, y es la unica regla de
+ * este endpoint que mira al que edita en vez de a la fila editada. Sin ella
+ * ninguno significaria nada: cualquier administrador se daria a si mismo el que
+ * le falta en dos clicks (o a un tercero, que es lo mismo con un paso mas).
+ * Valia solo para `facturacion` hasta el 07/09/2026 -- ver el detalle en
+ * handleUpdate(). Ver requirePermisoPanel() / panelPuede() en lib/acceso.php.
+ *
+ * PANELES DEL PERFIL (`perfiles_paneles`). Dice a que paneles del dominio puede
+ * entrar el perfil desde `app`. **El permiso es explicito: sin filas, el perfil
+ * no ve NINGUN panel** -- no hay fallback a "todos". Lo hubo mientras la tabla
+ * estaba vacia, y la siembra de 20260906_1700 (3.598 filas, los 2.225 perfiles
+ * con dominio) lo volvio innecesario. Mismo criterio que cloud/api/profiles.php.
+ *
+ * `perfiles.panel` (SINGULAR) ES OTRA COSA, y el editor la toca de rebote: es la
+ * MEMORIA del ultimo panel que ese perfil abrio en `app`, y tambien el que `app`
+ * le reabre al conectarse. La escribe `app/api/paneles.php` al cambiar de panel,
+ * siempre con uno ya permitido. Revocar el permiso sobre el panel recordado la
+ * dejaria apuntando a algo que el perfil no puede abrir, asi que el guardado la
+ * limpia -- ver olvidarPanelSinPermiso().
+ *
+ * `perfiles.paneles` -- el varchar(100) del sistema historico con el formato
+ * `(1177)(1231)` -- YA NO EXISTE: la elimino
+ * `20260906_1800_perfiles_sin_permisos_ni_paneles.sql` junto con
+ * `perfiles.permisos`. Nunca se leyo desde aca y no se perdio nada: de sus
+ * 2.375 pares, 2.368 apuntaban a un panel inexistente. La fuente es la tabla
+ * puente y nada mas.
  */
 
 require __DIR__ . '/bootstrap.php';
@@ -53,7 +94,6 @@ const ORDEN_VALIDO = [
     'usuario'    => 'u.usuario',
     'nombre'     => 'u.nombre',
     'correo'     => 'u.correo',
-    'rol'        => 'r.nombre',
     'registrado' => 'u.registrado',
     'ingresado'  => 'u.ingresado',
 ];
@@ -89,7 +129,6 @@ function handleList(): void
 
     $q      = trim((string) ($_GET['q']      ?? ''));
     $codigo = (int)         ($_GET['codigo'] ?? 0);
-    $rol    = (int)         ($_GET['rol']    ?? 0);
     $estado = (string)      ($_GET['estado'] ?? 'todos');
     $limite = (int)         ($_GET['limite'] ?? 100);
     $orden  = (string)      ($_GET['orden']  ?? 'id');
@@ -105,10 +144,6 @@ function handleList(): void
     if ($codigo > 0) {
         $where[]        = 'p.id = :cod';
         $params[':cod'] = $codigo;
-    }
-    if ($rol > 0) {
-        $where[]        = 'p.rol = :rol';
-        $params[':rol'] = $rol;
     }
     if ($estado === 'habilitados') {
         $where[]         = 'p.habilitado = :hab';
@@ -131,17 +166,15 @@ function handleList(): void
     }
 
     // LEFT JOIN y no INNER: hay perfiles sin cuenta (`perfiles.usuario` NULL o
-    // con el centinela 0) y perfiles sin rol (145 en dev). Con INNER se
-    // esconderian, y esconder una fila que ademas no le sirve a nadie es
-    // justamente lo que impide limpiarla.
+    // con el centinela 0). Con INNER se esconderian, y esconder una fila que
+    // ademas no le sirve a nadie es justamente lo que impide limpiarla.
     $sql = 'SELECT p.id, p.uuid, p.nombre AS perfil_nombre, p.habilitado,
-                   p.rol, p.tipo, r.nombre AS rol_nombre,
+                   p.tipo,
                    u.id AS usuario_id, u.uuid AS usuario_uuid, u.nombre, u.usuario,
                    u.correo, u.celular, u.habilitado AS usuario_habilitado,
                    u.registrado, u.ingresado
             FROM perfiles p
             LEFT JOIN usuarios u ON u.id = p.usuario
-            LEFT JOIN roles    r ON r.id = p.rol
             WHERE ' . implode(' AND ', $where) . '
             ORDER BY ' . ORDEN_VALIDO[$orden] . ' ' . $dir . '
             LIMIT ' . $limite;
@@ -161,7 +194,6 @@ function handleList(): void
 
     json_ok([
         'perfiles' => $filas,
-        'roles'    => rolesDelDominio($dominio),
         'resumen'  => [
             'total'          => (int) $r['total'],
             'habilitados'    => (int) $r['habilitados'],
@@ -180,7 +212,8 @@ function handleGet(int $id): void
 
     $stmt = db()->prepare(
         'SELECT p.id, p.uuid, p.nombre AS perfil_nombre, p.habilitado,
-                p.rol, p.tipo, p.dominio, r.nombre AS rol_nombre,
+                p.tipo, p.dominio, p.panel,
+                p.operacion, p.invitacion, p.facturacion,
                 u.id AS usuario_id, u.uuid AS usuario_uuid, u.nombre, u.usuario,
                 u.correo, u.celular, u.habilitado AS usuario_habilitado,
                 u.autenticacion, u.registrado, u.ingresado,
@@ -188,7 +221,6 @@ function handleGet(int $id): void
                 g.nombre AS registrante_nombre
          FROM perfiles p
          LEFT JOIN usuarios u ON u.id = p.usuario
-         LEFT JOIN roles    r ON r.id = p.rol
          LEFT JOIN dominios d ON d.id = p.dominio
          LEFT JOIN usuarios g ON g.id = u.registrante
          WHERE p.id = :id AND p.dominio = :dom
@@ -200,7 +232,22 @@ function handleGet(int $id): void
         json_error('Perfil no encontrado en este dominio', 404);
     }
 
-    json_ok(['perfil' => mapPerfil($row)]);
+    $perfil            = mapPerfil($row);
+    $perfil['paneles'] = panelesDelPerfil($id);
+    // `perfiles.panel` es la MEMORIA del ultimo panel que ese perfil abrio en
+    // `app`, y tambien el que `app` reabre al conectarse con el. Viaja para que
+    // el editor pueda marcarlo en la lista: quitarle el permiso sobre ese panel
+    // borra la memoria, y eso hay que poder verlo antes de guardar.
+    $perfil['panel'] = (int) ($row['panel'] ?? 0);
+
+    // El catalogo va con la ficha y no en el listado: son los paneles de UN
+    // dominio (el de la sesion) y el mas grande de la base tiene 7, asi que
+    // mandarlo en cada fila del listado seria repetirlo hasta 1.000 veces para
+    // una pantalla que ni lo usa.
+    json_ok([
+        'perfil'    => $perfil,
+        'catalogos' => ['paneles' => array_values(catalogoPaneles($dominio))],
+    ]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -208,12 +255,14 @@ function handleGet(int $id): void
 /* ------------------------------------------------------------------ */
 
 /**
- * Unico UPDATE del modulo: toca `perfiles.habilitado` y nada mas.
+ * Unico UPDATE del modulo. Toca `tipo`, `habilitado`, los tres permisos y
+ * `perfiles_paneles`, y nada mas — ver la cabecera: el resto de la fila no es de
+ * esta pantalla.
  *
- * No reescribe la fila entera a proposito — los datos del perfil (nombre, rol,
- * tipo) los administra Reactor y los de la persona son de su cuenta, asi que
- * un PUT con payload completo solo podia romper cosas que esta pantalla no
- * muestra.
+ * TODOS LOS CAMPOS SON OPCIONALES. El menu de la fila manda solo
+ * `{id, habilitado}` (el toggle) y el editor manda el resto; lo que no viene se
+ * relee de la fila y se reescribe igual. Se detecta con `array_key_exists` y no
+ * con `isset` para que un `null` cuente como "vino vacio" y no como "no vino".
  */
 function handleUpdate(): void
 {
@@ -223,30 +272,116 @@ function handleUpdate(): void
     if ($id <= 0) {
         json_error('Codigo invalido', 422);
     }
-    if (!array_key_exists('habilitado', $in)) {
-        json_error('Falta el estado', 422);
+
+    $tocaEstado  = array_key_exists('habilitado', $in);
+    $tocaTipo    = array_key_exists('tipo', $in);
+    $tocaPaneles = array_key_exists('paneles', $in);
+    $tocaPermiso = [];
+    foreach (perfilPermisosClaves() as $permiso) {
+        $tocaPermiso[$permiso] = array_key_exists($permiso, $in);
+    }
+    if (!$tocaEstado && !$tocaTipo && !$tocaPaneles && !in_array(true, $tocaPermiso, true)) {
+        json_error('No hay nada para guardar', 422);
     }
 
-    perfilDelDominio($id, $dominio);
-    // Deshabilitar el perfil con el que se esta trabajando cierra el panel en
-    // el request siguiente: el gate de acceso lo resuelve contra la base, no
-    // contra el token (lib/acceso.php).
-    if (esPerfilDeLaSesion($id)) {
-        json_error('No podes cambiar el estado de tu propio perfil', 409);
-    }
+    $fila = perfilDelDominio($id, $dominio);
 
     // Se escribe el ENTERO 1 o 0, nunca un booleano de PHP: PDO bindea `false`
     // como cadena vacia y en la columna vieja (varchar) eso dejaba un tercer
     // valor que ninguna pantalla sabia leer. Hoy la columna es tinyint NOT NULL
     // y el motor lo rechazaria, pero el binding correcto es el entero.
-    $habilitado = !empty($in['habilitado']) ? HABILITADO : DESHABILITADO;
+    $habilitado = $tocaEstado
+        ? (!empty($in['habilitado']) ? HABILITADO : DESHABILITADO)
+        : (int) $fila['habilitado'];
 
-    $stmt = db()->prepare(
-        'UPDATE perfiles SET habilitado = :hab WHERE id = :id AND dominio = :dom'
-    );
-    $stmt->execute([':hab' => $habilitado, ':id' => $id, ':dom' => $dominio]);
+    // Deshabilitar el perfil con el que se esta trabajando cierra el panel en el
+    // request siguiente: el gate de acceso lo resuelve contra la base, no contra
+    // el token (lib/acceso.php). Es lo que ademas garantiza que el dominio nunca
+    // se quede sin ningun acceso.
+    //
+    // EL CORTE ES SOBRE EL CAMBIO DE ESTADO, NO SOBRE EL PERFIL ENTERO: `tipo` y
+    // los paneles no gatean el panel (el gate solo mira `habilitado`), asi que
+    // uno puede editar los suyos. Guardar el propio perfil con el estado tal
+    // como esta tampoco es un cambio y pasa — lo que se rechaza es apagarlo.
+    if ($habilitado !== (int) $fila['habilitado'] && esPerfilDeLaSesion($id)) {
+        json_error('No podes cambiar el estado de tu propio perfil', 409);
+    }
 
-    json_ok(['id' => $id, 'habilitado' => $habilitado === HABILITADO]);
+    $tipo    = $tocaTipo    ? validarTipo($in['tipo'])                : (string) $fila['tipo'];
+    $paneles = $tocaPaneles ? validarPaneles($in['paneles'], $dominio) : null;
+
+    // LOS PERMISOS. Cada uno se resuelve por separado: el que no vino se relee
+    // de la fila y se reescribe igual, como el resto de los campos.
+    //
+    // NINGUNO DE LOS TRES SE OTORGA NI SE QUITA SIN TENERLO. Es la unica regla
+    // del endpoint que mira al que edita en vez de a la fila editada: sin ella,
+    // un administrador sin un permiso se lo daria a si mismo (o a un tercero,
+    // que es lo mismo con un paso mas) y el permiso no significaria nada.
+    //
+    // Hasta el 07/09/2026 la regla era solo de `facturacion` — los otros dos
+    // quedaban libres porque son de `app` y quien administra el dominio reparte
+    // el acceso a la app aunque el no la use. El argumento no se sostuvo: repartir
+    // lo que uno no tiene es exactamente la escalada que el corte evita, y que el
+    // permiso se ejerza en otra pantalla no cambia quien lo esta regalando.
+    //
+    // EL CORTE ES SOBRE EL CAMBIO, no sobre el guardado, igual que el del estado
+    // del perfil propio: guardar la ficha con los permisos tal como estan pasa
+    // siempre, asi quien no tiene ninguno igual puede editar `tipo` y los paneles.
+    // El front ni siquiera los manda —no dibuja el switch que no puede otorgar—,
+    // asi que llegar aca con un cambio prohibido es un payload armado a mano.
+    $permisos = [];
+    foreach (perfilPermisosClaves() as $permiso) {
+        $previo = valorHabilitado($fila[$permiso] ?? 0);
+        $nuevo  = $tocaPermiso[$permiso] ? valorHabilitado($in[$permiso]) : $previo;
+
+        if ($nuevo !== $previo && !panelPuede($permiso)) {
+            $etiqueta = PERFIL_PERMISOS[$permiso]['etiqueta'] ?? $permiso;
+            json_error('Solo un perfil con permiso de ' . $etiqueta . ' puede otorgarlo o quitarlo', 403);
+        }
+
+        $permisos[$permiso] = $nuevo;
+    }
+
+    // La fila y sus paneles van juntos: un perfil con el estado nuevo y los
+    // paneles viejos es un acceso que nadie configuro.
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare(
+            'UPDATE perfiles
+                SET tipo = :t, habilitado = :hab,
+                    operacion = :op, invitacion = :inv, facturacion = :fac
+              WHERE id = :id AND dominio = :dom'
+        )->execute([
+            ':t'   => $tipo,
+            ':hab' => $habilitado,
+            ':op'  => $permisos['operacion'],
+            ':inv' => $permisos['invitacion'],
+            ':fac' => $permisos['facturacion'],
+            ':id'  => $id,
+            ':dom' => $dominio,
+        ]);
+
+        if ($paneles !== null) {
+            sincronizarPaneles($pdo, $id, $paneles);
+            olvidarPanelSinPermiso($pdo, $id, (int) $fila['panel'], $paneles);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    json_ok([
+        'id'          => $id,
+        'habilitado'  => $habilitado === HABILITADO,
+        'operacion'   => $permisos['operacion']   === HABILITADO,
+        'invitacion'  => $permisos['invitacion']  === HABILITADO,
+        'facturacion' => $permisos['facturacion'] === HABILITADO,
+    ]);
 }
 
 /**
@@ -261,7 +396,7 @@ function handleUpdate(): void
  *
  * `usuarios.perfil` NO se toca aca: su FK es ON DELETE SET NULL y la base lo
  * resuelve sola. Si el perfil borrado era el activo de esa cuenta, el login
- * elige otro (api/login.php -> perfilesAdministrador()).
+ * elige otro (api/login.php -> perfilesHabilitados()).
  */
 function handleDelete(): void
 {
@@ -316,8 +451,6 @@ function mapPerfil(array $r): array
         'uuid'               => (string) ($r['uuid'] ?? ''),
         'perfil_nombre'      => (string) ($r['perfil_nombre'] ?? ''),
         'habilitado'         => (int) ($r['habilitado'] ?? 0) === HABILITADO,
-        'rol'                => isset($r['rol']) && $r['rol'] !== null ? (int) $r['rol'] : null,
-        'rol_nombre'         => (string) ($r['rol_nombre'] ?? ''),
         'usuario_id'         => !empty($r['usuario_id']) ? (int) $r['usuario_id'] : null,
         'usuario_uuid'       => (string) ($r['usuario_uuid'] ?? ''),
         'usuario'            => (string) ($r['usuario'] ?? ''),
@@ -342,14 +475,178 @@ function mapPerfil(array $r): array
         }
     }
 
+    // Los tres permisos, tambien solo en el GET por id. Viajan como BOOLEANOS y
+    // no como el 1/0 crudo, igual que `habilitado`: el front no tiene que
+    // repetir el criterio de lectura de la columna.
+    foreach (perfilPermisosClaves() as $permiso) {
+        if (array_key_exists($permiso, $r)) {
+            $out[$permiso] = esHabilitado($r[$permiso]);
+        }
+    }
+
     return $out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Paneles del perfil (`perfiles_paneles`)                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Paneles HABILITADOS del dominio, indexados por id. Solo los habilitados: dar
+ * permiso sobre un panel apagado no significa nada, porque `app` no lo lista
+ * igual.
+ *
+ * Acotado al dominio de la sesion, que es lo que vuelve innecesaria la
+ * comprobacion cross-dominio que si hace cloud: un panel de otro cliente
+ * directamente no esta en el catalogo, asi que `validarPaneles()` lo rechaza
+ * por el mismo camino que un id inventado.
+ */
+function catalogoPaneles(int $dominio): array
+{
+    static $cache = [];
+    if (isset($cache[$dominio])) {
+        return $cache[$dominio];
+    }
+
+    $stmt = db()->prepare(
+        'SELECT id, nombre FROM paneles
+         WHERE dominio = :dom AND habilitado = :hab
+         ORDER BY nombre ASC, id ASC'
+    );
+    $stmt->execute([':dom' => $dominio, ':hab' => HABILITADO]);
+
+    $catalogo = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $catalogo[(int) $r['id']] = [
+            'id'     => (int) $r['id'],
+            'nombre' => (string) ($r['nombre'] ?? ''),
+        ];
+    }
+
+    return $cache[$dominio] = $catalogo;
+}
+
+/** Ids de panel asignados al perfil. */
+function panelesDelPerfil(int $id): array
+{
+    $stmt = db()->prepare('SELECT panel FROM perfiles_paneles WHERE perfil = :p ORDER BY panel ASC');
+    $stmt->execute([':p' => $id]);
+
+    return array_map('intval', array_column($stmt->fetchAll(), 'panel'));
+}
+
+/**
+ * Ids validos para ese dominio. Un id que no este en el catalogo se rechaza con
+ * 422: puede ser inexistente, estar deshabilitado o ser de otro dominio, y los
+ * tres casos son lo mismo desde aca — un permiso que esta pantalla no puede dar.
+ * Sin esta validacion, un id a mano en el payload le daria a un perfil acceso al
+ * panel de otro cliente (la base no puede expresar esa restriccion con una FK).
+ */
+function validarPaneles(mixed $entrada, int $dominio): array
+{
+    if (!is_array($entrada)) {
+        return [];
+    }
+
+    $catalogo = catalogoPaneles($dominio);
+    $ids      = [];
+    foreach ($entrada as $v) {
+        $panel = (int) $v;
+        if ($panel <= 0) {
+            continue;
+        }
+        if (!isset($catalogo[$panel])) {
+            json_error('El panel #' . $panel . ' no existe, esta deshabilitado o es de otro dominio', 422);
+        }
+        $ids[] = $panel;
+    }
+
+    return array_values(array_unique($ids));
+}
+
+/**
+ * Deja `perfiles_paneles` igual a `$paneles` para ese perfil, tocando SOLO lo
+ * que cambia. No borra y reinserta a proposito: `asignado` es la fecha en que se
+ * dio ese permiso, y reescribir la fila entera en cada guardado la volveria la
+ * fecha del ultimo `Guardar`. Mismo criterio que las otras tablas puente del
+ * repo (`sincronizarPaneles()` en cloud/api/profiles.php).
+ */
+function sincronizarPaneles(PDO $pdo, int $perfil, array $paneles): void
+{
+    $stmt = $pdo->prepare('SELECT panel FROM perfiles_paneles WHERE perfil = :p');
+    $stmt->execute([':p' => $perfil]);
+
+    $previos = array_map('intval', array_column($stmt->fetchAll(), 'panel'));
+    $agregar = array_values(array_diff($paneles, $previos));
+    $quitar  = array_values(array_diff($previos, $paneles));
+
+    if ($quitar) {
+        // Interpolar la lista es seguro: son enteros, ya casteados por
+        // validarPaneles() y comprobados contra el catalogo del dominio.
+        $ids = implode(',', array_map('intval', $quitar));
+        $pdo->prepare("DELETE FROM perfiles_paneles WHERE perfil = :p AND panel IN ($ids)")
+            ->execute([':p' => $perfil]);
+    }
+
+    if ($agregar) {
+        $ins = $pdo->prepare(
+            'INSERT INTO perfiles_paneles (perfil, panel, asignado) VALUES (:p, :pa, NOW())'
+        );
+        foreach ($agregar as $panel) {
+            $ins->execute([':p' => $perfil, ':pa' => $panel]);
+        }
+    }
+}
+
+/**
+ * Borra la memoria del ultimo panel si el guardado le quito el permiso.
+ *
+ * `perfiles.panel` NO es una columna administrativa: es el ultimo panel que ese
+ * perfil abrio en `app`, y ademas el que `app` le reabre al conectarse. La
+ * escribe `app/api/paneles.php` cada vez que la persona cambia de panel, y solo
+ * con panels que ya paso por `appPanelesDelDominio()` -- o sea que la invariante
+ * que `app` mantiene es "`panel` es siempre uno de los permitidos".
+ *
+ * ESTE ENDPOINT ES EL UNICO QUE PUEDE ROMPERLA, porque es el unico que revoca
+ * paneles desde afuera de `app`. Sin esto, destildar el panel recordado deja el
+ * puntero apuntando a algo que el perfil ya no puede abrir.
+ *
+ * SE LIMPIA A NULL Y NO AL PRIMERO DE LA LISTA. Es una memoria, no una
+ * preferencia: elegirle uno seria inventarle al perfil una decision que nadie
+ * tomo. Para la persona no cambia nada — `appPanelesDelDominio()` ya cae al
+ * primer panel permitido cuando el recordado no esta en la lista
+ * (app/lib/contexto.php), y con `panel` en 0 hace exactamente lo mismo —, asi
+ * que lo unico que se gana es no dejar un puntero que miente. NULL y no 0 es el
+ * mismo criterio con el que lo escribe `panel/invitacion/aceptar.php`: con las
+ * FK declaradas en db/schema.sql, el 0 del legacy ya no es un valor valido.
+ */
+function olvidarPanelSinPermiso(PDO $pdo, int $id, int $recordado, array $paneles): void
+{
+    if ($recordado <= 0 || in_array($recordado, $paneles, true)) {
+        return;
+    }
+
+    $pdo->prepare('UPDATE perfiles SET panel = NULL WHERE id = :id')->execute([':id' => $id]);
+}
+
+/** `tipo` es ENUM('A','O') NOT NULL: dos letras y nada mas (lib/acceso.php). */
+function validarTipo(mixed $valor): string
+{
+    $tipo = strtoupper(trim((string) $valor));
+    if ($tipo !== PERFIL_TIPO_ADMINISTRADOR && $tipo !== PERFIL_TIPO_OPERADOR) {
+        json_error('Tipo invalido', 422);
+    }
+
+    return $tipo;
 }
 
 /** Corta con 404 si el perfil no es de este dominio. Devuelve la fila. */
 function perfilDelDominio(int $id, int $dominio): array
 {
     $stmt = db()->prepare(
-        'SELECT id, usuario, habilitado FROM perfiles WHERE id = :id AND dominio = :dom LIMIT 1'
+        'SELECT id, usuario, tipo, panel, habilitado,
+                operacion, invitacion, facturacion
+         FROM perfiles WHERE id = :id AND dominio = :dom LIMIT 1'
     );
     $stmt->execute([':id' => $id, ':dom' => $dominio]);
     $row = $stmt->fetch();
@@ -368,28 +665,6 @@ function esPerfilDeLaSesion(int $id): bool
     return $id > 0 && $id === (int) ($ctx['perfil'] ?? 0);
 }
 
-/**
- * Roles presentes entre los perfiles del dominio — el catalogo del filtro.
- *
- * Sale de `perfiles` y no de la tabla `roles` entera: ofrecer un rol que no
- * tiene ninguna fila en este dominio solo da un listado vacio.
- */
-function rolesDelDominio(int $dominio): array
-{
-    $stmt = db()->prepare(
-        'SELECT DISTINCT r.id, r.nombre
-         FROM perfiles p
-         INNER JOIN roles r ON r.id = p.rol
-         WHERE p.dominio = :dom
-         ORDER BY r.nombre ASC'
-    );
-    $stmt->execute([':dom' => $dominio]);
-
-    return array_map(static fn(array $r): array => [
-        'id'     => (int) $r['id'],
-        'nombre' => (string) ($r['nombre'] ?? ''),
-    ], $stmt->fetchAll());
-}
 
 function readJson(): array
 {

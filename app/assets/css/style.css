@@ -226,8 +226,13 @@ body.has-banner .layout {
    flotante y manda `.open` (ver el media query), por eso alli se neutraliza. */
 .sidebar.oculto { margin-left: calc(-1 * var(--sidebar-w)); }
 
+/* Sin aire arriba: el primer item arranca pegado a la topbar. Aca el realce es
+   una FRANJA de lado a lado con la barra de acento a la izquierda (ver
+   `.nav-item.active`), asi que un padding superior no despega nada -- deja un
+   hueco muerto entre la topbar y el item. En cloud/ y panel/ el realce es una
+   pastilla con margen lateral y alli ese aire si hace falta. */
 .sidebar-nav {
-    padding: 12px 0;
+    padding: 0 0 12px;
     flex: 1;
 }
 

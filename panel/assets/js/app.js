@@ -842,15 +842,35 @@
         ];
     }
 
-    /* ---------- Consultar ---------- */
+    /* ---------- Consultar ----------
+     * TRES PESTAÑAS, las mismas que el editor: `General` (los datos del acceso y
+     * de la persona), `Permisos` (los tres de `perfiles`) y `Paneles` (los de
+     * `perfiles_paneles` contra el catalogo del dominio). Antes era una sola
+     * grilla con los permisos abajo de una divisoria; con la solapa cada bloque
+     * se mira por separado y la paridad de cada uno se resuelve sola.
+     *
+     * LAS TRES SALEN DEL MISMO `GET ?id=N` que ya usaba el editor —trae la
+     * ficha, los paneles del perfil y el catalogo del dominio—, asi que ninguna
+     * se carga bajo demanda: no hay una segunda consulta que ahorrar.
+     *
+     * LAS TRES SOLAPAS ESTAN SIEMPRE, aunque el perfil no tenga ningun permiso o
+     * el dominio ningun panel: ahi va un estado vacio explicito. Que una pestaña
+     * aparezca y desaparezca segun la fila hace saltar el modal y deja al que
+     * mira sin saber si falta la pestaña o si no hay dato (mismo criterio que
+     * Consultar registro de Actividad). Es la diferencia con el EDITOR, donde
+     * `Permisos` no existe si no hay ninguno para otorgar: alla la solapa vacia
+     * no seria un dato de la fila sino una pantalla sin nada que hacer. */
     async function verUsuario(id) {
-        let u;
+        let data;
         try {
-            u = (await api(`api/usuarios?id=${id}`)).perfil;
+            data = await api(`api/usuarios?id=${id}`);
         } catch (err) {
             toast(err.message, { error: true });
             return;
         }
+
+        const u        = data.perfil;
+        const catalogo = (data.catalogos && data.catalogos.paneles) || [];
 
         const badge = (ok, si, no) => ok
             ? `<span class="badge badge-success">${si}</span>`
@@ -868,19 +888,8 @@
            elimino `perfiles`.`rol`. No es un reemplazo conceptual —`tipo` es la
            columna A/O que lee el legacy, no un rol— pero es el unico atributo
            del perfil que queda ademas del nombre, y la cuenta tenia que seguir
-           siendo par.
-
-           LOS TRES PERMISOS VAN EN UN SEGUNDO BLOQUE, detras de una divisoria
-           (`.view-sep`, como en Consultar invitacion): no son atributos de la
-           persona ni del acceso en general sino lo que ese perfil PUEDE HACER, y
-           mezclarlos con el correo y las fechas los perdia en la grilla. La
-           divisoria obliga a mirar la paridad POR BLOQUE: arriba doce medias
-           (seis renglones) y abajo tres, con la primera a todo el ancho — la
-           ranura impar — para que las dos que siguen cierren de a dos. */
-        const permiso = (ok, donde) => `${badge(ok, 'Habilitado', 'Deshabilitado')}
-            <span class="muted"> · ${donde}</span>`;
-
-        const body = `<div class="view-grid">${[
+           siendo par. */
+        const general = `<div class="view-grid">${[
             viewCard('Perfil',             u.perfil_nombre ? escapeHtml(u.perfil_nombre) : ''),
             viewCard('Tipo',               u.tipo === 'A' ? 'Administrador' : (u.tipo === 'O' ? 'Operador' : '')),
             viewCard('Usuario',            u.usuario ? escapeHtml(u.usuario) : ''),
@@ -893,11 +902,83 @@
             viewCard('Registrado por',     u.registrante_nombre ? escapeHtml(u.registrante_nombre) : ''),
             viewCard('Estado del perfil',  badge(u.habilitado, 'Habilitado', 'Deshabilitado')),
             viewCard('Estado de la cuenta', badge(u.usuario_habilitado, 'Habilitada', 'Deshabilitada')),
-            '<div class="view-sep"></div>',
-            viewCard('Operación',   permiso(u.operacion,   'Usar los paneles de operación en la app'), true),
-            viewCard('Invitación',  permiso(u.invitacion,  'Invitar usuarios desde la app')),
-            viewCard('Facturación', permiso(u.facturacion, 'Ver y abonar las facturas acá')),
         ].join('')}</div>`;
+
+        /* SOLO SE LISTA EL PERMISO QUE EL PERFIL TIENE. El que no lo tiene no
+           aparece: la pestaña es lo que ese perfil PUEDE HACER, y una fila que
+           dice "Deshabilitado" ocupa el mismo lugar que una que habilita algo
+           sin agregar nada — quien consulta quiere leer de un vistazo lo que el
+           acceso abre, no descartar renglones. Sin ninguno queda el estado
+           vacio, que es lo que distingue "no tiene permisos" de "la pestaña no
+           cargo".
+
+           NO SE FILTRA POR `puede()`, a diferencia del editor: alla se esconde
+           el permiso que la sesion no tiene porque nadie otorga lo que no tiene,
+           y aca no se otorga nada — esconderlo ocultaria un dato de la fila que
+           se esta consultando.
+
+           EL TEXTO SALE DE `PERMISOS_PERFIL`, el mismo catalogo que dibuja el
+           editor: dos copias de la frase que dice que abre cada permiso se
+           desincronizan sola. Van todas `full` porque la lista tiene largo
+           variable (cero a tres) y ninguna cuenta de paridad se sostiene. */
+        const otorgados = PERMISOS_PERFIL.filter((p) => !!u[p.clave]);
+        const permisos  = otorgados.length
+            ? `<div class="view-grid">${otorgados.map((p) => viewCard(
+                   p.etiqueta,
+                   `<span class="badge badge-success">Habilitado</span><span class="muted"> · ${escapeHtml(p.detalle)}</span>`,
+                   true,
+               )).join('')}</div>`
+            : `<div class="paneles-lista">
+                   <div class="paneles-vacio">Este perfil no tiene ningún permiso habilitado.</div>
+               </div>`;
+
+        /* ACA SE LISTA EL CATALOGO ENTERO, habilitados y no: es la inversa de
+           Permisos y es a proposito. El catalogo son los paneles del dominio
+           —una lista corta y cerrada, el mas grande de la base tiene 7— y lo que
+           importa es contra que se recorta el acceso; mostrando solo los
+           permitidos, un perfil con dos de siete se lee igual que uno con dos de
+           dos. Los permisos, en cambio, son tres claves fijas que ya se conocen.
+
+           `catalogoPaneles()` trae solo los HABILITADOS del dominio (dar permiso
+           sobre un panel apagado no significa nada), asi que el badge de la
+           tarjeta habla del PERMISO DEL PERFIL sobre el panel, no del estado del
+           panel.
+
+           Con la lista impar, la primera tarjeta va `full` para que las que
+           siguen cierren de a dos: es la ranura impar que documenta
+           Dispositivos → General, resuelta acá en tiempo de dibujo porque el
+           largo depende del dominio. */
+        const asignados = new Set((u.paneles || []).map(Number));
+        const paneles   = catalogo.length
+            ? `<div class="view-grid">${catalogo.map((p, i) => viewCard(
+                   p.nombre || 'Sin nombre',
+                   `${badge(asignados.has(Number(p.id)), 'Habilitado', 'No habilitado')}
+                    <span class="muted"> · <code>#${p.id}</code></span>`,
+                   catalogo.length % 2 === 1 && i === 0,
+               )).join('')}</div>`
+            : `<div class="paneles-lista">
+                   <div class="paneles-vacio">Este dominio no tiene paneles habilitados.</div>
+               </div>`;
+
+        // Los rotulos y los iconos son los del editor (`General` / `Permisos` /
+        // `Paneles`): es la misma ficha en modo lectura y en modo edicion, y si
+        // no coincidieran se leerian como dos pantallas distintas.
+        const body = `
+            <div class="modal-tabs" role="tablist">
+                <button type="button" class="modal-tab active" data-tab="general" role="tab" aria-selected="true">
+                    <i class="fa-solid fa-circle-info"></i> General
+                </button>
+                <button type="button" class="modal-tab" data-tab="permisos" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-key"></i> Permisos
+                </button>
+                <button type="button" class="modal-tab" data-tab="paneles" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-table-columns"></i> Paneles
+                </button>
+            </div>
+            <div class="modal-tabpanel" data-panel="general"  role="tabpanel">${general}</div>
+            <div class="modal-tabpanel" data-panel="permisos" role="tabpanel" hidden>${permisos}</div>
+            <div class="modal-tabpanel" data-panel="paneles"  role="tabpanel" hidden>${paneles}</div>
+        `;
 
         // La barra suma `Editar` como boton DIRECTO y no dentro de un
         // desplegable `Acciones`: es la unica accion de la ficha, y un menu de
@@ -908,6 +989,8 @@
             wide:        'xl',
             primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
         });
+
+        montarPestanas(m.backdrop);
 
         m.backdrop.querySelector('[data-act="editar"]').addEventListener('click', () => {
             m.close();

@@ -50,8 +50,10 @@ internos de Reactor y el perfil centinela `id = 0`) por ser el menos
 privilegiado — el mismo criterio con el que `habilitado` manda a `0` lo que no
 reconoce.
 
-- **Escribir con `PERFIL_TIPO_ADMINISTRADOR` / `PERFIL_TIPO_OPERADOR`** de
-  [panel/lib/acceso.php](panel/lib/acceso.php), no con la letra suelta.
+- **Escribir con `PERFIL_TIPO_ADMINISTRADOR` / `PERFIL_TIPO_OPERADOR`**, no con
+  la letra suelta. Las declaran [panel/lib/acceso.php](panel/lib/acceso.php) y
+  [app/lib/perfiles.php](app/lib/perfiles.php) — duplicadas, como todo lo que
+  comparten las tres apps sin compartir docroot.
 - **`tipo` NO es el control de acceso y NO está alineada con `rol`.** Hay 48
   perfiles con rol Administrador y `tipo = 'O'`, y 10 al revés. El panel gatea
   por `perfiles.rol`; el sistema legacy —fuera de este repo— lee `tipo`.
@@ -112,6 +114,41 @@ de la sección anterior: se leen con `esHabilitado()`, se escriben con
   tendría el camino servido para fabricarse el permiso.
 - **Quien crea un perfil tiene que darle permisos**, igual que con
   `perfiles_paneles`: el default de la columna es `0` y un perfil sin
-  `operacion` no puede usar la app. Los dos caminos que los crean ya lo hacen
-  (el alta de cloud pre-tilda `operacion` e `invitacion`, la invitación los
-  inserta en `1`).
+  `operacion` no puede usar la app. Los **tres** caminos que los crean ya lo
+  hacen: el alta de cloud pre-tilda `operacion` e `invitación`, y las dos
+  invitaciones —la del panel y la de la app— los insertan en `1` con
+  `facturacion` en `0`.
+
+### Las dos invitaciones: la del panel crea Administradores, la de la app Operadores
+
+Son el **mismo circuito** (tabla `invitaciones`, mismo canal de correo por
+Databox, misma pantalla de aceptación) emitido desde dos lados, y lo único que
+cambia es a quién dan de alta:
+
+| | `panel/` | `app/` |
+|---|---|---|
+| dónde se emite | Usuarios → *+ Nuevo usuario* / Invitaciones | *Mi Dominio* → *Invitar un Usuario* |
+| quién puede emitirla | cualquier perfil que entre al panel (`tipo = 'A'`) | el permiso `invitacion` |
+| a dónde enlaza el correo | `panel.reactor.com.ar/invitacion/` | `app.reactor.com.ar/invitacion/` |
+| `tipo` del perfil que crea | `A` (Administrador) | **`O` (Operador)** |
+| `operacion` / `invitacion` / `facturacion` | `1` / `1` / `0` | `1` / `1` / `0` |
+
+- **El `tipo` no es simetría rota, es la razón de ser de cada una.** Al panel
+  sólo entra un Administrador, así que su invitación sólo puede significar alta
+  administrativa; la de la app significa "sumate a operar los equipos", y ahí el
+  Administrador no hace falta. Y como `tipo` la lee el sistema legacy —que sí
+  reparte permisos con ella—, poner `A` desde la app le abriría al invitado el
+  back office viejo entero sin que nadie lo decidiera.
+- **Las dos resuelven los mismos tres casos** al aceptar: sin cuenta → se crea
+  `usuarios` + `perfiles`; con cuenta y sin perfil → sólo el perfil, sin tocarle
+  contraseña ni dominio activo; con perfil habilitado en ese dominio → **no se
+  hace nada** y la invitación se cierra igual.
+- La diferencia fina está en ese tercer caso: el panel busca un perfil **de
+  Administrador** y agrega uno si el que hay es Operador (porque el suyo es el
+  `tipo` que abre la puerta), y la app se queda con **cualquier** perfil
+  habilitado que encuentre (`appPerfilAsegurado()` en
+  [app/lib/perfiles.php](app/lib/perfiles.php)) — reescribirlo le cambiaría el
+  acceso en el panel y en el legacy desde una pantalla que no administra nada.
+- **Las dos le asignan al perfil nuevo todos los paneles habilitados del
+  dominio.** No es un extra: `perfiles_paneles` no tiene fallback, así que sin
+  esas filas la persona entra a una app vacía.

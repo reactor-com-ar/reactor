@@ -219,7 +219,13 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
             ]);
         }
 
-        $perfilId = perfilAsegurado($pdo, $usuarioId, $dominioId, $dominioNombre);
+        // El emisor de la invitacion queda como `registrante` del perfil SIEMPRE,
+        // haya cuenta nueva o no. Es la diferencia con `usuarios`.`registrante`
+        // de arriba, que solo se escribe cuando la cuenta se crea aca: una
+        // cuenta que ya existia la registro otra persona en otro momento, y
+        // pisarle ese dato seria reescribir un hecho. El acceso, en cambio, lo
+        // esta otorgando esta invitacion.
+        $perfilId = perfilAsegurado($pdo, $usuarioId, $dominioId, $dominioNombre, (int) $inv['emisor']);
 
         // Solo a la cuenta nueva se le fija el perfil activo. A una cuenta que
         // ya existia no se le mueve el dominio con el que esta trabajando: el
@@ -273,8 +279,13 @@ function aceptarInvitacion(array $inv, string $nombre, string $apellido, string 
  *
  * `panel` queda en NULL y no en 0 — con las FK declaradas, el 0 del sistema
  * viejo ya no es un valor valido (ver db/schema.sql).
+ *
+ * `$registranteId` es el EMISOR de la invitacion, y va a `perfiles`.`registrante`
+ * (migracion 20260907_1100): quien otorgo este acceso. Solo se escribe cuando el
+ * perfil se CREA — si se reutiliza uno que ya estaba, ese acceso lo otorgo otro
+ * y no hay nada que anotar.
  */
-function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $dominioNombre): int
+function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $dominioNombre, int $registranteId = 0): int
 {
     $busca = $pdo->prepare(
         'SELECT id FROM perfiles
@@ -296,9 +307,11 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
 
     $alta = $pdo->prepare(
         'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo,
-                               operacion, invitacion, facturacion, habilitado)
+                               operacion, invitacion, facturacion,
+                               registrante, habilitado)
          VALUES (:uuid, :nombre, :usuario, :dominio, :tipo,
-                 :operacion, :invitacion, :facturacion, :habilitado)'
+                 :operacion, :invitacion, :facturacion,
+                 :registrante, :habilitado)'
     );
     $alta->execute([
         ':uuid'       => bin2hex(random_bytes(8)),
@@ -336,6 +349,13 @@ function perfilAsegurado(PDO $pdo, int $usuarioId, int $dominioId, string $domin
         ':operacion'   => HABILITADO,
         ':invitacion'  => HABILITADO,
         ':facturacion' => DESHABILITADO,
+        // QUIEN OTORGO ESTE ACCESO: el emisor de la invitacion. `?: null` y no
+        // el entero pelado porque la columna es una FK y el `0` del sistema
+        // historico ya no es un valor valido — mismo criterio con el que
+        // `usuarioAlta()` escribe `usuarios`.`registrante`. Una invitacion
+        // vieja sin emisor deja el perfil con NULL, que se lee como "no se
+        // sabe" (ver 20260907_1100).
+        ':registrante' => $registranteId ?: null,
         // El perfil nace habilitado. La columna es tinyint(1) NOT NULL y su
         // unico otro valor es 0 (lib/habilitado.php).
         ':habilitado' => HABILITADO,

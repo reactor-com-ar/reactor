@@ -791,7 +791,8 @@ tbody tr.row-clickable { cursor: pointer; }
 .modal-menubar-end      { margin-left: auto; }
 .menubar-caret          { font-size: .7em; opacity: .65; margin-left: 2px; }
 
-/* Variante ancha para editores monoespaciados (JSON, logs, etc.). */
+/* Variante ancha. Dos usos: editores monoespaciados (JSON, logs, etc.) y los
+ * modales de Filtros de los módulos con muchos campos (§26). */
 .modal.modal-wide { max-width: 760px; }
 
 /* Tabs dentro de un modal (ej.: Consultar usuario → General / Perfiles). */
@@ -1159,6 +1160,18 @@ th.action-col, td.action-col {
 @media (max-width: 640px) {
     .filters-grid { grid-template-columns: 1fr; }
 }
+
+/* Dentro de un modal ancho (`.modal-wide`, 520px -> 760px) la grilla pasa a
+ * tres columnas. Es el modo de los módulos con muchos filtros —hoy Perfiles,
+ * que suma uno por permiso—: sin esto el ancho extra sólo estira los campos y
+ * el modal sigue igual de largo, que es justo lo que se queria arreglar.
+ *
+ * `auto-fit` en vez de `repeat(3, 1fr)` a proposito: el modal es `width: 100%`
+ * hasta su max-width, asi que en pantallas angostas se achica solo y la grilla
+ * baja a dos columnas y despues a una sin necesidad de una media query propia
+ * —una que ademas tendria que repetir la de arriba para ganarle en
+ * especificidad—. Con 760px de modal entran exactamente tres. */
+.modal-wide .filters-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 
 /* ---------- 27. Tile grid (menú de navegación) ----------
  * Grilla de tarjetas-botón usadas como menú de aterrizaje hacia

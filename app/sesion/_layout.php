@@ -27,11 +27,18 @@ function sesionCacheBust(): string
 /**
  * Pinta una pantalla de sesión.
  *
+ * También la usan las pantallas públicas que no son de sesión pero se sirven
+ * sin ella: el canje de un enlace mágico (`acceso.php`) y las tres páginas de
+ * `invitacion/`. Es el equivalente de `lib/publico.php` en el panel — una sola
+ * tarjeta para todo lo que se muestra sin haber entrado.
+ *
  * @param string $encabezado Texto grande arriba del formulario.
  * @param string $formulario HTML del form (ya escapado por el llamador).
  * @param string $error      Mensaje de error, vacío si no hay.
+ * @param string $titulo     Lo que va en el `<title>`, antes de "· Reactor".
+ *                           El default es el de las tres pantallas de sesión.
  */
-function sesionPantalla(string $encabezado, string $formulario, string $error = ''): void
+function sesionPantalla(string $encabezado, string $formulario, string $error = '', string $titulo = 'Ingresar'): void
 {
     $cb = htmlspecialchars(sesionCacheBust(), ENT_QUOTES);
     ?>
@@ -40,7 +47,7 @@ function sesionPantalla(string $encabezado, string $formulario, string $error = 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Ingresar &middot; Reactor</title>
+    <title><?= htmlspecialchars($titulo, ENT_QUOTES) ?> &middot; Reactor</title>
 
     <link rel="shortcut icon"                        href="/favicon.ico?v=<?= $cb ?>">
     <link rel="icon" type="image/x-icon"             href="/favicon.ico?v=<?= $cb ?>">

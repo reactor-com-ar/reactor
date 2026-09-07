@@ -665,6 +665,92 @@ body.sesion-page {
 }
 .sesion-fila .sesion-btn { margin-top: 0; }
 
+/* -------------------- Paginas publicas de invitacion --------------------
+ *
+ * `invitacion/` (ver / aceptar / rechazar) se sirve SIN sesion y reusa la
+ * tarjeta roja del login: quien llega desde el correo tiene que reconocer al
+ * toque que esta en Reactor, y la pantalla siguiente —el ingreso— es esa misma.
+ * Lo unico que hace falta agregar son las piezas que el login no tiene: la
+ * bajada, la ficha de datos y las notas de resultado.
+ *
+ * El prefijo `inv-` es el mismo que usa el panel para sus paginas publicas, para
+ * que las dos se lean como lo que son: la misma pantalla en dos productos.
+ * ------------------------------------------------------------------------ */
+
+/* El login tiene un solo campo por pantalla; el formulario de aceptacion tiene
+ * cuatro. Va con `+` para que las pantallas de un campo queden igual que antes. */
+.sesion-form .sesion-campo + .sesion-campo { margin-top: 12px; }
+
+.inv-lead {
+    font-size: .95rem;
+    line-height: 1.45;
+    margin-bottom: 18px;
+    color: rgba(255,255,255,.92);
+}
+
+.inv-datos {
+    background: rgba(0,0,0,.14);
+    border-radius: 12px;
+    padding: 4px 14px;
+    margin-bottom: 18px;
+    text-align: left;
+}
+
+.inv-dato {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,.14);
+}
+.inv-dato:last-child { border-bottom: none; }
+
+.inv-dato-label {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: rgba(255,255,255,.65);
+    flex: 0 0 auto;
+}
+.inv-dato-valor {
+    font-size: .95rem;
+    font-weight: 600;
+    text-align: right;
+    /* La contrasena generada y el correo se leen de la pantalla y se tipean a
+     * mano: tienen que poder cortarse sin desbordar la tarjeta. */
+    word-break: break-word;
+}
+
+/* Resultado de la operacion. Misma caja que `.sesion-error`, con el borde de
+ * color como unico distintivo: sobre el rojo institucional un verde o un rojo
+ * plenos ensucian, y el texto ya dice que paso. */
+.inv-nota {
+    background: rgba(0,0,0,.28);
+    border-left: 3px solid rgba(255,255,255,.5);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 18px;
+    font-size: .92rem;
+    line-height: 1.4;
+    text-align: left;
+}
+.inv-nota-ok  { border-left-color: #7ddf9a; }
+.inv-nota-bad { border-left-color: #ffd166; }
+
+.inv-acciones {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+}
+/* Cada boton ocupa su mitad: el `<form>` del rechazo es un bloque mas, asi que
+ * sin esto el boton de adentro se encogeria al ancho de su texto. */
+.inv-acciones > * { flex: 1 1 0; }
+.inv-acciones form { display: flex; }
+.inv-acciones .sesion-btn { margin-top: 0; }
+/* Una sola accion (el "Ingresar" de la bienvenida): a todo el ancho. */
+.inv-acciones-sola { display: block; }
+
 /* -------------------- Modales --------------------
  *
  * Tarjeta blanca como los panels de control, con la cabecera en el rojo del
@@ -970,28 +1056,20 @@ body.sesion-page {
 }
 .lista-aviso.error { color: #a51212; }
 
-/* Aviso de funcionalidad todavia no implementada (Invitar un Usuario). */
-.proximamente {
-    text-align: center;
-    padding: 14px 6px 6px;
-}
-.proximamente-ico {
-    font-size: 2rem;
-    color: var(--primary);
-    opacity: .85;
-}
-.proximamente-titulo {
-    margin-top: 14px;
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: #333;
-}
-.proximamente-texto {
-    margin-top: 8px;
+/* Aca vivia `.proximamente*`, el cartel de "todavia no esta implementado" del
+   modal Invitar un Usuario. Se elimino al implementarlo (07/09/2026): era su
+   unico call site. */
+
+/* Bajada de un modal: la linea que explica que hace el formulario de abajo.
+   Hoy la usa Invitar un Usuario, el unico modal que es un formulario y no una
+   ficha ni una lista. */
+.modal-lead {
     font-size: .92rem;
     line-height: 1.5;
     color: #777;
+    margin-bottom: 16px;
 }
+.modal-lead strong { color: #333; }
 
 /* --- Actividad --- */
 .evento {

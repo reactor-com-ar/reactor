@@ -14,7 +14,8 @@
 --             `adopcion`, `dominios`.`contrato`) y bitacoras / atribucion
 --             historica, donde el historial no debe gobernar el ciclo de vida
 --             del padre (`registros`.*, `senales`.*, `notificaciones`,
---             `sucesos`, `usuarios`.`registrante`, `casos`.`autor`).
+--             `sucesos`, `usuarios`.`registrante`, `perfiles`.`registrante`,
+--             `casos`.`autor`).
 --   CASCADE   Filas de detalle propiedad de su padre (`comprobantesrenglones`,
 --             `dispositivosparametros`, `gadgets`.`dashboard`, `carritos`).
 --
@@ -2366,13 +2367,16 @@ CREATE TABLE `perfiles` (
   `invitacion` tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = puede invitar usuarios desde app',
   `facturacion` tinyint(1) NOT NULL DEFAULT '0' COMMENT '1 = puede ver y abonar las facturas en panel',
   `panel` int DEFAULT NULL COMMENT 'id del ultimo panel',
+  `registrante` int DEFAULT NULL COMMENT 'id del usuario que dio de alta este perfil',
   `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_perfiles_usuario` (`usuario`),
   KEY `fk_perfiles_dominio` (`dominio`),
   KEY `fk_perfiles_panel` (`panel`),
+  KEY `fk_perfiles_registrante` (`registrante`),
   CONSTRAINT `fk_perfiles_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_perfiles_panel` FOREIGN KEY (`panel`) REFERENCES `paneles` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_perfiles_registrante` FOREIGN KEY (`registrante`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_perfiles_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;

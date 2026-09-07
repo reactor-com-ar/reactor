@@ -94,6 +94,10 @@
         if (id === 'modal-notificaciones') cargarNotificaciones();
         if (id === 'modal-dominio')        cargarDominios();
         if (id === 'modal-panel')          cargarPaneles();
+        // Se vacia al abrir: el modal queda abierto despues de invitar (para
+        // mandar otra), asi que sin esto la proxima apertura mostraria el
+        // correo y el aviso de la invitacion anterior.
+        if (id === 'modal-invitar')        limpiarInvitacion();
         // El entorno se relee en cada apertura: storage y cookies cambian.
         if (id === 'modal-entorno') cargarEntorno();
         var foco = m.querySelector('input:not([type=hidden])');
@@ -622,6 +626,95 @@
                 .catch(function () {
                     mostrarAviso('No se pudo conectar con el servidor.', false);
                     revisar();
+                });
+        });
+    }
+
+    // ---------- Invitar un usuario ----------
+    // UN SOLO CAMPO, el correo: es el destino del mensaje y lo unico que hace
+    // falta para emitir la invitacion. El nombre y el celular los completa la
+    // persona invitada en `invitacion/aceptar.php`.
+    //
+    // EL MODAL NO SE CIERRA AL ENVIAR, y no es un descuido: el alta de la fila y
+    // el encolado del correo van en la MISMA transaccion del backend, asi que
+    // "se envio" es una respuesta que hay que esperar. Cerrar optimista mostraria
+    // como enviada una invitacion que se revirtio. Al confirmarse queda el campo
+    // vacio y el aviso en verde, que es lo que hace falta para invitar a otra
+    // persona sin volver a abrir el modal.
+    //
+    // El markup existe solo si el perfil tiene el permiso `invitacion`
+    // (index.php), asi que todo esto es no-op para el resto.
+    var formInvitar       = document.getElementById('form-invitar');
+    var limpiarInvitacion = function () {};
+
+    if (formInvitar) {
+        var invCampo  = document.getElementById('inv-correo');
+        var invAviso  = document.getElementById('inv-aviso');
+        var invEnviar = document.getElementById('inv-submit');
+
+        // Validacion de forma, no de existencia: solo decide si el boton se
+        // habilita. La buena la hace el backend con FILTER_VALIDATE_EMAIL.
+        var invEsCorreo = function (v) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || '').trim());
+        };
+
+        var invMostrarAviso = function (texto, ok) {
+            invAviso.textContent = texto;
+            invAviso.classList.toggle('error', !ok);
+            invAviso.classList.toggle('ok', !!ok);
+            invAviso.classList.add('visible');
+        };
+        var invLimpiarAviso = function () {
+            invAviso.textContent = '';
+            invAviso.classList.remove('visible', 'error', 'ok');
+        };
+        var invRevisar = function () {
+            invEnviar.disabled = !invEsCorreo(invCampo.value);
+        };
+
+        limpiarInvitacion = function () {
+            invCampo.value = '';
+            invLimpiarAviso();
+            invRevisar();
+        };
+
+        invCampo.addEventListener('input', function () {
+            invLimpiarAviso();
+            invRevisar();
+        });
+
+        formInvitar.addEventListener('submit', function (e) {
+            e.preventDefault();
+            invLimpiarAviso();
+
+            var correo = invCampo.value.trim();
+            if (!invEsCorreo(correo)) {
+                invMostrarAviso('Escribí un correo válido.', false);
+                return;
+            }
+
+            invEnviar.disabled = true;
+            fetch('api/invitaciones', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ correo: correo }),
+                credentials: 'same-origin'
+            })
+                .then(function (r) { return r.json().catch(function () { return null; }); })
+                .then(function (j) {
+                    if (!j || j.ok !== true) {
+                        invMostrarAviso((j && j.error) ? j.error : 'No se pudo enviar la invitación.', false);
+                        invRevisar();
+                        return;
+                    }
+                    invCampo.value = '';
+                    invRevisar();
+                    invMostrarAviso('Le enviamos la invitación a ' + correo + '.', true);
+                    showToast('Invitación enviada');
+                })
+                .catch(function () {
+                    invMostrarAviso('No se pudo conectar con el servidor.', false);
+                    invRevisar();
                 });
         });
     }

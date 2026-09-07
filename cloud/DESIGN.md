@@ -1393,6 +1393,7 @@ Form completo de filtros del listado (ver `ABM.md` §3). Se abre desde el botón
 - **Últimos campos `Ordenar por` + `Dirección`** (`desc` por default). La grilla los pone uno al lado del otro. El select de `Ordenar por` debe incluir al menos la opción `Código` (`value="id"`).
 - **Barra de acciones** (§21-bis) en orden **Cancelar → Limpiar → Aplicar**, sin footer: la salida primero en `btn-ghost` y las otras dos en `btn-primary`, las tres directas — este modal no tiene desplegables. `Limpiar` solo resetea los campos del modal a sus defaults (no aplica ni cierra). `Cancelar` cierra sin aplicar. `Aplicar` lee los valores, actualiza el estado del listado y cierra el modal.
 - **El modal de Filtros lo dibuja un único helper compartido** (`openFiltersModal()` en `app.js`): cada módulo aporta sólo el `bodyHtml` de sus campos. Por eso los doce listados tienen exactamente la misma cabecera y la misma barra, y migrarlo al formato nuevo fue un solo cambio — no hay una copia por módulo que se pueda quedar atrás.
+- **Ancho: 520px por defecto, `wide: true` para los módulos con muchos filtros** (760px, la clase `.modal-wide` de §14). En el modal ancho la grilla pasa sola de dos a tres columnas (§26), así el ancho extra compra layout y no aire — sin eso el modal queda igual de largo, sólo con los campos estirados. Hoy lo usa **Perfiles**, que además de los seis filtros comunes suma uno por permiso. **Es opt-in por módulo y sólo toca el `max-width`**: la cabecera, la barra de acciones y el orden de los campos no cambian, que es donde vive la regla de que todos los Filtros se lean iguales. Un módulo no se pasa a ancho "para emparejar" — se pasa cuando sus campos no entran.
 - Filtrado **client-side por defecto** (un único array en memoria por módulo): el cambio de filtros re-renderiza la tabla sin re-fetch.
 - La búsqueda rápida del toolbar (§9) escribe en la misma propiedad `state.texto` que el campo `Buscar` del modal — abrir el modal pre-rellena el input con lo que haya tipeado el usuario.
 - **Caso mixto (señales, registros):** los filtros `Dispositivo` y `Límite` viajan al backend en la query string (`?dispositivo=&limit=`); cambiar cualquiera de los dos dispara un re-fetch. El resto de los filtros (texto, dominio, sentido, estado, usuario, código) se aplican client-side sobre el array ya descargado.
@@ -2101,6 +2102,32 @@ las pestañas de los modales, así el orden es el mismo se mire donde se mire.
 - **Cada ícono dibuja lo que el permiso ABRE**, no el permiso en abstracto: `fa-sliders` los controles del panel de operación, `fa-user-plus` el alta de una persona, `fa-file-invoice-dollar` el comprobante. Con tres íconos grises en la misma celda esa es la única pista de cuál es cuál antes de leer el tooltip.
 - **`title` obligatorio con permiso + dónde vale** (`Operación — app.reactor.com.ar`), el mismo par que muestra la ficha de Consultar: un ícono suelto no distingue si abre `app` o `panel`, y sin eso la columna miente por omisión.
 - **Los íconos salen de `PERMISOS_PERFIL`**, el catálogo único de `app.js` que ya alimenta la ficha y el formulario. Un permiso nuevo se agrega ahí con su `icono` y aparece en las tres vistas a la vez.
+
+### 35-bis.2 Filtros por permiso
+
+El modal de Filtros de Perfiles lleva **un select por permiso**, en la fila
+siguiente a `Dominio / Tipo / Estado` y antes de `Límite / Ordenar por /
+Dirección`. Por eso el módulo abre sus Filtros en modo ancho (`wide: true`,
+§23-bis): con tres campos más, en dos columnas el modal se vuelve una lista
+larga que hay que scrollear.
+
+La grilla queda en cuatro filas de tres, sin los `.form-group` vacíos que antes
+rellenaban las dos columnas:
+
+| | | |
+|---|---|---|
+| Código | Buscar | Usuario |
+| Dominio | Tipo | Estado |
+| Operación | Invitación | Facturación |
+| Límite | Ordenar por | Dirección |
+
+**Reglas:**
+
+- **Tres estados por permiso: `Todos` / `Con permiso` / `Sin permiso`.** La negativa no es un lujo simétrico: "qué perfiles quedaron sin operación" es la consulta que encuentra los errores de carga, y un perfil sin `operacion` no puede usar la app.
+- **Varios permisos filtrados se cruzan con Y, no con O.** "Quién tiene operación y facturación" es la pregunta que se hace sobre permisos; para consultar uno solo alcanza con dejar los otros dos en `Todos`.
+- **El label lleva el mismo ícono que la columna del listado** (§35-bis.1). Es lo que ata el filtro a lo que se ve después en la tabla; sin eso son dos vocabularios para lo mismo.
+- **Debajo del select va en `.form-nota` en qué app vale el permiso.** El mismo dato que da la ficha de Consultar: sin él, `Operación` y `Facturación` en la misma columna se leen como si las dos fueran de cloud.
+- **Los tres selects se generan desde `PERMISOS_PERFIL`**, igual que la columna y la ficha — incluido el estado del filtro (`permisosFiltroDefaults()`). Un permiso nuevo en el catálogo aparece solo en el modal, en el estado y en el filtrado; no hay tres claves escritas a mano que se puedan olvidar.
 
 ---
 

@@ -405,11 +405,17 @@
     //                     El modal se cierra automáticamente al volver.
     //   - onClear(modal): callback opcional que resetea los campos a defaults.
     //                     Si no se pasa, "Limpiar" no hace nada visual.
-    function openFiltersModal({ bodyHtml, onApply, onClear }) {
+    //   - wide:       opt-in a `.modal-wide` (760px) para los módulos con muchos
+    //                 filtros. Ahí la grilla pasa sola de dos a tres columnas
+    //                 (CSS §26), así el ancho compra layout y no aire. Lo que
+    //                 NO cambia es la cabecera ni la barra de acciones: la
+    //                 regla de DESIGN.md §23-bis es que los Filtros de todos
+    //                 los módulos se lean iguales, y eso vive en el chrome.
+    function openFiltersModal({ bodyHtml, onApply, onClear, wide = false }) {
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="filters-title">
+            <div class="modal${wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="filters-title">
                 <div class="modal-header modal-header-primary">
                     <div class="modal-title" id="filters-title">Filtros</div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
@@ -3792,9 +3798,17 @@
         { value: 'tipo_texto',     label: 'Tipo'     },
     ];
 
+    /* Un filtro por permiso, todos en `''` (= no filtra). Sale del catálogo y no
+       de tres claves escritas a mano: un permiso nuevo en `PERMISOS_PERFIL`
+       aparece solo en el estado, en el modal y en el filtrado. */
+    function permisosFiltroDefaults() {
+        return PERMISOS_PERFIL.reduce((acc, p) => { acc[p.clave] = ''; return acc; }, {});
+    }
+
     function perfilesDefaults() {
         return {
             codigo: '', texto: '', usuario: '', dominio: '', tipo: '', estado: '',
+            permisos: permisosFiltroDefaults(),
             orden:  'id', dir: 'desc', limit: 100,
         };
     }
@@ -3965,6 +3979,11 @@
             const q = state.texto.toLowerCase();
             const codigo = parseInt(state.codigo, 10);
 
+            /* Sólo los permisos con filtro puesto. Los tres en `''` es el caso
+               normal, y así el `permisosDelPerfil()` de cada fila —que arma un
+               objeto— no corre 2.227 veces para nada. */
+            const permPedidos = PERMISOS_PERFIL.filter(x => state.permisos[x.clave]);
+
             let filtered = allPerfiles.filter(p => {
                 if (Number.isFinite(codigo) && p.id !== codigo) return false;
                 if (state.tipo    && p.tipo !== state.tipo) return false;
@@ -3972,6 +3991,16 @@
                 if (state.estado === 'inactivo' &&  p.activo) return false;
                 if (state.usuario && String(p.usuario_id) !== state.usuario) return false;
                 if (state.dominio && String(p.dominio_id) !== state.dominio) return false;
+                // Varios permisos filtrados se cruzan con Y, no con O: "quién
+                // tiene operación Y facturación" es la pregunta que se hace
+                // sobre permisos, y para una sola basta con dejar las otras dos
+                // en "Todos".
+                if (permPedidos.length) {
+                    const tiene = permisosDelPerfil(p);
+                    for (const x of permPedidos) {
+                        if (tiene[x.clave] !== (state.permisos[x.clave] === 'si')) return false;
+                    }
+                }
                 if (q && !(p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
                     .toLowerCase().includes(q)) return false;
                 return true;
@@ -4041,6 +4070,39 @@
             `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
         ).join('');
 
+        /* Un select por permiso, generado desde `PERMISOS_PERFIL` igual que la
+           columna del listado y la ficha. Tres estados: sin filtrar, con el
+           permiso y sin el permiso — la negativa hace falta tanto como la
+           positiva ("qué perfiles quedaron sin operación" es la búsqueda que
+           encuentra los errores de carga).
+
+           El label lleva el MISMO ícono que la columna Permisos: es lo que ata
+           el filtro a lo que se ve después en la tabla. Y abajo, en `muted`, en
+           qué app vale el permiso — el dato que la ficha ya da y que sin él
+           deja "Operación" y "Facturación" leyéndose como si las dos fueran de
+           cloud. */
+        const permGrupos = PERMISOS_PERFIL.map(p => {
+            const val = state.permisos[p.clave] || '';
+            return `
+                <div class="form-group">
+                    <label for="prf-fm-${p.clave}">
+                        <i class="fa-solid ${p.icono} fa-fw"></i> ${escape(p.label)}
+                    </label>
+                    <select id="prf-fm-${p.clave}">
+                        <option value=""${val === ''   ? ' selected' : ''}>Todos</option>
+                        <option value="si"${val === 'si' ? ' selected' : ''}>Con permiso</option>
+                        <option value="no"${val === 'no' ? ' selected' : ''}>Sin permiso</option>
+                    </select>
+                    <span class="form-nota">${escape(p.donde)}</span>
+                </div>
+            `;
+        }).join('');
+
+        /* Cuatro filas de tres en el modal ancho: Código-Buscar-Usuario,
+           Dominio-Tipo-Estado, los tres permisos, y Límite-Ordenar-Dirección.
+           Cierra justo, sin los `.form-group` vacíos que antes rellenaban la
+           grilla de dos columnas, y respeta el orden de ABM.md §3 (Código
+           primero; Límite, Ordenar por y Dirección al final). */
         const bodyHtml = `
             <div class="filters-grid">
                 <div class="form-group">
@@ -4048,8 +4110,8 @@
                     <input type="number" id="prf-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
                 </div>
                 <div class="form-group">
-                    <label for="prf-fm-texto">Buscar (usuario / email / dominio)</label>
-                    <input type="search" id="prf-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                    <label for="prf-fm-texto">Buscar</label>
+                    <input type="search" id="prf-fm-texto" placeholder="Usuario, email o dominio" value="${escape(state.texto)}">
                 </div>
                 <div class="form-group">
                     <label for="prf-fm-usuario">Usuario</label>
@@ -4071,12 +4133,11 @@
                         <option value="inactivo"${state.estado === 'inactivo' ? ' selected' : ''}>Deshabilitados</option>
                     </select>
                 </div>
-                <div class="form-group"></div>
+                ${permGrupos}
                 <div class="form-group">
                     <label for="prf-fm-limit">Límite</label>
                     <input type="number" id="prf-fm-limit" min="1" max="1000" value="${state.limit}">
                 </div>
-                <div class="form-group"></div>
                 <div class="form-group">
                     <label for="prf-fm-orden">Ordenar por</label>
                     <select id="prf-fm-orden">${ordOpts}</select>
@@ -4093,6 +4154,7 @@
 
         openFiltersModal({
             bodyHtml,
+            wide: true,
             onApply(modal) {
                 state.codigo  = modal.querySelector('#prf-fm-codigo').value.trim();
                 state.texto   = modal.querySelector('#prf-fm-texto').value.trim();
@@ -4100,6 +4162,9 @@
                 state.dominio = modal.querySelector('#prf-fm-dominio').value;
                 state.tipo    = modal.querySelector('#prf-fm-tipo').value;
                 state.estado  = modal.querySelector('#prf-fm-estado').value;
+                PERMISOS_PERFIL.forEach(p => {
+                    state.permisos[p.clave] = modal.querySelector(`#prf-fm-${p.clave}`).value;
+                });
                 state.orden   = modal.querySelector('#prf-fm-orden').value;
                 state.dir     = modal.querySelector('#prf-fm-dir').value;
                 state.limit   = readLimit(modal.querySelector('#prf-fm-limit'), 100);
@@ -4113,6 +4178,9 @@
                 modal.querySelector('#prf-fm-dominio').value = d.dominio;
                 modal.querySelector('#prf-fm-tipo').value    = d.tipo;
                 modal.querySelector('#prf-fm-estado').value  = d.estado;
+                PERMISOS_PERFIL.forEach(p => {
+                    modal.querySelector(`#prf-fm-${p.clave}`).value = d.permisos[p.clave];
+                });
                 modal.querySelector('#prf-fm-orden').value   = d.orden;
                 modal.querySelector('#prf-fm-dir').value     = d.dir;
                 modal.querySelector('#prf-fm-limit').value   = String(d.limit);

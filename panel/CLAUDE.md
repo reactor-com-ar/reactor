@@ -1265,23 +1265,72 @@ Reglas que no se deducen del esquema:
   dominio de la sesión —el mismo criterio con el que se excluyó de
   Dispositivos → General—; y `tipo` es la columna desalineada con `rol`, que
   mostrarla sólo invita a leerla como el rol verdadero.
-- **Abre por el acceso (`Perfil` + `Rol`) y cierra por los dos estados**
-  (`Estado del perfil` + `Estado de la cuenta`), que van juntos al final porque
-  es donde se leen comparados: son independientes y ninguno de los dos alcanza
-  por sí solo para saber si la persona entra. En el medio van los datos de
-  contacto, `Identificador` (el `uuid` de la **cuenta**, con ese rótulo y no
-  "UUID") y las fechas. Son 12 tarjetas, **todas `half`**: seis renglones que
-  cierran de a dos. **Agregar o quitar un campo deja la cuenta impar** y estira
-  la última a todo el ancho, que se lee como un destaque deliberado (mismo
-  criterio que Dispositivos → General).
-- **Los tres permisos van en un SEGUNDO BLOQUE, detrás de una `.view-sep`**
-  (mismo recurso que Consultar invitación). No son atributos de la persona ni del
-  acceso en general sino lo que ese perfil *puede hacer*, y mezclarlos con el
-  correo y las fechas los perdía en la grilla. **La divisoria obliga a mirar la
-  paridad por bloque**: arriba las doce medias y abajo tres, con `Operación` a
-  todo el ancho —la ranura impar— para que `Invitación` y `Facturación` cierren
-  de a dos. Cada uno muestra su badge más, en tenue, qué abre: dos de los tres no
-  son de esta pantalla y sin eso se leen como permisos del panel.
+- **`General` abre por el acceso (`Perfil` + `Tipo`) y cierra por los dos
+  estados** (`Estado del perfil` + `Estado de la cuenta`), que van juntos al
+  final porque es donde se leen comparados: son independientes y ninguno de los
+  dos alcanza por sí solo para saber si la persona entra. En el medio van los
+  datos de contacto, `Identificador` (el `uuid` de la **cuenta**, con ese rótulo
+  y no "UUID") y las fechas. Son 12 tarjetas, **todas `half`**: seis renglones
+  que cierran de a dos. **Agregar o quitar un campo deja la cuenta impar** y
+  estira la última a todo el ancho, que se lee como un destaque deliberado
+  (mismo criterio que Dispositivos → General).
+
+### Usuarios → modal Consultar perfil (pestañas General / Permisos / Paneles)
+
+`verUsuario()` (07/09/2026). Las **tres solapas del editor, en modo lectura**:
+`General` con la ficha de arriba, `Permisos` con los tres de `perfiles` y
+`Paneles` con `perfiles_paneles` contra el catálogo del dominio.
+
+- **Hasta el 07/09/2026 era una sola grilla** con los permisos abajo de una
+  `.view-sep` (como en Consultar invitación). Con la solapa cada bloque se mira
+  por separado y **la paridad de cada uno se resuelve sola**: ya no hay que
+  contar medias tarjetas a los dos lados de una divisoria.
+- **Las tres pestañas salen del MISMO `GET ?id=N`** que ya usaba el editor —trae
+  la ficha, `paneles` del perfil y `catalogos.paneles` del dominio—, así que
+  ninguna se carga bajo demanda: no hay una segunda consulta que ahorrar (a
+  diferencia de Dispositivo → Conexión). Lo único que cambió en el front es que
+  `verUsuario()` se queda con la respuesta entera y no sólo con `.perfil`.
+- **Los rótulos y los íconos son los del editor** (`General` / `Permisos` /
+  `Paneles`): es la misma ficha en lectura y en edición, y si no coincidieran se
+  leerían como dos pantallas distintas. Se cablean con `montarPestanas()`.
+- **Las tres solapas están siempre**, aunque el perfil no tenga ningún permiso o
+  el dominio ningún panel: ahí va un estado vacío explícito (`.paneles-vacio`
+  dentro de una `.paneles-lista`, la misma caja del editor). Que una pestaña
+  aparezca y desaparezca según la fila hace saltar el modal y deja al que mira
+  sin saber si falta la pestaña o si no hay dato — mismo criterio que Actividad.
+  **Es la diferencia con el EDITOR**, donde `Permisos` no existe si no hay
+  ninguno para otorgar: allá la solapa vacía no sería un dato de la fila sino una
+  pantalla sin nada que hacer.
+- **`Permisos` lista SÓLO los que el perfil tiene.** El que no tiene no aparece
+  —no hay fila "Deshabilitado"—: la pestaña es lo que ese acceso *puede hacer*, y
+  un renglón negativo ocupa el mismo lugar que uno que habilita algo sin agregar
+  nada. Sin ninguno queda el estado vacío, que es lo que distingue "no tiene
+  permisos" de "la pestaña no cargó".
+- **No se filtra por `puede()`**, a diferencia del editor. Allá se esconde el
+  permiso que la sesión no tiene porque nadie otorga lo que no tiene; acá no se
+  otorga nada, y esconderlo ocultaría un dato de la fila que se está consultando.
+- **El texto de cada permiso sale de `PERMISOS_PERFIL`**, el mismo catálogo que
+  dibuja el editor. Antes la ficha tenía su propia copia de la frase que dice qué
+  abre cada uno; dos copias se desincronizan solas. Van **todas `full`** porque
+  la lista tiene largo variable (cero a tres) y ninguna cuenta de paridad se
+  sostiene.
+- **`Paneles` lista el catálogo ENTERO, habilitados y no** — es la inversa de
+  `Permisos` y es a propósito. El catálogo son los paneles de **un** dominio (el
+  más grande de la base tiene 7) y lo que importa es **contra qué se recorta** el
+  acceso: mostrando sólo los permitidos, un perfil con dos de siete se lee igual
+  que uno con dos de dos. Los permisos, en cambio, son tres claves fijas que ya
+  se conocen de memoria.
+- **El badge de la tarjeta de panel habla del PERMISO DEL PERFIL, no del estado
+  del panel**: `catalogoPaneles()` ya devuelve sólo los paneles habilitados del
+  dominio (dar permiso sobre uno apagado no significa nada, porque `app` no lo
+  lista igual).
+- **Con el catálogo impar, la primera tarjeta va `full`** para que las que siguen
+  cierren de a dos. Es la ranura impar que documenta Dispositivos → General,
+  pero resuelta **en tiempo de dibujo** (`catalogo.length % 2 === 1 && i === 0`)
+  porque acá el largo depende del dominio y no se puede fijar en el código.
+- **No se marca el `Último abierto`** que sí muestra el editor. Ese badge existe
+  allá porque avisa qué se rompe al destildar esa fila (`perfiles.panel` se va a
+  `NULL`); acá no se destilda nada.
 
 ### Usuarios → modal Editar perfil (pestañas General / Permisos / Paneles)
 

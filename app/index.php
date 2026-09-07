@@ -549,9 +549,17 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
     </div>
 </div>
 
-<!-- Modal "Invitar un Usuario": todavia no esta implementado. El item queda en
-     el menu (el legacy tiene la pantalla en `dominio/invitar.php`) pero avisa
-     que falta, en vez de abrir algo a medio hacer. -->
+<!-- Modal "Invitar un Usuario": UN SOLO CAMPO, el correo.
+     Es el destino del mensaje, y es lo unico que hace falta: el nombre y el
+     celular los completa la persona invitada al aceptar
+     (`invitacion/aceptar.php`). Es el mismo modal que el "+ Nuevo usuario" del
+     panel y el espejo del alta legacy (`dominio/invitar.php` pedia un solo
+     campo tambien, el celular, porque el canal era WhatsApp).
+
+     Va gateado por el permiso `invitacion`, igual que el item del menu que lo
+     abre: sin el no hay forma de llegar hasta aca. El corte de verdad igual lo
+     hace `api/invitaciones.php`, que revalida contra la base. -->
+<?php if ($puedeInvitar): ?>
 <div class="modal-fondo" id="modal-invitar">
     <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="modal-invitar-titulo">
 
@@ -565,16 +573,31 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
         </header>
 
         <div class="modal-cuerpo">
-            <div class="proximamente">
-                <i class="fa-solid fa-clock proximamente-ico"></i>
-                <p class="proximamente-titulo">Pr&oacute;ximamente</p>
-                <p class="proximamente-texto">
-                    Muy pronto vas a poder invitar usuarios a tu dominio desde ac&aacute;.
-                </p>
-            </div>
+            <p class="modal-lead">
+                Le mandamos un correo con un enlace para sumarse a
+                <strong><?= htmlspecialchars($dominioNombre, ENT_QUOTES) ?></strong>.
+                El resto de los datos los completa al aceptar la invitaci&oacute;n.
+            </p>
+
+            <form id="form-invitar" novalidate>
+                <div class="campo">
+                    <label for="inv-correo">Correo electr&oacute;nico</label>
+                    <input type="email" id="inv-correo" name="correo"
+                           maxlength="100" inputmode="email"
+                           autocomplete="off" autocapitalize="none" spellcheck="false"
+                           placeholder="nombre@ejemplo.com" required>
+                </div>
+
+                <div class="form-aviso" id="inv-aviso" role="status"></div>
+
+                <button type="submit" class="modal-btn" id="inv-submit" disabled>
+                    <i class="fa-solid fa-paper-plane"></i> Enviar invitaci&oacute;n
+                </button>
+            </form>
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- Modal "Detalles de Dominio": solo informacion, sin acciones. Campos en el
      formato del legacy: etiqueta a la izquierda y valor en pildora gris. -->

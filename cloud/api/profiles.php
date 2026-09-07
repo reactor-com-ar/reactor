@@ -278,6 +278,18 @@ function handleCreate(): void
     $dominioNombre = (string) ($dom->fetchColumn() ?: '');
     if ($dominioNombre === '') json_error('El dominio no existe', 422);
 
+    // QUIEN ESTA DANDO DE ALTA ESTE ACCESO. Va a `perfiles`.`registrante`, la
+    // columna que responde "quien otorgo este acceso" — que NO es lo mismo que
+    // `usuarios`.`registrante`, que responde quien creo la CUENTA (la escribe
+    // `usuarioAlta()` en api/users.php). Este es el unico alta de perfiles CON
+    // sesion: los otros dos son las invitaciones, que corren sin ella y anotan
+    // al emisor de la invitacion.
+    //
+    // `?: null` y no el entero pelado: la columna es una FK y el `0` del sistema
+    // historico ya no es un valor valido. Mismo criterio que `usuarioAlta()`.
+    $actual      = authUser();
+    $registrante = ((int) ($actual['id'] ?? 0)) ?: null;
+
     // La fila y sus paneles van en una transaccion: un perfil a medio asignar
     // deja permisos que nadie pidio.
     $pdo = db();
@@ -285,8 +297,9 @@ function handleCreate(): void
     try {
         $stmt = $pdo->prepare(
             'INSERT INTO perfiles (uuid, nombre, usuario, dominio, tipo,
-                                   operacion, invitacion, facturacion, habilitado)
-             VALUES (:uuid, :nombre, :u, :d, :t, :op, :inv, :fac, :h)'
+                                   operacion, invitacion, facturacion,
+                                   registrante, habilitado)
+             VALUES (:uuid, :nombre, :u, :d, :t, :op, :inv, :fac, :reg, :h)'
         );
         $stmt->execute([
             ':uuid'   => bin2hex(random_bytes(8)),
@@ -297,6 +310,7 @@ function handleCreate(): void
             ':op'     => $permisos['operacion'],
             ':inv'    => $permisos['invitacion'],
             ':fac'    => $permisos['facturacion'],
+            ':reg'    => $registrante,
             // Entero, nunca el booleano de PHP. Ver lib/habilitado.php.
             ':h'      => valorHabilitado($activo),
         ]);

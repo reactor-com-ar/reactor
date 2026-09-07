@@ -1035,6 +1035,13 @@ mismas tablas. Reglas que no se deducen del esquema:
   no podría usar la app. El tercero en `0` **a propósito** — este alta corre sin
   sesión, así que con `1` sería la puerta trasera para fabricarse el permiso que
   el `PUT` sólo deja otorgar a quien ya lo tiene. Ver "Permisos del perfil".
+- **Y con `registrante` = `invitaciones.emisor`**, columna de `perfiles` desde el
+  07/09/2026 (migración `20260907_1100`): quién otorgó ese acceso. Se escribe
+  **siempre que el perfil se cree**, haya cuenta nueva o no — es la diferencia
+  con `usuarios.registrante`, que sólo se escribe en el alta de la cuenta: una
+  cuenta que ya existía la registró otra persona y ese dato no se pisa. Va con
+  `?: null` porque es una FK y el `0` del legacy no es un valor válido. Ver
+  "`perfiles.registrante`" en el [CLAUDE.md raíz](../CLAUDE.md).
 - **`perfilAsegurado()` busca un perfil de ADMINISTRADOR, no "cualquier perfil
   del dominio".** Si la persona ya tenía uno de Operador ahí (porque usa
   `reactor-app`), ese no habilita el panel —el gate es `perfiles.tipo = 'A'`—

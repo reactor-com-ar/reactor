@@ -1001,8 +1001,14 @@ Estructura del cuerpo, en este orden:
    de confirmar **no se renderiza**: queda sólo `Cancelar`.
 3. `.del-section` con título `.del-danger` — **"Se eliminarán junto con el
    usuario"**: filas que desaparecen (borrado explícito o `ON DELETE CASCADE`).
-4. `.del-section` con título `.del-warn` — **"Se conservarán, sin usuario
-   asociado"**: filas que sobreviven con la FK en NULL (`ON DELETE SET NULL`).
+4. `.del-section` con título `.del-warn` — **"Se conservarán, sin la referencia
+   a este usuario"**: filas que sobreviven con la FK en NULL
+   (`ON DELETE SET NULL`). **No dice "sin usuario asociado"**, que es lo que
+   decía hasta el 07/09/2026: dos de las filas del grupo son `registrante`
+   —los usuarios y los perfiles que esta persona dio de alta— y pertenecen a
+   OTRA gente, así que conservan su propio usuario y sólo pierden la autoría.
+   Bajo el título viejo, `Perfiles que registró · 12` se leía como si el
+   borrado fuera a dejar doce accesos ajenos sin dueño.
 5. `.del-warning` — "Esta acción no se puede deshacer", sólo si no hay bloqueo.
 
 Cada ítem es un `.del-item` con la etiqueta a la izquierda y un `.badge` con la
@@ -1582,6 +1588,8 @@ Va siempre dentro de un `.modal.modal-wide` (ver §14) para que el JSON respire 
 
 `login.php` es la **única vista de cloud que vive fuera de la SPA** y no tiene chrome (no hay sidebar ni topbar). El usuario aterriza acá cuando no hay sesión, ingresa credenciales y, si el login es correcto, el backend abre la sesión y el navegador es redirigido a `index.php`.
 
+**La credencial es el correo de un controlador, no un usuario.** El primer campo se rotula `Correo` y es un `type="email"` — no `Usuario` / `type="text"` como hasta el 07/09/2026, cuando el login autenticaba contra `usuarios` (los clientes de app y panel). `controladores` no tiene columna `usuario`: la identidad es `correo`, con UNIQUE y normalizado a minúsculas. El subtítulo acompaña el cambio ("Ingresá con tu correo para continuar"). Ver el encabezado de `api/login.php`.
+
 Esta pantalla es la **única excepción** a la regla "el rojo solo aparece como acento" (§1). El card del login va **pintado completo en `var(--primary)`** — mismo rojo institucional que sidebar y topbar — porque la pantalla *es* la marca: lo primero que ve el usuario antes de entrar a la app. La regla del rojo como acento aplica solo cuando hay zona gris alrededor (cards / modales sobre `--bg`). Acá no hay zona gris dentro del card, así que el card sigue las reglas de §4-§5 (chrome rojo) en lugar de las de §14 (modales).
 
 Reglas visuales:
@@ -1602,11 +1610,11 @@ Reglas visuales:
         <img src="assets/img/reactor_white.png" alt="Reactor" class="login-logo">
       </div>
       <h1 class="login-title">Reactor Cloud</h1>
-      <p class="login-subtitle">Ingresá con tu usuario para continuar.</p>
+      <p class="login-subtitle">Ingresá con tu correo para continuar.</p>
       <form class="login-form" id="login-form">
         <div class="form-group">
-          <label for="login-usuario">Usuario</label>
-          <input type="text" id="login-usuario" name="usuario" autocomplete="username" autofocus required>
+          <label for="login-correo">Correo</label>
+          <input type="email" id="login-correo" name="correo" autocomplete="username" autofocus required>
         </div>
         <div class="form-group">
           <label for="login-contrasena">Contraseña</label>

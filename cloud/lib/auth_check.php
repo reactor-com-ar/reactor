@@ -32,6 +32,17 @@ function authUser(): ?array
     if (!$payload) {
         return $user;
     }
+
+    // El token tiene que venir del login contra `controladores`. Los emitidos
+    // antes del 07/09/2026 salian de `usuarios` —la tabla de los clientes de
+    // app y panel— y no llevan `src`: se rechazan aunque la firma sea valida y
+    // el TTL no haya vencido, porque son exactamente las sesiones que el cambio
+    // de api/login.php vino a sacar de cloud. Efecto practico: al deployar,
+    // todo el mundo vuelve a la pantalla de ingreso una vez.
+    if (($payload['src'] ?? '') !== 'ctl') {
+        return $user;
+    }
+
     $user = $payload;
     return $user;
 }

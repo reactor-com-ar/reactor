@@ -3607,7 +3607,15 @@
 
     // Borrar un usuario arrastra dependencias en 13 tablas con tres
     // comportamientos distintos (ver `api/users`): filas que se eliminan,
-    // filas que sobreviven sin usuario asociado y filas que bloquean el borrado.
+    // filas que sobreviven perdiendo sólo la referencia a este usuario, y filas
+    // que bloquean el borrado.
+    //
+    // La segunda sección NO dice "sin usuario asociado", que es lo que decía
+    // hasta el 07/09/2026: las dos filas de `registrante` —los usuarios y los
+    // perfiles que esta persona dio de alta— son de OTRA gente y conservan su
+    // propio usuario. Lo único que pierden es la autoría. Con la redacción
+    // vieja, "Perfiles que registró · 12" bajo "sin usuario asociado" se leía
+    // como si el borrado fuera a dejar 12 accesos ajenos sin dueño.
     // El `confirmDialog` genérico (§15 de DESIGN.md) no alcanza para mostrar
     // eso, así que se pide el detalle real al backend y se abre un modal propio.
     async function confirmDeleteUser(usr) {
@@ -3680,7 +3688,7 @@
                     ${avisoBloqueo}
                     ${sinDatos}
                     ${seccion('Se eliminarán junto con el usuario', 'fa-trash',      'del-danger', elimina,    'badge-danger')}
-                    ${seccion('Se conservarán, sin usuario asociado', 'fa-link-slash', 'del-warn',   desvincula, 'badge-warn')}
+                    ${seccion('Se conservarán, sin la referencia a este usuario', 'fa-link-slash', 'del-warn',   desvincula, 'badge-warn')}
                     ${bloqueado ? '' : `
                     <div class="del-warning">
                         <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
@@ -6263,9 +6271,11 @@
      * separadas a propósito y ninguna deriva de la otra (ver el encabezado de
      * cloud/api/controladores.php).
      *
-     * A diferencia de Usuarios, el modal de edición NO precarga la contraseña
-     * vigente: `controladores.contrasena` guarda un hash bcrypt y no se puede
-     * deshacer. El campo abre vacío y vacío significa "no cambiarla".
+     * El modal de edición precarga la contraseña vigente en puntos, igual que
+     * el de Usuarios: desde la migración 20260907_1200 `controladores.contrasena`
+     * guarda el cifrado legacy de Reactor —reversible— y no un hash bcrypt, así
+     * que el ojo del campo tiene algo que revelar. Vaciar el campo sigue
+     * significando "no cambiarla".
      */
     const ORDEN_CONTROLADORES = [
         { value: 'id',         label: 'Código'         },
@@ -6683,7 +6693,7 @@
                     <div class="form-group">
                         <label for="ctl-pass">
                             Contraseña
-                            ${isEdit ? '<span class="muted" style="font-weight:400">(dejar vacío para no cambiarla)</span>' : ''}
+                            ${isEdit ? '<span class="muted" style="font-weight:400">(vaciar para no cambiarla)</span>' : ''}
                         </label>
                         <div class="input-password">
                             <input type="password" id="ctl-pass" minlength="8" autocomplete="new-password"
@@ -6734,9 +6744,8 @@
             activoLbl.textContent = activoChk.checked ? 'Sí' : 'No';
         });
 
-        // Ojo del campo contraseña: alterna entre puntos y texto plano. Acá sólo
-        // sirve para revisar lo que se está tipeando — a diferencia de Usuarios,
-        // no hay contraseña vigente que revelar.
+        // Ojo del campo contraseña: alterna entre puntos y texto plano. El ícono
+        // muestra la acción disponible (ojo = mostrar, ojo tachado = ocultar).
         const passToggle = backdrop.querySelector('[data-act="toggle-pass"]');
         passToggle.addEventListener('click', () => {
             const mostrar = passInput.type === 'password';
@@ -6747,6 +6756,19 @@
             passToggle.title = rotulo;
             passInput.focus();
         });
+
+        // Precarga de la contraseña vigente (ver `handleCredencial()` en
+        // api/controladores.php): el campo abre con la contraseña real en
+        // puntos, así el ojo tiene algo que revelar. Va por separado del listado
+        // y en segundo plano para no demorar la apertura del modal.
+        if (isEdit) {
+            api('controladores?credencial=1&id=' + encodeURIComponent(ctl.id))
+                .then(r => {
+                    // Si el operador ya empezó a escribir, no le pisamos lo tipeado.
+                    if (passInput.value === '') passInput.value = r.password || '';
+                })
+                .catch(() => { /* queda vacío, que equivale a "no cambiarla" */ });
+        }
 
         nombreInput.focus();
 
@@ -6781,7 +6803,7 @@
             }
             // El mínimo son 8 caracteres (más que los 6 de Usuarios): estas
             // credenciales abren el backoffice entero. El máximo se cuenta en
-            // bytes y lo valida el backend — bcrypt ignora todo lo que pase de 72.
+            // bytes y lo valida el backend — lo limita el ancho de la columna.
             if (!isEdit && pass.length < 8) {
                 passErr.textContent = 'Mínimo 8 caracteres';
                 passErr.style.display = 'block';

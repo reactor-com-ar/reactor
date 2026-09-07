@@ -44,6 +44,13 @@ const DEP_DESVINCULA = [
     ['casos',        'autor',       'Casos abiertos'],
     ['mensajes',     'usuario',     'Mensajes'],
     ['usuarios',     'registrante', 'Usuarios que registró'],
+    // `perfiles`.`registrante` (20260907_1100) es la otra mitad del par: la de
+    // arriba cuenta las CUENTAS que dio de alta y ésta los ACCESOS que otorgó.
+    // Son accesos de OTRAS personas —no los suyos, que van en DEP_ELIMINA por
+    // `perfiles`.`usuario`—, así que sobreviven al borrado y sólo pierden la
+    // autoría. Por eso la FK es `SET NULL`: con `RESTRICT` habría que
+    // reasignarlos uno por uno antes de poder borrar la cuenta.
+    ['perfiles',     'registrante', 'Perfiles que registró'],
 ];
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -165,15 +172,20 @@ function handleCreate(): void
     // (autenticacion, habilitado, perfiles, dominios, paneles) -- por eso no se
     // le pasa `habilitado`: al crear siempre nace 1. El toggle Activo del
     // formulario recien tiene efecto al editar.
-    $actual = authUser();
-    $id     = usuarioAlta(db(), [
+    // `registrante` VA EN NULL Y NO EN EL ID DE LA SESION. Es una FK contra
+    // `usuarios`.`id`, y desde que el login de cloud valida contra
+    // `controladores` (07/09/2026) quien esta logueado NO es una fila de
+    // `usuarios`: escribir su id ahi apuntaria a otra persona real que casualmente
+    // tiene ese numero. Un alta hecha desde cloud no la registro ningun usuario
+    // — la registro Reactor —, y eso es exactamente lo que dice el NULL.
+    $id = usuarioAlta(db(), [
         'nombre'      => $nombre,
         // Cloud no pide un nombre de usuario aparte: la credencial es el correo.
         'usuario'     => $email,
         'contrasena'  => $password,
         'correo'      => $email,
         'celular'     => $celular === '' ? null : $celular,
-        'registrante' => (int) ($actual['id'] ?? 0),
+        'registrante' => null,
     ]);
 
     json_ok(['id' => $id], 201);
@@ -279,13 +291,15 @@ function handleImpacto(): void
 
     $usr['id'] = (int) $usr['id'];
 
-    $actual = authUser();
-
     json_ok([
         'usuario'    => $usr,
-        // Borrarse a uno mismo invalida la sesión en curso: el front lo bloquea
-        // en el modal y handleDelete() lo vuelve a rechazar del lado servidor.
-        'es_propio'  => $actual !== null && (int) ($actual['id'] ?? 0) === $id,
+        // SIEMPRE false desde el 07/09/2026, y la clave se conserva porque el
+        // front la lee. Antes comparaba el id de la sesion contra este usuario
+        // para impedir que alguien se borrara a si mismo; ahora el login valida
+        // contra `controladores`, asi que quien esta logueado nunca es una fila
+        // de `usuarios` y la comparacion no solo sobra: seria un falso positivo
+        // que bloquea borrar al usuario cuyo id coincide con el del controlador.
+        'es_propio'  => false,
         'bloqueos'   => contarDependencias($id, DEP_BLOQUEA),
         'elimina'    => contarDependencias($id, DEP_ELIMINA),
         'desvincula' => contarDependencias($id, DEP_DESVINCULA),
@@ -328,12 +342,13 @@ function handleDelete(): void
     $stmt->execute([':id' => $id]);
     if ($stmt->fetchColumn() === false) json_error('Usuario no encontrado', 404);
 
-    // Un usuario no puede borrarse a si mismo: perderia la sesion en curso y el
-    // JWT seguiria siendo valido 12 h apuntando a un id inexistente.
-    $actual = authUser();
-    if ($actual !== null && (int) ($actual['id'] ?? 0) === $id) {
-        json_error('No podes eliminar tu propio usuario', 409);
-    }
+    // ACA HABIA UN "no podes eliminar tu propio usuario". Se saco el 07/09/2026,
+    // cuando el login paso a validar contra `controladores`: quien esta logueado
+    // dejo de ser una fila de `usuarios`, asi que el caso que protegia —quedarse
+    // sin sesion por borrarse— ya no existe, y la comparacion de ids habria
+    // bloqueado borrar al usuario cuyo id coincidiera con el del controlador.
+    // El equivalente vivo es `garantizarQueQuedaAlguien()` en
+    // api/controladores.php, que impide vaciar la lista de quienes entran.
 
     // Bloqueos duros: los dejamos al operador en vez de resolverlos por él.
     foreach (DEP_BLOQUEA as [$tabla, $columna, $label]) {

@@ -95,10 +95,11 @@ function handleCrear(): void
         ':d'   => $destino,
         ':t'   => hash('sha256', $token),
         ':em'  => (int) ($actual['id'] ?? 0) ?: null,
-        // Hoy el login de cloud valida contra `usuarios`; el dia que pase a
-        // `controladores` este valor cambia y las filas viejas siguen siendo
-        // legibles porque dicen de que tabla era su id.
-        ':et'  => 'usuarios',
+        // Ese dia llego: desde el 07/09/2026 el login de cloud valida contra
+        // `controladores`, asi que `emisor` es un id de esa tabla. Las filas
+        // emitidas antes siguen diciendo 'usuarios' y por eso siguen siendo
+        // legibles — para eso existe esta columna.
+        ':et'  => 'controladores',
         ':min' => ENLACE_MINUTOS,
         ':ip'  => origenRequest(),
     ]);

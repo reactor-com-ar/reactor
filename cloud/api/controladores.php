@@ -11,37 +11,50 @@ declare(strict_types=1);
  * otra: por eso la tabla no tiene FK contra `usuarios` (ver el encabezado de
  * cloud/sql/migrations/20260906_1000_crear_controladores.sql).
  *
- * LA CONTRASENA ES UN HASH BCRYPT, NO EL CIFRADO HISTORICO DE REACTOR. La
- * diferencia con api/users.php es deliberada: `usuarios.contrasena` es
- * reversible porque hay miles de filas ya escritas asi y un sistema legacy
- * afuera de este repo que las lee, mientras que esta tabla nace hoy y solo la
- * lee cloud. Consecuencia practica: aca NO existe el endpoint `?credencial=1`
- * que api/users.php usa para precargar la contrasena vigente en el modal — un
- * hash no se puede deshacer. Solo se puede fijar una nueva.
+ * LA CONTRASENA USA EL CIFRADO HISTORICO DE REACTOR, NO UN HASH. Es el mismo
+ * `reactor_legacy_encriptar()` de `usuarios.contrasena` (XOR sumativa + base64,
+ * clave global), y por eso aca SI existe el endpoint `?credencial=1` que
+ * api/users.php usa para precargar la contrasena vigente en el modal: el ojo
+ * del campo tiene algo que revelar.
+ *
+ * Hasta el 07/09/2026 esta columna guardaba un hash bcrypt, que es lo que
+ * corresponderia a credenciales que abren el backoffice entero. Se cambio a
+ * pedido, aceptando el costo: la clave del cifrado legacy es una constante del
+ * repo, asi que la columna es texto plano para cualquiera que lea la base. El
+ * razonamiento completo esta en
+ * cloud/sql/migrations/20260907_1200_controladores_contrasena_legacy.sql.
  *
  * ALCANCE: lo puede llamar cualquier sesion autenticada de cloud, igual que el
  * resto de los endpoints del panel (bootstrap.php exige JWT valido y nada mas).
- * Cuando el login de cloud pase a leer esta tabla, este endpoint es el primero
- * que necesita un control por rol: quien puede editar controladores puede
- * darse acceso a si mismo.
+ * Ahora que el login lee esta tabla, este endpoint es el primero que necesita
+ * un control por rol: quien puede editar controladores puede darse acceso a si
+ * mismo — y con `?credencial=1` puede ademas leer la contrasena de los demas.
  */
 
 require __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/legacy_crypto.php';
 
 /** Minimo de la contrasena. Mas alto que los 6 de `usuarios` porque estas
  *  credenciales abren el backoffice entero, no un dominio. */
 const CONTROLADOR_PASS_MIN = 8;
 
-/** Tope duro: bcrypt ignora en silencio todo lo que pase de 72 BYTES. Sin este
- *  chequeo, dos contrasenas distintas que compartan los primeros 72 bytes
- *  validarian igual y el operador no tendria forma de enterarse. */
-const CONTROLADOR_PASS_MAX_BYTES = 72;
+/** Tope duro, contado en BYTES porque el cifrado trabaja byte a byte y un
+ *  caracter acentuado ocupa dos. El limite real lo pone la columna: base64
+ *  expande 4/3, asi que varchar(255) aguanta 191 bytes de plano. Se corta bien
+ *  antes para que el error salga como un 422 legible y no como un truncado
+ *  silencioso del motor. */
+const CONTROLADOR_PASS_MAX_BYTES = 128;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
     switch ($method) {
-        case 'GET':    handleList();   break;
+        case 'GET':
+            // ?credencial=1&id=N devuelve la contrasena en claro de un
+            // controlador, para que el modal de Edicion la precargue.
+            if (isset($_GET['credencial'])) handleCredencial();
+            else                            handleList();
+            break;
         case 'POST':   handleCreate(); break;
         case 'PUT':    handleUpdate(); break;
         case 'DELETE': handleDelete(); break;
@@ -103,6 +116,39 @@ function handleList(): void
     ]);
 }
 
+/**
+ * Contrasena en claro de UN controlador, para que el modal de Edicion la abra
+ * en puntos y el ojo pueda revelarla. Es el gemelo de `handleCredencial()` en
+ * api/users.php y es posible por lo mismo: desde la migracion
+ * 20260907_1200 la columna guarda el cifrado legacy de Reactor, que es
+ * reversible, y no un hash.
+ *
+ * Se sirve de a un id, y NO dentro de handleList(), a proposito: asi el listado
+ * no viaja con las credenciales de todos los controladores en cada refresco y
+ * la contrasena solo sale cuando alguien abre ese controlador puntual.
+ *
+ * Una fila que todavia tenga un hash bcrypt —porque la migracion no corrio—
+ * devuelve cadena vacia en vez de la basura que saldria de desencriptar un
+ * `$2y$...`: vacio es exactamente lo que el modal interpreta como "no la
+ * cambies", que es el comportamiento seguro.
+ */
+function handleCredencial(): void
+{
+    $id = (int) ($_GET['id'] ?? 0);
+    if ($id <= 0) json_error('Id invalido', 422);
+
+    $stmt = db()->prepare('SELECT contrasena FROM controladores WHERE id = :id');
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+
+    if (!$row) json_error('Controlador no encontrado', 404);
+
+    $guardada = (string) ($row['contrasena'] ?? '');
+    $esHash   = preg_match('/^\$2[aby]\$/', $guardada) === 1;
+
+    json_ok(['password' => $esHash ? '' : reactor_legacy_desencriptar($guardada)]);
+}
+
 /** controlador -> [{id, nombre, activo}], para el listado y la ficha. */
 function rolesAsignados(?int $controlador = null): array
 {
@@ -160,7 +206,7 @@ function handleCreate(): void
             ':n'   => $datos['nombre'],
             ':c'   => $datos['correo'],
             ':cel' => $datos['celular'],
-            ':p'   => password_hash($password, PASSWORD_DEFAULT),
+            ':p'   => reactor_legacy_encriptar($password),
             // Entero, nunca el booleano de PHP: PDO bindea `false` como cadena
             // vacia. Ver lib/habilitado.php.
             ':h'   => valorHabilitado($datos['activo']),
@@ -218,7 +264,7 @@ function handleUpdate(): void
 
     if ($password !== '') {
         $sql          .= ', contrasena = :p';
-        $params[':p']  = password_hash($password, PASSWORD_DEFAULT);
+        $params[':p']  = reactor_legacy_encriptar($password);
     }
 
     $sql .= ' WHERE id = :id';
@@ -294,9 +340,9 @@ function handleDelete(): void
  *
  * Es la contracara del requisito "solo los controladores entran a cloud": con
  * la lista vacia no entra nadie, y recuperarse exigiria un INSERT a mano contra
- * la base de produccion. Mientras el login siga leyendo `usuarios` el escenario
- * no se puede dar todavia, pero la regla vive aca desde el principio para que
- * el corte del paso siguiente no dependa de acordarse de agregarla.
+ * la base de produccion. Desde el 07/09/2026 el login lee esta tabla
+ * (api/login.php), asi que el escenario dejo de ser hipotetico: esta funcion es
+ * lo unico que separa a cloud de un lockout total.
  */
 function garantizarQueQuedaAlguien(int $id, string $accion): void
 {

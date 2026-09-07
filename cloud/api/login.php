@@ -2,6 +2,30 @@
 
 declare(strict_types=1);
 
+/**
+ * Login de Reactor Cloud. AUTENTICA CONTRA `controladores`, NO CONTRA
+ * `usuarios`.
+ *
+ * Hasta el 07/09/2026 leia `usuarios`, que es la tabla de los clientes finales
+ * —los que entran a `app` y a `panel`—, y eso significaba que cualquier cuenta
+ * habilitada de cualquier dominio podia entrar al backoffice entero: el
+ * Explorador DB, el de S3, el Migrador y el Programador de tareas incluidos. El
+ * modulo Controladores existia desde el 06/09 justamente para ser esta lista, y
+ * lo unico que faltaba era que el login la leyera.
+ *
+ * LA CREDENCIAL ES EL CORREO. `controladores` no tiene columna `usuario`: tiene
+ * `correo` con UNIQUE, y api/controladores.php lo normaliza a minusculas al
+ * guardarlo. Aca se aplica el mismo strtolower() antes de buscar, porque el
+ * UNIQUE distingue mayusculas y sin esto "Ana@x.com" no encontraria la fila que
+ * se guardo como "ana@x.com".
+ *
+ * LA COMPARACION ES CONTRA EL CIFRADO LEGACY, con un fallback a bcrypt para las
+ * filas que todavia no migro
+ * cloud/sql/migrations/20260907_1200_controladores_contrasena_legacy.sql. El
+ * fallback no es una concesion de diseno: es lo que evita que el orden entre
+ * deploy y migracion deje a cloud sin nadie que pueda entrar.
+ */
+
 // Endpoint publico: no exige sesion previa.
 define('CLOUD_API_PUBLIC', true);
 
@@ -17,60 +41,80 @@ try {
     $body = $raw === false || $raw === '' ? [] : json_decode($raw, true);
     if (!is_array($body)) $body = [];
 
-    $usuario    = trim((string) ($body['usuario']    ?? ''));
-    $contrasena = (string)        ($body['contrasena'] ?? '');
+    // `usuario` se sigue aceptando como alias de `correo`: es la clave que
+    // mandaba el formulario viejo, y un login.php cacheado en el navegador no
+    // tiene por que tirar un 422 despues del deploy.
+    $correo     = strtolower(trim((string) ($body['correo'] ?? $body['usuario'] ?? '')));
+    $contrasena = (string)                  ($body['contrasena'] ?? '');
 
-    if ($usuario === '' || $contrasena === '') {
-        json_error('Usuario y contrasena son obligatorios', 422);
+    if ($correo === '' || $contrasena === '') {
+        json_error('Correo y contrasena son obligatorios', 422);
     }
 
-    // Lookup por `usuario`. El cifrado historico no es por usuario sino
-    // global (clave fija '0123456789'), asi que comparamos el resultado
-    // de encriptar la contrasena tipeada contra la columna `contrasena`.
     $stmt = db()->prepare(
-        'SELECT id, nombre, usuario, contrasena, habilitado, correo
-         FROM usuarios
-         WHERE usuario = :u
-         LIMIT 1'
+        'SELECT id, nombre, correo, contrasena, habilitado
+           FROM controladores
+          WHERE correo = :c
+          LIMIT 1'
     );
-    $stmt->execute([':u' => $usuario]);
+    $stmt->execute([':c' => $correo]);
     $row = $stmt->fetch();
 
     if (!$row) {
-        // Mensaje generico: no exponer si fallo el usuario o la contrasena.
-        json_error('Usuario o contrasena incorrectos', 401);
+        // Mensaje generico: no exponer si fallo el correo o la contrasena.
+        json_error('Correo o contrasena incorrectos', 401);
     }
 
-    // `usuarios.habilitado` es tinyint(1) NOT NULL: entra solo con 1.
+    // `controladores.habilitado` es tinyint(1) NOT NULL: entra solo con 1.
     if (!esHabilitado($row['habilitado'])) {
-        json_error('El usuario esta deshabilitado', 403);
+        json_error('El controlador esta deshabilitado', 403);
     }
 
-    $stored   = (string) ($row['contrasena'] ?? '');
-    $expected = reactor_legacy_encriptar($contrasena);
+    $guardada = (string) ($row['contrasena'] ?? '');
 
-    // hash_equals para comparacion constant-time (mitiga timing side-channels).
-    if ($stored === '' || !hash_equals($stored, $expected)) {
-        json_error('Usuario o contrasena incorrectos', 401);
+    if ($guardada === '') {
+        json_error('Correo o contrasena incorrectos', 401);
     }
 
-    $usuarioPayload = [
+    if (preg_match('/^\$2[aby]\$/', $guardada) === 1) {
+        // Fila sin migrar: sigue siendo bcrypt. password_verify ya es
+        // constant-time.
+        $ok = password_verify($contrasena, $guardada);
+    } else {
+        // hash_equals para comparacion constant-time (mitiga timing side-channels).
+        $ok = hash_equals($guardada, reactor_legacy_encriptar($contrasena));
+    }
+
+    if (!$ok) {
+        json_error('Correo o contrasena incorrectos', 401);
+    }
+
+    // `src` marca de que tabla salio este token. Lo exige authUser(), y es lo
+    // que mata las sesiones emitidas contra `usuarios` antes de este cambio en
+    // vez de dejarlas vivir las 12 h que les quedan de TTL: si el motivo del
+    // cambio es que esa gente no tenia que estar adentro, esperar medio dia no
+    // es cerrar la puerta.
+    //
+    // La clave `usuario` se conserva ademas de `correo` porque index.php la usa
+    // como fallback del nombre a mostrar.
+    $controladorPayload = [
         'id'      => (int) $row['id'],
-        'usuario' => (string) $row['usuario'],
-        'nombre'  => (string) $row['nombre'],
-        'correo'  => (string) ($row['correo'] ?? ''),
+        'src'     => 'ctl',
+        'correo'  => (string) $row['correo'],
+        'usuario' => (string) $row['correo'],
+        'nombre'  => (string) ($row['nombre'] ?? ''),
     ];
 
-    jwt_cookie_set(jwt_sign($usuarioPayload, JWT_TTL));
+    jwt_cookie_set(jwt_sign($controladorPayload, JWT_TTL));
 
     // Persistir el ultimo ingreso. Falla silenciosamente si la columna
     // estuviera ausente en alguna BD vieja: no bloquea el login.
     try {
-        $upd = db()->prepare('UPDATE usuarios SET ingresado = NOW() WHERE id = :id');
+        $upd = db()->prepare('UPDATE controladores SET ingresado = NOW() WHERE id = :id');
         $upd->execute([':id' => (int) $row['id']]);
     } catch (Throwable $_) { /* noop */ }
 
-    json_ok(['usuario' => $usuarioPayload]);
+    json_ok(['usuario' => $controladorPayload]);
 } catch (Throwable $e) {
     json_error('Error al procesar el login: ' . $e->getMessage(), 500);
 }

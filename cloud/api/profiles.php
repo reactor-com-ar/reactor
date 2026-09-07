@@ -285,10 +285,13 @@ function handleCreate(): void
     // sesion: los otros dos son las invitaciones, que corren sin ella y anotan
     // al emisor de la invitacion.
     //
-    // `?: null` y no el entero pelado: la columna es una FK y el `0` del sistema
-    // historico ya no es un valor valido. Mismo criterio que `usuarioAlta()`.
-    $actual      = authUser();
-    $registrante = ((int) ($actual['id'] ?? 0)) ?: null;
+    // VA EN NULL, Y NO ES UN OLVIDO. La columna es una FK contra
+    // `usuarios`.`id`, y desde el 07/09/2026 el login de cloud valida contra
+    // `controladores`: quien esta logueado no es una fila de `usuarios`, asi que
+    // su id ahi apuntaria a otra persona. Un perfil otorgado desde cloud no lo
+    // registro ningun usuario — lo registro Reactor —, y eso dice el NULL.
+    // Mismo criterio que `usuarioAlta()` en api/users.php.
+    $registrante = null;
 
     // La fila y sus paneles van en una transaccion: un perfil a medio asignar
     // deja permisos que nadie pidio.

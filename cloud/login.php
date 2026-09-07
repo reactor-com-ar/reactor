@@ -46,15 +46,15 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
                  alt="Reactor" class="login-logo">
         </div>
         <h1 class="login-title" id="login-title"><?= htmlspecialchars($appName) ?></h1>
-        <p class="login-subtitle">Ingres&aacute; con tu usuario para continuar.</p>
+        <p class="login-subtitle">Ingres&aacute; con tu correo para continuar.</p>
 
 
         <form id="login-form" class="login-form" autocomplete="on" novalidate>
             <div class="form-group">
-                <label for="login-usuario">Usuario</label>
-                <input type="text"
-                       id="login-usuario"
-                       name="usuario"
+                <label for="login-correo">Correo</label>
+                <input type="email"
+                       id="login-correo"
+                       name="correo"
                        autocomplete="username"
                        autocapitalize="off"
                        autocorrect="off"
@@ -85,7 +85,7 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
 (() => {
     'use strict';
     const form     = document.getElementById('login-form');
-    const usuario  = document.getElementById('login-usuario');
+    const correo   = document.getElementById('login-correo');
     const password = document.getElementById('login-contrasena');
     const errBox   = document.getElementById('login-error');
     const submit   = document.getElementById('login-submit');
@@ -94,26 +94,26 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
     function showError(msg) {
         errBox.textContent = msg;
         errBox.hidden = false;
-        usuario.classList.toggle('input-invalid', !usuario.value.trim());
+        correo.classList.toggle('input-invalid', !correo.value.trim());
         password.classList.add('input-invalid');
     }
     function clearError() {
         errBox.hidden = true;
         errBox.textContent = '';
-        usuario.classList.remove('input-invalid');
+        correo.classList.remove('input-invalid');
         password.classList.remove('input-invalid');
     }
-    usuario.addEventListener('input', clearError);
+    correo.addEventListener('input', clearError);
     password.addEventListener('input', clearError);
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         clearError();
 
-        const u = usuario.value.trim();
+        const c = correo.value.trim().toLowerCase();
         const p = password.value;
-        if (!u || !p) {
-            showError('Usuario y contraseña son obligatorios.');
+        if (!c || !p) {
+            showError('Correo y contraseña son obligatorios.');
             return;
         }
 
@@ -125,7 +125,7 @@ $cacheBust   = is_file($versionFile) ? trim((string) file_get_contents($versionF
             const res = await fetch('api/login', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                body: JSON.stringify({ usuario: u, contrasena: p }),
+                body: JSON.stringify({ correo: c, contrasena: p }),
                 credentials: 'same-origin',
             });
             let body = null;

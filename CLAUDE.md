@@ -132,6 +132,7 @@ cambia es a quién dan de alta:
 | a dónde enlaza el correo | `panel.reactor.com.ar/invitacion/` | `app.reactor.com.ar/invitacion/` |
 | `tipo` del perfil que crea | `A` (Administrador) | **`O` (Operador)** |
 | `operacion` / `invitacion` / `facturacion` | `1` / `1` / `0` | `1` / `1` / `0` |
+| `registrante` del perfil que crea | `invitaciones.emisor` | `invitaciones.emisor` |
 
 - **El `tipo` no es simetría rota, es la razón de ser de cada una.** Al panel
   sólo entra un Administrador, así que su invitación sólo puede significar alta
@@ -152,3 +153,45 @@ cambia es a quién dan de alta:
 - **Las dos le asignan al perfil nuevo todos los paneles habilitados del
   dominio.** No es un extra: `perfiles_paneles` no tiene fallback, así que sin
   esas filas la persona entra a una app vacía.
+- **Y las dos anotan al emisor como `registrante` del perfil** — ver la sección
+  siguiente. En el tercer caso (ya tenía perfil) no se anota nada: no se creó
+  ningún acceso.
+
+## `perfiles.registrante`: quién otorgó el acceso
+
+Columna de `perfiles` entre `panel` y `habilitado`, creada por
+[cloud/sql/migrations/20260907_1100_perfiles_registrante.sql](cloud/sql/migrations/20260907_1100_perfiles_registrante.sql).
+`int NULL` con FK a `usuarios`(`id`) `ON DELETE SET NULL`. Guarda **el id del
+usuario que dio de alta ese perfil**, sea por invitación o a mano desde cloud.
+
+- **Es el espejo de `usuarios`.`registrante`, no un duplicado.** Esa columna
+  dice quién creó la **cuenta**; ésta, quién otorgó **este acceso**. Son dos
+  altas distintas: una cuenta se crea una sola vez y después acumula perfiles en
+  varios dominios, cada uno otorgado por alguien distinto y en otro momento.
+- **Al aceptar una invitación se escriben las dos columnas, o sólo una:**
+
+  | caso | `usuarios.registrante` | `perfiles.registrante` |
+  |---|---|---|
+  | la persona **no** tenía cuenta | emisor de la invitación | emisor de la invitación |
+  | la persona **ya** tenía cuenta | *no se toca* | emisor de la invitación |
+  | ya tenía perfil habilitado ahí | *no se toca* | *no se crea nada* |
+
+  La cuenta que ya existía la registró otra persona, en otro momento y quizá en
+  otro dominio: pisarle el dato sería reescribir un hecho. El acceso, en cambio,
+  lo está otorgando esta invitación.
+- **`NULL` es un valor válido y significa "no se sabe".** Lo tienen las 2.227
+  filas que ya existían: la migración **no** las siembra a propósito —`perfiles`
+  no guarda cuándo se creó la fila y `invitaciones` no apunta al perfil que
+  produjo, así que el dato no se puede reconstruir sin inventarlo. Se llena de
+  acá en adelante.
+- **Se escribe con `?: null`, nunca con el entero pelado**: es una FK y el `0`
+  del sistema histórico ya no es un valor válido. Mismo criterio con el que
+  `usuarioAlta()` escribe `usuarios`.`registrante`.
+- **La FK es `ON DELETE SET NULL` y no `RESTRICT`** como casi todo el esquema:
+  apunta a quien *registró*, no a quien *pertenece*. Borrar un usuario ya obliga
+  a borrar antes todos sus perfiles; sumarle los perfiles **ajenos** que alguna
+  vez otorgó lo volvería impracticable.
+- **Los tres caminos que crean perfiles ya la escriben**: el alta de cloud
+  ([cloud/api/profiles.php](cloud/api/profiles.php)) con el usuario de la sesión
+  —es el único alta *con* sesión—, y las dos invitaciones con
+  `invitaciones.emisor`, que corren sin sesión.

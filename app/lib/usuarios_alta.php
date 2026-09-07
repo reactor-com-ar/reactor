@@ -66,7 +66,9 @@ const USUARIO_AUTENTICACION_INICIAL = 'F';
  */
 const USUARIO_HABILITADO_INICIAL = HABILITADO;
 
-require_once dirname(__DIR__) . '/api/legacy_crypto.php';
+// Unica diferencia con la copia del panel: alla el cifrado legacy vive en
+// `api/legacy_crypto.php` y aca en `lib/legacy_crypto.php`.
+require_once __DIR__ . '/legacy_crypto.php';
 
 /**
  * Da de alta un usuario y devuelve su id.

@@ -633,6 +633,21 @@ th.action-col, td.action-col {
     font-size: .9rem; color: var(--text);
     word-break: break-word; white-space: pre-wrap;
 }
+/* Variante EN FILA: rotulo (mas su glosa) a la izquierda y pildora de estado a
+ * la derecha. La usan las pestañas Permisos y Paneles de Consultar perfil, que
+ * son listas de "esto lo tiene / esto no": con las pildoras alineadas contra el
+ * borde derecho se leen todas en la misma columna. `min-width: 0` en el bloque
+ * izquierdo y `flex: none` en el badge para que una glosa larga corte por
+ * palabra en vez de empujar la pildora fuera de la tarjeta. Portada de cloud. */
+.view-card-row {
+    flex-direction: row; align-items: center;
+    justify-content: space-between; gap: 12px;
+}
+.view-card-main {
+    display: flex; flex-direction: column; gap: 4px;
+    min-width: 0;
+}
+.view-card-row > .badge { flex: none; }
 .view-card-value code {
     font-family: monospace; font-size: .85rem;
     background: var(--bg); border: 1px solid var(--border);
@@ -792,7 +807,6 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
  * esta seccion es el reparto horizontal — `flex: 1` en el nombre es lo que
  * empuja el switch contra el borde derecho. */
 .paneles-wrap     { display: flex; flex-direction: column; gap: 12px; }
-.paneles-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
 .paneles-lista    {
     border: 1px solid var(--border); border-radius: var(--radius);
     background: var(--bg); overflow: hidden;
@@ -803,10 +817,12 @@ button.dominio-item:hover .dominio-item-nombre { color: var(--primary); }
 /* `min-width: 0` deja que un nombre largo corte en vez de desbordar la caja. */
 .panel-item-nombre      { flex: 1 1 auto; min-width: 0; font-size: .88rem;
                           color: var(--text); word-break: break-word; }
-.panel-item-nombre code { font-size: .76rem; color: var(--muted); margin-left: 6px; }
-/* La misma fila la reusa la pestaña Permisos de Editar perfil, donde el
-   segundo renglon no es un `<code>` con el id sino la frase que dice QUE abre
-   el permiso: va en bloque abajo, no colgada al lado del nombre. */
+/* La misma fila la reusa la pestaña Permisos de Editar perfil, donde el nombre
+   lleva un segundo renglon: la frase que dice QUE abre el permiso. Va en bloque
+   abajo, no colgada al lado del nombre. La fila de PANEL no tiene segundo
+   renglon: llevo el `<code>` con el id y el badge `Ultimo abierto` hasta el
+   07/09/2026 y se sacaron por pedido, junto con los botones de seleccion masiva
+   (`.paneles-acciones`, que quedo sin uso). */
 .panel-item-nombre .muted { display: block; margin-top: 2px; font-size: .78rem; }
 .paneles-vacio    { padding: 16px 12px; text-align: center;
                     color: var(--muted); font-size: .85rem; }

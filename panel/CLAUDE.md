@@ -472,6 +472,48 @@ Herramientas y sus utilidades tienen sus propias skills dedicadas
 (`abm_design`, `crear_modulo_herramientas`, etc.) — respetalas cuando
 implementes cada uno.
 
+### EL `Código` (el id) NO SE MUESTRA EN NINGÚN MÓDULO (07/09/2026)
+
+Regla transversal del panel, y **se aparta a propósito del skill `abm_design`**,
+que pide `Código` como primera columna del listado. Vale para los seis módulos
+con listado — Dispositivos, Usuarios, Chips, Actividad, Facturas y Recibos — y
+en las **tres** capas donde el id asomaba:
+
+| dónde | qué se sacó |
+|---|---|
+| listado | la columna `Código` y su celda `.td-id` (`colspan` de los estados vacíos: 8 → 7, y 8/7 → 7/6 en comprobantes) |
+| modal de Filtros | el campo `Código` (`#*-f-codigo`), su listener, su reset y la clave `codigo` de `*_DEFAULTS` + del `GET` |
+| modal de Consultar | el `#N` del título y la tarjeta `Código` donde existía (Actividad y Comprobantes) |
+
+- **Es un dato interno, no del cliente.** El panel es el back office **del
+  dominio**: el id es la PK del sistema histórico y no identifica nada que la
+  persona pueda reconocer. Cada módulo ya tiene su identificador propio y
+  legible — `uuid` en Dispositivos, `usuario` en Usuarios, `telefono` en Chips,
+  `numero` en Facturas y Recibos.
+- **Sacar la columna obliga a rehacer dos cuentas, no una.** El `colspan` de las
+  filas vacías (`Cargando…` / error / "no hay resultados") y **la paridad de las
+  fichas de Consultar**: `.view-grid` es flex con `flex-grow: 1` (CSS §11), así
+  que quitar una tarjeta deja la cuenta impar y estira la última al 100%, que se
+  lee como un destaque deliberado. En Actividad → General eso se resolvió
+  marcando `Fecha` como `view-card-full` en la ranura impar (ver más abajo).
+- **El backend sigue aceptando `codigo`** en los cinco endpoints: no se tocó
+  ninguno. Lo que desapareció es el control que lo mandaba, así que reponer el
+  filtro es volver a dibujarlo. **La excepción a mirar es Actividad**, donde el
+  lookup por id era el único camino que el backend resolvía *sin* la ventana de
+  200.000 registros — ver "la ventana de búsqueda es fija" más abajo.
+- **`Ordenar por → Código` se conserva** en los modales de Filtros, y no es una
+  inconsistencia: es el criterio de orden (la PK, que en estas tablas es
+  cronológica), no un dato de la fila. En Actividad además es la **única**
+  opción posible — `registros` no tiene índice por `fecha` y ordenar por ella
+  tarda 5,5 s.
+- **Invitaciones ya venía así** desde el 03/09/2026 y con el mismo argumento
+  (ahí el identificador visible es el `uuid`). Lo que cambió es que dejó de ser
+  la excepción del panel para ser la regla. **Conserva su filtro por `Código`**:
+  no estaba en el pedido, y en ese módulo es el atajo del soporte.
+- **Queda fuera `Mi cuenta`** (el modal del botón de usuario de la topbar), que
+  sigue mostrando su tarjeta `Código`: es la ficha de la propia cuenta y no el
+  listado de un módulo.
+
 ### Dashboard → gráfico "Uso por dispositivo"
 
 `api/dashboard_senales.php` + `renderDashboard()` agregan debajo de las stat
@@ -623,8 +665,11 @@ responder.
 La ficha **no muestra todo lo que devuelve el endpoint**: son 16 campos de los
 ~35 que sirve `api/dispositivos.php`. Quedan fuera a propósito:
 
-- **`id`**: no hay tarjeta `Código`. El id ya encabeza el modal
-  (`Consultar dispositivo #N`), así que repetirlo adentro es ruido.
+- **`id`**: no hay tarjeta `Código` — y desde el 07/09/2026 tampoco está en el
+  título, que es `Consultar dispositivo` a secas. Antes el argumento era que el
+  id ya encabezaba el modal (`Consultar dispositivo #N`) y repetirlo adentro era
+  ruido; hoy directamente no se muestra en ningún lado del módulo (ver "El
+  `Código` (el id) no se muestra en ningún módulo").
 - **`dominio`**: el panel filtra todo por el dominio de la sesión, así que la
   columna sólo puede tener un valor y repetirlo en cada ficha no informa nada.
 - **Catálogos que administra Reactor y el cliente no elige**: `agente`,
@@ -903,17 +948,23 @@ entidad que el registro referencia. Reglas que no se deducen del esquema:
   dispositivo: ahí el panel muestra un estado vacío explícito. Que una
   pestaña aparezca y desaparezca según la fila haría saltar el modal y
   dejaría al usuario sin saber si falta la pestaña o si no hay dato.
-- **Las tres fichas tienen 8 campos — par a propósito.** `.view-grid` es flex
-  con `flex-grow: 1` (CSS §11): con la cuenta impar la última tarjeta se
-  estira al 100% y se lee como un campo destacado deliberado. Mismo criterio
-  que Dispositivos → General y Usuarios → Consultar.
-- **General perdió cuatro campos** (03/09/2026): `UUID del dispositivo`,
-  `Número de canal`, `Correo` y `Dominio`. Los dos primeros y el correo no se
-  perdieron — pasaron a las pestañas nuevas (`Identificador` del equipo,
-  `Correo` del usuario). `Dominio` no vuelve en ningún lado: el panel filtra
-  todo por el dominio de la sesión, así que la columna sólo puede tener un
-  valor (el mismo criterio con el que se excluyó de Dispositivos → General y
-  de Usuarios → Consultar).
+- **La paridad se cuida en las tres, pero ya no es la misma cuenta.**
+  `.view-grid` es flex con `flex-grow: 1` (CSS §11): con la cuenta impar la
+  última tarjeta se estira al 100% y se lee como un campo destacado deliberado.
+  `Usuario` y `Dispositivo` siguen en **8 campos** y cierran solas; **`General`
+  quedó en 7** al sacarse `Código` (07/09/2026), así que **`Fecha` va
+  `view-card-full` en la ranura impar** —la primera— y las seis restantes
+  cierran de a dos. La tarjeta full le viene bien al valor, que es la fecha
+  larga con segundos. Mismo criterio que Dispositivos → General y Usuarios →
+  Consultar.
+- **General perdió `Código`** (07/09/2026) y, antes, **cuatro campos más**
+  (03/09/2026): `UUID del dispositivo`, `Número de canal`, `Correo` y `Dominio`.
+  Los dos primeros y el correo no se perdieron — pasaron a las pestañas nuevas
+  (`Identificador` del equipo, `Correo` del usuario). `Dominio` no vuelve en
+  ningún lado: el panel filtra todo por el dominio de la sesión, así que la
+  columna sólo puede tener un valor (el mismo criterio con el que se excluyó de
+  Dispositivos → General y de Usuarios → Consultar). El `#id` del título se fue
+  junto con la tarjeta: el modal se titula `Consultar actividad` a secas.
 - **El modal pasó a `wide: true`** (880px): con tres solapas y tarjetas al
   50%, los 520px del ancho base quedaban apretados. Es el mismo ancho del
   otro modal con pestañas, Consultar dispositivo.
@@ -940,14 +991,22 @@ Dos recortes de UI del 03/09/2026 sobre `renderActividad()`:
   (ver `project_registros_scale`). Lo que se quitó es la posibilidad de
   **ampliarla** desde la UI, que era justamente la opción cara. Como el select
   ya no está, la línea `#ac-ventana-nota` bajo la tarjeta de ayuda dejó de
-  decir "ampliá la ventana desde Filtros" y ahora manda a **buscar por
-  código**, que es el único camino al historial viejo (el backend resuelve el
-  lookup por id sin ventana). `api/actividad.php` conserva su lista `VENTANAS`
-  y sigue validando contra ella: el día que haga falta reponer el selector,
-  el backend ya lo soporta.
-- Al sacar el select, `Dispositivo` quedaba solo en un `.filters-grid` de dos
-  columnas con media columna vacía a la derecha, así que pasó a ser un
-  `.form-group` suelto a todo el ancho.
+  decir "ampliá la ventana desde Filtros". `api/actividad.php` conserva su lista
+  `VENTANAS` y sigue validando contra ella: el día que haga falta reponer el
+  selector, el backend ya lo soporta.
+- **AL HISTORIAL VIEJO YA NO HAY ATAJO** (07/09/2026). Hasta esa fecha la nota
+  mandaba a **buscar por código**, que era el único camino: el backend resuelve
+  el lookup por id **sin** aplicar la ventana. Al sacarse el filtro `Código` de
+  todos los módulos (ver "El `Código` (el id) no se muestra en ningún módulo")
+  ese camino se cerró desde la UI y la nota quedó diciendo sólo dentro de qué
+  ventana se busca. **El endpoint sigue aceptando `codigo` y sigue resolviéndolo
+  sin ventana** — no se tocó —, así que reponerlo es volver a dibujar el campo.
+  Lo que queda hoy para mirar hacia atrás es acotar por fecha **dentro** de la
+  ventana; más allá de los 200.000 ids, no hay pantalla que llegue.
+- Al sacar el select primero y el campo `Código` después, los dos selects que
+  quedaron —`Usuario` y `Dispositivo`— comparten un `.filters-grid` de dos
+  columnas. Con `Código` adentro, `Usuario` quedaba con media columna vacía a su
+  derecha y `Dispositivo` solo a lo ancho debajo.
 
 ### Comprobantes (Facturas y Recibos)
 
@@ -1134,7 +1193,9 @@ Las columnas son `Identificador` / `Emitida` / `Emisor` / `Destinatario` /
   módulo —tampoco en el modal— porque la invitación se identifica por su
   `uuid`, que es lo que viaja en el enlace del correo. El filtro por código
   sigue estando en el modal de Filtros: es el atajo para el soporte, no una
-  columna.
+  columna. **Esto dejó de ser la excepción del panel el 07/09/2026**, cuando la
+  columna se sacó de los otros seis listados; Invitaciones es hoy el único que
+  **conserva el filtro**, porque el pedido no lo incluyó.
 - **`Emisor` y `Destinatario` se pintan con la misma celda** (`celdaPersona()`):
   nombre arriba en `.td-nombre` (blanco, 600) y debajo correo y celular en
   `.td-id` (tenue, monoespaciada). Lo único que cambia es de dónde salen los
@@ -1214,12 +1275,18 @@ quién tiene acceso a este dominio, y eso vive en `perfiles`, no en
   [lib/habilitado.php](lib/habilitado.php) (los enteros 1 y 0), nunca con un
   literal ni con un booleano de PHP — ver "La bandera `habilitado`" más abajo.
 - **Una persona puede aparecer varias veces**: son 8 los pares
-  `(usuario, dominio)` con más de un perfil. La fila se identifica por el
-  **`Código` = id del perfil**, no por el usuario.
+  `(usuario, dominio)` con más de un perfil. **La fila es el perfil, no la
+  persona**, y las dos apariciones se distinguen por lo que las diferencia
+  —estado, último ingreso— no por el usuario, que es el mismo en las dos. Hasta
+  el 07/09/2026 se identificaban por el **`Código` = id del perfil**; esa columna
+  ya no está (ver "El `Código` (el id) no se muestra en ningún módulo"), y el id
+  sigue viajando en `data-id` de la `<tr>`, que es lo que usan el menú y el
+  modal.
 - **Ya no hay columna `Rol` en el listado** (06/09/2026): se eliminó
-  `perfiles.rol`. El listado quedó en `Código / Usuario / Nombre / Correo /
-  Celular / Estado / Último ingreso / Acciones`, y el filtro por rol se fue del
-  modal de Filtros junto con la opción `Rol` del selector de orden.
+  `perfiles.rol`. El listado quedó en `Usuario / Nombre / Correo / Celular /
+  Estado / Último ingreso / Acciones` —sin `Código` desde el 07/09/2026—, y el
+  filtro por rol se fue del modal de Filtros junto con la opción `Rol` del
+  selector de orden.
 - **El modal de Consultar muestra `Tipo` en la ranura que ocupaba `Rol`.** No es
   un reemplazo conceptual —`tipo` es el `ENUM('A','O')` que lee el legacy, no un
   rol— pero es el único atributo del perfil que queda además del nombre, y la
@@ -1328,7 +1395,9 @@ Reglas que no se deducen del esquema:
   dispositivo). Copiar usuario / correo y habilitar-deshabilitar siguen viviendo
   en el menú contextual de la fila.
 - **La ficha no muestra `id`, `autenticacion`, `roles`, `panel`, `dominio` ni
-  `perfiles.tipo`.** El id ya encabeza el modal (`Consultar perfil #N`);
+  `perfiles.tipo`.** El id tampoco encabeza ya el modal: el título es `Consultar
+  perfil` a secas desde el 07/09/2026 (hasta entonces era `Consultar perfil #N`,
+  y ése era justamente el argumento para no repetirlo adentro);
   `autenticacion`, `roles` y `panel` son internos del sistema histórico;
   `dominio` sólo puede tener un valor, porque el panel filtra todo por el
   dominio de la sesión —el mismo criterio con el que se excluyó de
@@ -1363,43 +1432,69 @@ Reglas que no se deducen del esquema:
   `Paneles`): es la misma ficha en lectura y en edición, y si no coincidieran se
   leerían como dos pantallas distintas. Se cablean con `montarPestanas()`.
 - **Las tres solapas están siempre**, aunque el perfil no tenga ningún permiso o
-  el dominio ningún panel: ahí va un estado vacío explícito (`.paneles-vacio`
-  dentro de una `.paneles-lista`, la misma caja del editor). Que una pestaña
-  aparezca y desaparezca según la fila hace saltar el modal y deja al que mira
-  sin saber si falta la pestaña o si no hay dato — mismo criterio que Actividad.
-  **Es la diferencia con el EDITOR**, donde `Permisos` no existe si no hay
-  ninguno para otorgar: allá la solapa vacía no sería un dato de la fila sino una
-  pantalla sin nada que hacer.
-- **`Permisos` lista SÓLO los que el perfil tiene.** El que no tiene no aparece
-  —no hay fila "Deshabilitado"—: la pestaña es lo que ese acceso *puede hacer*, y
-  un renglón negativo ocupa el mismo lugar que uno que habilita algo sin agregar
-  nada. Sin ninguno queda el estado vacío, que es lo que distingue "no tiene
-  permisos" de "la pestaña no cargó".
+  el dominio ningún panel. Que una pestaña aparezca y desaparezca según la fila
+  hace saltar el modal y deja al que mira sin saber si falta la pestaña o si no
+  hay dato — mismo criterio que Actividad. **Es la diferencia con el EDITOR**,
+  donde `Permisos` no existe si no hay ninguno para otorgar: allá la solapa vacía
+  no sería un dato de la fila sino una pantalla sin nada que hacer.
+
+#### El formato de `Permisos` y `Paneles` es el mismo, y es el de cloud
+
+Portado de `cloud/` → Perfiles → Consultar perfil el 07/09/2026
+(`viewCardEstado()` en `assets/js/app.js`, `.view-card-row` / `.view-card-main`
+en CSS §11b). Las dos pestañas contestan la misma pregunta —**qué tiene prendido
+este perfil**— y resolverla con dos formas distintas obliga a releer la segunda.
+
+- **Tarjeta EN FILA, siempre `full`**: nombre a la izquierda y píldora
+  `Habilitado` / `Deshabilitado` a la derecha, contra el borde. Lo que se lee de
+  un vistazo es la **columna de píldoras**; apiladas, el badge arranca donde
+  termine el rótulo de arriba y nunca hay dos en la misma `x`.
+- **La glosa bajo el nombre es opcional y sólo la lleva `Permisos`** (la frase de
+  `PERMISOS_PERFIL` que dice qué abre cada uno). `Paneles` llevó un
+  `<code>#id</code>` ahí hasta el 07/09/2026 y se sacó por pedido: el id del
+  panel no es un dato del acceso. **Sobrevive sólo como nombre de reemplazo**
+  (`Panel #12`) en las filas que salieron de la unión y no del catálogo, que es
+  el único caso sin nombre. Sin glosa, `viewCardEstado()` omite el
+  `.view-card-value` entero — y **no cae al `DASH`** como `viewCard()`: un guion
+  es "este campo no tiene valor", y la glosa no es un campo sino la aclaración
+  del rótulo.
+- **Sin paridad que calcular.** Al ir todas `full` desapareció la ranura impar
+  que la pestaña `Paneles` resolvía en tiempo de dibujo
+  (`catalogo.length % 2 === 1 && i === 0`), y con ella el último lugar del panel
+  donde la cuenta de tarjetas dependía del dominio.
+- **`Permisos` lista LOS TRES, tenga el perfil el permiso o no** (07/09/2026).
+  Antes listaba sólo los otorgados, con este argumento: la pestaña es lo que ese
+  acceso *puede hacer* y un renglón negativo ocupa el mismo lugar sin agregar
+  nada. Ya no se sostiene con la píldora a la derecha — **un permiso que no
+  aparece no se distingue de un permiso que no existe**, y lo que se lee es la
+  columna de estados, que necesita las tres filas. De paso desapareció el estado
+  vacío de esa pestaña: los tres están siempre, así que no hay caso "sin
+  permisos" que distinguir de "la pestaña no cargó".
 - **No se filtra por `puede()`**, a diferencia del editor. Allá se esconde el
   permiso que la sesión no tiene porque nadie otorga lo que no tiene; acá no se
   otorga nada, y esconderlo ocultaría un dato de la fila que se está consultando.
 - **El texto de cada permiso sale de `PERMISOS_PERFIL`**, el mismo catálogo que
   dibuja el editor. Antes la ficha tenía su propia copia de la frase que dice qué
-  abre cada uno; dos copias se desincronizan solas. Van **todas `full`** porque
-  la lista tiene largo variable (cero a tres) y ninguna cuenta de paridad se
-  sostiene.
-- **`Paneles` lista el catálogo ENTERO, habilitados y no** — es la inversa de
-  `Permisos` y es a propósito. El catálogo son los paneles de **un** dominio (el
-  más grande de la base tiene 7) y lo que importa es **contra qué se recorta** el
+  abre cada uno; dos copias se desincronizan solas.
+- **`Paneles` lista el catálogo del dominio UNIDO a lo que el perfil ya tiene**,
+  no sólo los asignados. El catálogo son los paneles de **un** dominio (el más
+  grande de la base tiene 7) y lo que importa es **contra qué se recorta** el
   acceso: mostrando sólo los permitidos, un perfil con dos de siete se lee igual
-  que uno con dos de dos. Los permisos, en cambio, son tres claves fijas que ya
-  se conocen de memoria.
+  que uno con dos de dos.
+- **La unión no es cosmética**: `catalogoPaneles()` devuelve sólo los paneles
+  **habilitados** del dominio, así que un panel asignado que después se apagó no
+  está ahí y desaparecería de la ficha aunque el perfil lo siga teniendo en
+  `perfiles_paneles`. Esas filas salen con `#id` por nombre, que es lo único que
+  se sabe de ellas. Mismo criterio que `perfilPanelesFicha()` en cloud.
 - **El badge de la tarjeta de panel habla del PERMISO DEL PERFIL, no del estado
-  del panel**: `catalogoPaneles()` ya devuelve sólo los paneles habilitados del
-  dominio (dar permiso sobre uno apagado no significa nada, porque `app` no lo
-  lista igual).
-- **Con el catálogo impar, la primera tarjeta va `full`** para que las que siguen
-  cierren de a dos. Es la ranura impar que documenta Dispositivos → General,
-  pero resuelta **en tiempo de dibujo** (`catalogo.length % 2 === 1 && i === 0`)
-  porque acá el largo depende del dominio y no se puede fijar en el código.
-- **No se marca el `Último abierto`** que sí muestra el editor. Ese badge existe
-  allá porque avisa qué se rompe al destildar esa fila (`perfiles.panel` se va a
-  `NULL`); acá no se destilda nada.
+  del panel** (dar permiso sobre uno apagado no significa nada, porque `app` no
+  lo lista igual).
+- **`Paneles` conserva el estado vacío** (`.paneles-vacio` dentro de una
+  `.paneles-lista`, la misma caja del editor) para el dominio que no tiene ningún
+  panel habilitado. Es el único que queda en el modal: `Permisos` ya no puede
+  quedar vacía.
+- **No se marca el `Último abierto`.** Lo mostró el editor hasta el 07/09/2026 y
+  la ficha nunca — acá no se destilda nada. Hoy no lo muestra ninguno de los dos.
 
 ### Usuarios → modal Editar perfil (pestañas General / Permisos / Paneles)
 
@@ -1428,9 +1523,12 @@ el alcance por dominio del panel.
 - **Sin ningún permiso que otorgar, la pestaña no existe**: ni la solapa ni el
   panel. Una solapa vacía se lee como una pantalla rota — el mismo criterio con
   el que `index.php` omite el agrupador `Cuenta` entero en vez de vaciarlo.
-- **La pestaña no lleva texto introductorio.** Tuvo un `.form-nota` que explicaba
-  que los permisos son independientes del estado y del tipo; se sacó por pedido
-  explícito. Las tres filas ya dicen qué abre cada una.
+- **Ninguna de las dos pestañas lleva texto introductorio.** `Permisos` tuvo un
+  `.form-nota` que explicaba que los permisos son independientes del estado y del
+  tipo; `Paneles`, otro que explicaba qué le pasa a la memoria de
+  `perfiles.panel` al destildar el `Último abierto`. Los dos se sacaron por
+  pedido explícito. Las filas ya dicen lo suyo, y la regla de la memoria vive en
+  `olvidarPanelSinPermiso()`.
 - **Viajan sólo los permisos dibujados**, y los que no están no se tocan (el
   `PUT` relee de la fila lo que no viene). Hasta el 07/09/2026 iban los tres
   siempre —el bloqueado mandaba su valor sin cambios— para que el payload no
@@ -1444,7 +1542,13 @@ el alcance por dominio del panel.
   (`.paneles-lista` + `.toggle-switch.panel-item`): es la misma forma y duplicar
   CSS para tres filas no compra nada. Lo único que se agregó es
   `.panel-item-nombre .muted { display: block }`, porque el segundo renglón acá
-  es una frase y no el `<code>` con el id.
+  es una frase y sin eso los tres permisos quedan en una línea sola.
+- **La fila de panel es sólo el nombre.** Hasta el 07/09/2026 llevó además un
+  `<code>#12</code>` y el badge `Último abierto`; los dos se sacaron por pedido,
+  el `<code>` junto con el de la ficha. El id no ayuda a elegir y el `value` del
+  checkbox lo sigue llevando — que es lo único que necesita el guardado. El panel
+  sin nombre conserva su `Sin nombre` de siempre. Al irse el badge, `formPerfil()`
+  dejó de calcular `recordado` y `panelesListaHtml()` perdió su tercer parámetro.
 - **El usuario va como campo deshabilitado.** Da el contexto de *qué* acceso se
   está editando; no es un campo del formulario. Mismo recurso que usa cloud, que
   ahí muestra los selects de usuario y dominio en `disabled`.
@@ -1467,8 +1571,13 @@ el alcance por dominio del panel.
 - **La lista de paneles es un switch por fila, sin buscador.** No reusa ningún
   selector con filtro a propósito: el catálogo son los paneles de **un** dominio
   y el más grande de la base tiene 7 (dominio 216), así que un buscador sobre
-  siete filas es ruido. `Seleccionar todo` / `Deseleccionar todo` operan sobre
-  toda la lista — sin buscador no hay nada oculto que puedan pisar por sorpresa.
+  siete filas es ruido.
+- **Y sin `Seleccionar todo` / `Deseleccionar todo`** (07/09/2026, pedido
+  explícito). Existieron y operaban sobre toda la lista; se sacaron por el mismo
+  argumento que el buscador — son dos botones sobre a lo sumo siete filas, donde
+  tildar a mano cuesta lo mismo. Con ellos se fueron el `.paneles-acciones` del
+  control y el listener que los cableaba en `formPerfil()`. Mismo cambio en
+  `cloud/` (DESIGN.md §35).
 - **El `input` va PEGADO al `.toggle-track`.** El CSS del switch (§11h) pinta el
   estado con `input:checked + .toggle-track`: cualquier nodo entre los dos lo
   deja siempre apagado. Es el error fácil de cometer al reordenar el markup.
@@ -1521,10 +1630,13 @@ paneles desde afuera de `app`. Por eso el guardado la limpia
 - **`NULL` y no `0`**: con las FK declaradas en `db/schema.sql`, el `0` del
   legacy ya no es un valor válido. Mismo criterio con el que lo escribe
   `panel/invitacion/aceptar.php`.
-- **La UI lo marca con el badge `Último abierto`** sobre la fila que corresponde,
-  y la nota de la pestaña avisa que destildarla borra esa memoria. **No es una
-  tercera opción del switch**: es información sobre qué pasa si se destilda esa
-  fila, no algo que se elija desde acá.
+- **La UI ya no la muestra en ningún lado** (07/09/2026, pedido explícito). El
+  editor marcaba esa fila con un badge `Último abierto` y una nota que avisaba
+  que destildarla borra la memoria; se sacaron los dos. **La regla no era del
+  badge**: `olvidarPanelSinPermiso()` sigue mandando `panel` a `NULL` al guardar
+  si el perfil pierde el permiso sobre el panel recordado. Lo que desapareció es
+  el aviso, no el comportamiento — y como `perfiles.panel` no es editable desde
+  acá, tampoco había nada que elegir.
 
 ### Módulos de ficha única
 

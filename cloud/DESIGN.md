@@ -1511,6 +1511,10 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
                 display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .view-card-half { flex: 1 1 calc(50% - 6px); }
 .view-card-full { flex: 1 1 100%; }
+.view-card-row  { flex-direction: row; align-items: center;
+                  justify-content: space-between; gap: 12px; }
+.view-card-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.view-card-row > .badge { flex: none; }
 .view-card-label { font-size: .75rem; font-weight: 600;
                    text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .view-card-value { font-size: .9rem; color: var(--text);
@@ -1527,6 +1531,9 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 - **Fondo de la tarjeta fijo**: `color-mix(in srgb, var(--surface) 90%, #000)`. No se sustituye por `--bg`, ni por otra mezcla — la regla del 10% más oscuro está en `ABM.md`.
 - **50% de ancho** (`view-card-half`) para valores cortos: códigos, números, fechas, estados, booleanos, IDs.
 - **100% de ancho** (`view-card-full`) para valores largos: descripciones, observaciones, direcciones completas, JSON, payloads MQTT.
+- **Variante en fila** (`view-card-row`, siempre sobre una `view-card-full`) para las **listas de "esto lo tiene / esto no"**: el nombre a la izquierda dentro de un `.view-card-main` —con su glosa debajo, en `muted`— y la **píldora de estado a la derecha**, contra el borde de la tarjeta. La usan las pestañas `Permisos` y `Paneles` de Consultar perfil. El motivo es la lectura en columna: la pregunta que se le hace a esas pestañas no es qué dice cada tarjeta sino **cuáles están prendidas**, y con los badges alineados en la misma `x` se contesta de un vistazo; apilados arrancan donde termine el rótulo de arriba y hay que leer tarjeta por tarjeta. **No es la forma por defecto** — un campo cualquiera va apilado, como el resto de §25.
+  - `min-width: 0` en `.view-card-main` y `flex: none` en el badge: sin los dos, una glosa larga empuja la píldora fuera de la tarjeta o la parte en dos renglones.
+  - Los rótulos del estado son **`Habilitado` / `Deshabilitado`** (`badge-success` / `badge-danger`), los mismos que la tarjeta `Estado` de `General`: la bandera `habilitado` es 1 o 0 y nada más, así que los fija el helper `viewCardEstado()` y no cada llamador.
 - El modal de Consultar muestra **todos los campos** de la entidad (no solo los del listado). Es la única vista donde el usuario ve la fila completa sin pasar al modo edición.
 - Valores nulos / vacíos van como `<span class="muted">—</span>` o `<span class="muted">Sin descripción</span>` dentro del `view-card-value`.
 - JSON / payloads dentro de `<pre>`; no usar `.json-editor` (es para edición, no para read-only).
@@ -2034,21 +2041,13 @@ Control de modal de Alta/Edición para elegir un subconjunto de un catálogo de 
 
 ## 35. Lista de paneles del perfil
 
-Control de la pestaña **Paneles** del modal de Alta/Edición de Perfiles: un switch por panel del dominio, con dos botones de selección masiva.
+Control de la pestaña **Paneles** del modal de Alta/Edición de Perfiles: un switch por panel del dominio, y nada más.
 
 ```html
 <div id="prf-paneles-wrap" class="paneles-wrap">
-  <div class="paneles-acciones">
-    <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-todos">
-      <i class="fa-solid fa-check-double"></i> Seleccionar todo
-    </button>
-    <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-ninguno">
-      <i class="fa-solid fa-xmark"></i> Deseleccionar todo
-    </button>
-  </div>
   <div class="paneles-lista">
     <label class="toggle-switch panel-item">
-      <span class="panel-item-nombre">AMERICANA <code>#218</code></span>
+      <span class="panel-item-nombre">AMERICANA</span>
       <input type="checkbox" value="218" checked>
       <span class="toggle-track"><span class="toggle-thumb"></span></span>
     </label>
@@ -2058,7 +2057,6 @@ Control de la pestaña **Paneles** del modal de Alta/Edición de Perfiles: un sw
 
 ```css
 .paneles-wrap      { display: flex; flex-direction: column; gap: 12px; }
-.paneles-acciones  { display: flex; gap: 8px; flex-wrap: wrap; }
 .paneles-lista     { border: 1px solid var(--border); border-radius: var(--radius);
                      background: var(--bg); overflow: hidden; }
 .paneles-lista .panel-item               { padding: 9px 12px; }
@@ -2075,9 +2073,34 @@ Control de la pestaña **Paneles** del modal de Alta/Edición de Perfiles: un sw
 - **NO reusa el selector de ids (§34), y es a propósito.** Ese control existe para catálogos de decenas de opciones —115 permisos, 122 menús— y por eso trae buscador y contador. Acá se listan los paneles de **un** dominio: el más grande de la base tiene 7. Un buscador sobre siete filas es ruido, y el switch comunica mejor que un checkbox que se está prendiendo o apagando un permiso.
 - **La fila ES el `.toggle-switch`**: el `label` envuelve nombre + `input` + track, así hereda el `display:flex`, el `cursor:pointer` y el pintado del §17. Esta sección sólo agrega el reparto horizontal — `flex: 1` en el nombre es lo que empuja el switch al borde derecho, y `min-width: 0` deja que un nombre largo corte en vez de desbordar.
 - **El `input` va pegado al `.toggle-track`.** El CSS del switch pinta el estado con `input:checked + .toggle-track`: cualquier nodo entre los dos deja el switch siempre apagado. Es el error fácil de cometer al reordenar el markup.
-- **`Seleccionar todo` / `Deseleccionar todo` operan sobre TODA la lista**, no sobre "lo visible" como en §34: sin buscador no hay nada oculto que puedan pisar por sorpresa.
+- **Sin `Seleccionar todo` / `Deseleccionar todo`** (07/09/2026, pedido explícito). Existieron y operaban sobre toda la lista; se sacaron porque son dos botones sobre a lo sumo 7 filas, donde tildar a mano cuesta lo mismo. Con ellos se fueron el `.paneles-acciones` del control y el `wirePanelesLista()` que los cableaba: **el control ya no necesita cablearse**, los switches son `<label>` + `<input>` y se leen recién al guardar (`readPanelesLista()`).
 - **La lista está acotada al dominio del perfil** y se re-renderiza entera cuando cambia el select de dominio en el alta. Un panel de otro dominio no es una opción válida y el backend lo rechaza con 422.
-- **El `gap` vertical vive en `.paneles-wrap`**, no en márgenes de los hijos: el wrap se re-renderiza entero al cambiar de dominio y así el ritmo no depende de qué se haya dibujado adentro.
+- **El `gap` vertical vive en `.paneles-wrap`**, no en márgenes de los hijos: el wrap se re-renderiza entero al cambiar de dominio y así el ritmo no depende de qué se haya dibujado adentro. Hoy le queda un solo hijo, así que no separa nada — pero el wrap sigue siendo el nodo que se re-renderiza y el que consultan `montarPaneles()` y `readPanelesLista()`.
+- **La fila es sólo el nombre del panel.** Llevó un `<code>#218</code>` al lado hasta el 07/09/2026 y se sacó por pedido, junto con el de la ficha (§35.1): el id no es un dato que ayude a elegir, y el `value` del checkbox lo sigue llevando — que es lo único que necesita el guardado. **El panel sin nombre cae a `Panel #id`**, porque el `<code>` era lo único que lo identificaba.
+
+### 35.1 Pestaña Paneles de Consultar
+
+En **Consultar perfil** la misma lista es read-only y va con las **tarjetas en
+fila de §25** (`view-card-full view-card-row`): el nombre del panel a la
+izquierda y a la derecha la píldora `Habilitado` / `Deshabilitado`. Es el mismo
+formato que la pestaña `Permisos` (§35-bis) — las dos contestan qué tiene
+prendido este perfil.
+
+```html
+<div class="view-card view-card-full view-card-row">
+  <div class="view-card-main">
+    <div class="view-card-label">Tablero de bombas</div>
+  </div>
+  <span class="badge badge-success">Habilitado</span>
+</div>
+```
+
+**Reglas:**
+
+- **Se listan TODOS los paneles del dominio, no sólo los asignados.** Antes iban los asignados como badges `badge-info` sueltas y ahí *"le faltan dos"* no se ve: sin las filas apagadas no hay con qué comparar. La píldora en `Deshabilitado` dice lo que el perfil **no** ve, que es justo lo que se mira antes de mandar a editar.
+- **El universo es el catálogo del dominio UNIDO a lo que el perfil ya tiene**, nunca sólo el catálogo. `catalogoPaneles()` trae únicamente paneles con `habilitado = 1`, así que un panel asignado que después se deshabilitó desaparecería de la ficha aunque siga en `perfiles_paneles`. Y si la ficha se abrió desde Consultar usuario → solapa Perfiles, el módulo Perfiles nunca se renderizó y el catálogo puede estar vacío: la unión es lo único que deja algo en pantalla, ahí con `#id` por nombre.
+- **Sin tarjeta madre que envuelva la lista.** El rótulo `Paneles en la app (N)` repetía el nombre de la pestaña y encerraba las filas en un segundo marco; la cuenta la dicen las píldoras. Si el dominio no tiene ningún panel habilitado sí va una tarjeta sola con `<span class="badge badge-warn">Ninguno</span>` y el porqué — eso es lo que un listado vacío no comunica.
+- **Sin segundo renglón con el `#id`.** La tarjeta llevó `<code>#12</code>` bajo el nombre hasta el 07/09/2026 y se sacó por pedido: el id del panel no es un dato del acceso, y con la píldora a la derecha la fila se lee de un renglón. **El `#id` sobrevive sólo como nombre de reemplazo** (`Panel #12`) en las filas que salieron de la unión y no del catálogo — el único caso donde no hay nombre. `viewCardEstado()` omite el `.view-card-value` entero cuando no hay glosa, en vez de dejar un div vacío que el `gap` separaría igual.
 
 ---
 
@@ -2096,7 +2119,9 @@ Cada uno abre algo concreto **en otra app del repo**:
 **Reglas:**
 
 - **Pestaña propia, no tarjetas nuevas en `General`.** Dos de los tres permisos son de la app y el tercero del panel: mezclarlos con el usuario y el dominio los haría leer como atributos de cloud. Y `General` tiene ocho tarjetas justo por paridad (§25) — cualquier agregado la rompe.
-- **En Consultar va una `view-card-full` por permiso, no tres medias.** Con tres tarjetas media, la grilla flex estira la última a todo el ancho y se lee como un destaque deliberado. Las full además dejan lugar para decir en la misma línea qué abre cada permiso y en qué app, que es el dato que vuelve entendible una lista de permisos de otro producto.
+- **En Consultar va una `view-card-full` por permiso, no tres medias.** Con tres tarjetas media, la grilla flex estira la última a todo el ancho y se lee como un destaque deliberado. Las full además dejan lugar para decir en la misma línea qué abre cada permiso, que es el dato que vuelve entendible una lista de permisos de otro producto.
+- **Y va en la variante EN FILA** (`view-card-row`, §25): nombre del permiso a la izquierda, píldora `Habilitado` / `Deshabilitado` a la derecha, y la frase de qué abre bajo el nombre —del lado izquierdo, porque es la glosa del permiso y no la del estado—. **Es el mismo formato que la pestaña `Paneles`** (§35.1): las dos contestan la misma pregunta —qué tiene prendido este perfil— y resolverla con dos formas distintas obliga a releer la segunda.
+- **La glosa de la ficha NO lleva el host donde vale el permiso.** Cerraba con `(app.reactor.com.ar)` y ahí el dominio no aporta: la ficha se abre para ver qué tiene este perfil, no para averiguar en qué máquina se ejerce, y tres hosts repetidos en tres renglones seguidos le comen la atención a la frase que sí se lee. **`donde` sigue en `PERMISOS_PERFIL` y no se toca**: lo usan el `title` de la columna del listado (§35-bis.1), donde el ícono suelto no distingue `app` de `panel`, y la `.form-nota` del modal de Filtros (§35-bis.2). Ahí el dato es lo único que desambigua; en la ficha convive con el nombre y la frase.
 - **En Alta/Edición se reusa la lista de switches de §35** (`.paneles-lista` + `.toggle-switch.panel-item`). Es la misma forma —una lista corta y cerrada de cosas que se prenden y se apagan— y duplicar el CSS para tres filas no compra nada. El `input` va **pegado** al `.toggle-track`, igual que allá.
 - **El segundo renglón de la fila es una frase, no un `<code>` con el id.** Por eso `.panel-item-nombre .muted` va en `display:block`: sin eso los tres permisos quedan en una línea sola y la frase se lee como parte del título.
 - **El alta pre-tilda `operacion` e `invitacion` y deja `facturacion` apagada.** Es exactamente el reparto con el que la migración sembró los 2.227 perfiles que ya existían (2.227 / 2.227 / 444) y el mismo criterio por el que el alta pre-tilda todos los paneles del dominio: un perfil que naciera sin permisos sería un perfil que no puede usar la app.

@@ -115,6 +115,36 @@
         </div>`;
     }
 
+    /* Tarjeta read-only EN FILA: el nombre (con su glosa debajo) a la izquierda
+       y la pildora de estado a la derecha. Portada de cloud (`viewCardEstado()`
+       en cloud/assets/js/app.js), donde la usan las mismas dos pestañas.
+
+       Es para las listas de "esto lo tiene / esto no" -- los permisos y los
+       paneles del perfil --, donde la pregunta no es que dice cada tarjeta sino
+       cuales estan prendidas. Con la pildora a la derecha las tres o siete
+       quedan alineadas en la misma columna y eso se contesta de un vistazo;
+       apiladas hay que leer tarjeta por tarjeta, porque el badge arranca donde
+       termine el rotulo de arriba y nunca dos en el mismo x.
+
+       Va SIEMPRE `full`: la fila es el renglon entero, asi que la paridad de la
+       grilla no entra en juego y no hay ranura impar que calcular.
+
+       `detalleHtml` entra como HTML -- lo escapa quien llama -- y es OPCIONAL:
+       sin el no se dibuja el `.view-card-value`. Ojo que aca NO cae al `DASH`
+       como `viewCard()`: un guion es "este campo no tiene valor", y la glosa no
+       es un campo sino la aclaracion del rotulo. Los rotulos del estado son los
+       de siempre -- `habilitado` es 1 o 0 y nada mas --, por eso los fija la
+       tarjeta y no cada call site. */
+    function viewCardEstado(label, detalleHtml, activo) {
+        return `<div class="view-card view-card-full view-card-row">
+            <div class="view-card-main">
+                <div class="view-card-label">${escapeHtml(label)}</div>
+                ${detalleHtml ? `<div class="view-card-value">${detalleHtml}</div>` : ''}
+            </div>
+            <span class="badge ${activo ? 'badge-success' : 'badge-danger'}">${activo ? 'Habilitado' : 'Deshabilitado'}</span>
+        </div>`;
+    }
+
     /* Valor de una referencia a otra tabla: el nombre si el JOIN lo trajo y
        el id entre `code` si no (usuario borrado, equipo que cambio de dueño,
        catalogo incompleto). Vacio si la fila no apunta a nada -- ahi
@@ -607,7 +637,7 @@
      * solo se muestra de que dominio se trata.
      * ======================================================= */
 
-    const USUARIOS_DEFAULTS = { codigo: '', estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
+    const USUARIOS_DEFAULTS = { estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
 
     const usuarios = {
         q: '',
@@ -618,7 +648,6 @@
 
     function usuariosFiltrosActivos() {
         let n = 0;
-        if (String(usuarios.codigo) !== USUARIOS_DEFAULTS.codigo) n++;
         if (usuarios.estado !== USUARIOS_DEFAULTS.estado)         n++;
         if (usuarios.limite !== USUARIOS_DEFAULTS.limite)         n++;
         if (usuarios.orden  !== USUARIOS_DEFAULTS.orden)          n++;
@@ -670,7 +699,6 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Código</th>
                                 <th>Usuario</th>
                                 <th>Nombre</th>
                                 <th>Correo</th>
@@ -681,7 +709,7 @@
                             </tr>
                         </thead>
                         <tbody id="us-tbody">
-                            <tr><td colspan="8" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="7" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -715,11 +743,10 @@
     async function cargarUsuarios() {
         const tbody = document.getElementById('us-tbody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Cargando…</td></tr>';
 
         const qs = new URLSearchParams({
             q:      usuarios.q,
-            codigo: usuarios.codigo || '',
             estado: usuarios.estado,
             limite: usuarios.limite,
             orden:  usuarios.orden,
@@ -731,7 +758,7 @@
             usuarios.filas   = data.perfiles || [];
             usuarios.resumen = data.resumen  || null;
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
         }
 
@@ -739,7 +766,7 @@
         pintarBadgeFiltrosUsuarios();
 
         if (usuarios.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No hay perfiles que coincidan con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No hay perfiles que coincidan con la búsqueda.</td></tr>';
             return;
         }
 
@@ -792,7 +819,6 @@
             : '<span class="badge badge-danger">Deshabilitado</span>';
         return `
             <tr data-id="${u.id}" class="row-clickable">
-                <td class="td-id">#${u.id}</td>
                 <td>${u.usuario ? escapeHtml(u.usuario) : DASH}</td>
                 <td class="td-nombre">${u.nombre ? escapeHtml(u.nombre) : DASH}</td>
                 <td>${u.correo  ? escapeHtml(u.correo)  : DASH}</td>
@@ -854,12 +880,19 @@
      * se carga bajo demanda: no hay una segunda consulta que ahorrar.
      *
      * LAS TRES SOLAPAS ESTAN SIEMPRE, aunque el perfil no tenga ningun permiso o
-     * el dominio ningun panel: ahi va un estado vacio explicito. Que una pestaña
-     * aparezca y desaparezca segun la fila hace saltar el modal y deja al que
-     * mira sin saber si falta la pestaña o si no hay dato (mismo criterio que
-     * Consultar registro de Actividad). Es la diferencia con el EDITOR, donde
-     * `Permisos` no existe si no hay ninguno para otorgar: alla la solapa vacia
-     * no seria un dato de la fila sino una pantalla sin nada que hacer. */
+     * el dominio ningun panel. Que una pestaña aparezca y desaparezca segun la
+     * fila hace saltar el modal y deja al que mira sin saber si falta la pestaña
+     * o si no hay dato (mismo criterio que Consultar registro de Actividad). Es
+     * la diferencia con el EDITOR, donde `Permisos` no existe si no hay ninguno
+     * para otorgar: alla la solapa vacia no seria un dato de la fila sino una
+     * pantalla sin nada que hacer.
+     *
+     * PERMISOS Y PANELES SE DIBUJAN IGUAL, con la tarjeta en fila de cloud
+     * (`viewCardEstado()`): nombre a la izquierda y pildora `Habilitado` /
+     * `Deshabilitado` a la derecha. Las dos contestan la misma pregunta —que
+     * tiene prendido este perfil— y resolverla con dos formas distintas obliga a
+     * releer la segunda. Solo Paneles conserva estado vacio, para el dominio sin
+     * ningun panel habilitado; los tres permisos estan siempre. */
     async function verUsuario(id) {
         let data;
         try {
@@ -904,13 +937,17 @@
             viewCard('Estado de la cuenta', badge(u.usuario_habilitado, 'Habilitada', 'Deshabilitada')),
         ].join('')}</div>`;
 
-        /* SOLO SE LISTA EL PERMISO QUE EL PERFIL TIENE. El que no lo tiene no
-           aparece: la pestaña es lo que ese perfil PUEDE HACER, y una fila que
-           dice "Deshabilitado" ocupa el mismo lugar que una que habilita algo
-           sin agregar nada — quien consulta quiere leer de un vistazo lo que el
-           acceso abre, no descartar renglones. Sin ninguno queda el estado
-           vacio, que es lo que distingue "no tiene permisos" de "la pestaña no
-           cargo".
+        /* SE LISTAN LOS TRES, tenga el perfil el permiso o no. Hasta el
+           07/09/2026 se filtraba a los otorgados, con este argumento: la pestaña
+           es lo que el acceso PUEDE HACER y un renglon negativo ocupa el mismo
+           lugar sin agregar nada. Ya no: con la pildora a la derecha lo que se
+           lee de un vistazo es la COLUMNA de estados, y para eso las tres filas
+           tienen que estar — un permiso que no aparece no se distingue de un
+           permiso que no existe. Es el mismo criterio que la pestaña Paneles,
+           que siempre listo el catalogo entero.
+
+           De paso desaparece el estado vacio: los tres estan siempre, asi que
+           no hay caso "sin permisos" que distinguir de "la pestaña no cargo".
 
            NO SE FILTRA POR `puede()`, a diferencia del editor: alla se esconde
            el permiso que la sesion no tiene porque nadie otorga lo que no tiene,
@@ -919,18 +956,12 @@
 
            EL TEXTO SALE DE `PERMISOS_PERFIL`, el mismo catalogo que dibuja el
            editor: dos copias de la frase que dice que abre cada permiso se
-           desincronizan sola. Van todas `full` porque la lista tiene largo
-           variable (cero a tres) y ninguna cuenta de paridad se sostiene. */
-        const otorgados = PERMISOS_PERFIL.filter((p) => !!u[p.clave]);
-        const permisos  = otorgados.length
-            ? `<div class="view-grid">${otorgados.map((p) => viewCard(
-                   p.etiqueta,
-                   `<span class="badge badge-success">Habilitado</span><span class="muted"> · ${escapeHtml(p.detalle)}</span>`,
-                   true,
-               )).join('')}</div>`
-            : `<div class="paneles-lista">
-                   <div class="paneles-vacio">Este perfil no tiene ningún permiso habilitado.</div>
-               </div>`;
+           desincronizan sola. */
+        const permisos = `<div class="view-grid">${PERMISOS_PERFIL.map((p) => viewCardEstado(
+            p.etiqueta,
+            `<span class="muted">${escapeHtml(p.detalle)}</span>`,
+            !!u[p.clave],
+        )).join('')}</div>`;
 
         /* ACA SE LISTA EL CATALOGO ENTERO, habilitados y no: es la inversa de
            Permisos y es a proposito. El catalogo son los paneles del dominio
@@ -944,17 +975,30 @@
            tarjeta habla del PERMISO DEL PERFIL sobre el panel, no del estado del
            panel.
 
-           Con la lista impar, la primera tarjeta va `full` para que las que
-           siguen cierren de a dos: es la ranura impar que documenta
-           Dispositivos → General, resuelta acá en tiempo de dibujo porque el
-           largo depende del dominio. */
+           POR ESO LA LISTA ES EL CATALOGO UNIDO A LO QUE EL PERFIL YA TIENE, y
+           no el catalogo solo: un panel asignado que despues se deshabilito no
+           esta en el catalogo y desapareceria de la ficha aunque el perfil lo
+           siga teniendo en `perfiles_paneles`. Esas filas salen con `#id` por
+           nombre, que es lo unico que se sabe de ellas. Mismo criterio que
+           `perfilPanelesFicha()` en cloud.
+
+           Sin paridad que calcular: `viewCardEstado()` va siempre `full`, asi
+           que la ranura impar que documenta Dispositivos → General no aplica. */
         const asignados = new Set((u.paneles || []).map(Number));
-        const paneles   = catalogo.length
-            ? `<div class="view-grid">${catalogo.map((p, i) => viewCard(
-                   p.nombre || 'Sin nombre',
-                   `${badge(asignados.has(Number(p.id)), 'Habilitado', 'No habilitado')}
-                    <span class="muted"> · <code>#${p.id}</code></span>`,
-                   catalogo.length % 2 === 1 && i === 0,
+        const delCatalogo = catalogo.map((p) => ({ id: Number(p.id), nombre: p.nombre }));
+        const conocidos   = new Set(delCatalogo.map((p) => p.id));
+        asignados.forEach((id) => {
+            if (!conocidos.has(id)) delCatalogo.push({ id, nombre: '' });
+        });
+
+        // Sin segundo renglon: el `#id` que iba bajo el nombre se saco por
+        // pedido. Sobrevive solo como nombre de reemplazo cuando la fila salio
+        // de la union y no del catalogo, que es el unico caso sin nombre.
+        const paneles = delCatalogo.length
+            ? `<div class="view-grid">${delCatalogo.map((p) => viewCardEstado(
+                   p.nombre || `Panel #${p.id}`,
+                   '',
+                   asignados.has(p.id),
                )).join('')}</div>`
             : `<div class="paneles-lista">
                    <div class="paneles-vacio">Este dominio no tiene paneles habilitados.</div>
@@ -985,7 +1029,7 @@
         // un solo item no se justifica (misma regla que Consultar dispositivo).
         // El resto de las acciones del perfil sigue viviendo en el menu
         // contextual de la fila del listado.
-        const m = openModal(`Consultar perfil <span class="muted">#${u.id}</span>`, body, {
+        const m = openModal('Consultar perfil', body, {
             wide:        'xl',
             primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
         });
@@ -1056,12 +1100,6 @@
         // segun la fila hace dudar de si falta el dato o falta el permiso.
         const propio = !!u.es_propio;
         const quien  = u.usuario || u.nombre || u.perfil_nombre || `#${u.id}`;
-        // `perfiles.panel`: el ultimo panel que el perfil abrio en la app, y el
-        // que la app le reabre. No es un campo editable —lo escribe la app cada
-        // vez que la persona cambia de panel—, pero se marca en la lista porque
-        // destildar ESE panel borra la memoria (ver olvidarPanelSinPermiso en el
-        // endpoint), y eso hay que poder verlo antes de guardar.
-        const recordado = Number(u.panel) || 0;
 
         // LOS PERMISOS QUE ESTA SESION NO TIENE NO SE DIBUJAN. Es la unica parte
         // del modal que mira a QUIEN edita y no a la fila editada: nadie otorga
@@ -1108,12 +1146,13 @@
                     ${permisos.map((p) => permisoItemHtml(p.clave, p.etiqueta, p.detalle, u[p.clave])).join('')}
                 </div>
             </div>` : ''}
+            <!-- Sin nota introductoria, igual que la pestaña Permisos: la
+                 explicacion del badge "Ultimo abierto" se saco por pedido. El
+                 badge se queda -- es un dato de la fila --, y lo que hace al
+                 destildarla lo sigue resolviendo olvidarPanelSinPermiso() en
+                 el backend, que es donde vive la regla. -->
             <div class="modal-tabpanel" data-panel="paneles" role="tabpanel" hidden>
-                ${recordado > 0 ? `<div class="form-nota">
-                    El marcado como <strong>Último abierto</strong> es el que la app le reabre
-                    a este perfil; si le quitás el permiso, esa memoria se borra.
-                </div>` : ''}
-                <div id="up-paneles" class="paneles-wrap">${panelesListaHtml(catalogo, u.paneles, recordado)}</div>
+                <div id="up-paneles" class="paneles-wrap">${panelesListaHtml(catalogo, u.paneles)}</div>
             </div>
         `;
 
@@ -1128,16 +1167,6 @@
         const chk = m.backdrop.querySelector('#up-habilitado');
         const lbl = m.backdrop.querySelector('#up-habilitado-label');
         chk.addEventListener('change', () => { lbl.textContent = chk.checked ? 'Sí' : 'No'; });
-
-        // `Seleccionar todo` / `Deseleccionar todo` operan sobre TODA la lista:
-        // sin buscador no hay nada oculto que puedan pisar por sorpresa.
-        const wrap = m.backdrop.querySelector('#up-paneles');
-        wrap.querySelectorAll('[data-act^="paneles-"]').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                const valor = btn.dataset.act === 'paneles-todos';
-                wrap.querySelectorAll('.panel-item input').forEach((i) => { i.checked = valor; });
-            });
-        });
 
         // VIAJAN SOLO LOS PERMISOS DIBUJADOS, y los que no estan no se tocan: el
         // PUT relee de la fila lo que no viene. Antes iban los tres siempre —el
@@ -1234,40 +1263,38 @@
        con `input:checked + .toggle-track`, y cualquier nodo entre los dos lo
        deja siempre apagado. Es el error facil de cometer al reordenar el markup.
 
-       `recordado` es `perfiles.panel` — el ultimo panel abierto en la app. Se
-       marca con un badge y NO es una tercera opcion del switch: es informacion
-       sobre lo que pasa si se destilda esa fila, no algo que se elija desde
-       aca. La app lo reescribe sola cada vez que la persona cambia de panel. */
-    function panelesListaHtml(catalogo, seleccion, recordado) {
+       SIN EL BADGE `Ultimo abierto` (07/09/2026, pedido explicito). Marcaba la
+       fila de `perfiles.panel` —el ultimo panel que ese perfil abrio en la app—
+       para avisar que destildarla borra esa memoria. Se fue con la nota que lo
+       explicaba, y con eso la funcion dejo de recibir el tercer parametro.
+       **La regla no era del badge**: al guardar, `olvidarPanelSinPermiso()` en
+       el backend sigue mandando `panel` a NULL si el perfil pierde el permiso
+       sobre el panel recordado. Lo que se saco es el aviso, no el comportamiento. */
+    function panelesListaHtml(catalogo, seleccion) {
         if (catalogo.length === 0) {
             return `<div class="paneles-lista">
                 <div class="paneles-vacio">Este dominio no tiene paneles habilitados.</div>
             </div>`;
         }
 
+        // Sin el `<code>#id</code>` al lado del nombre (se saco por pedido,
+        // igual que en la pestaña Paneles de Consultar): el id no es un dato
+        // que ayude a elegir. El `value` del checkbox lo sigue llevando, que es
+        // lo unico que necesita el guardado.
         const sel   = new Set((seleccion || []).map(Number));
         const filas = catalogo.map((p) => `
             <label class="toggle-switch panel-item">
-                <span class="panel-item-nombre">${escapeHtml(p.nombre) || 'Sin nombre'} <code>#${p.id}</code>${
-                    Number(p.id) === Number(recordado)
-                        ? ' <span class="badge badge-info">Último abierto</span>'
-                        : ''}</span>
+                <span class="panel-item-nombre">${escapeHtml(p.nombre) || 'Sin nombre'}</span>
                 <input type="checkbox" value="${p.id}"${sel.has(Number(p.id)) ? ' checked' : ''}>
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
         `).join('');
 
-        return `
-            <div class="paneles-acciones">
-                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-todos">
-                    <i class="fa-solid fa-check-double"></i> Seleccionar todo
-                </button>
-                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-ninguno">
-                    <i class="fa-solid fa-xmark"></i> Deseleccionar todo
-                </button>
-            </div>
-            <div class="paneles-lista">${filas}</div>
-        `;
+        // Sin `Seleccionar todo` / `Deseleccionar todo` (07/09/2026, pedido
+        // explicito): eran dos botones sobre una lista de a lo sumo 7 filas,
+        // donde tildar a mano cuesta lo mismo. Con ellos se fue tambien el
+        // `.paneles-acciones` de este control.
+        return `<div class="paneles-lista">${filas}</div>`;
     }
 
     function copiar(texto) {
@@ -1332,12 +1359,6 @@
             `<button type="button" class="filter-chip${usuarios.estado === val ? ' active' : ''}" data-estado="${val}">${label}</button>`;
 
         const body = `
-            <div class="filters-grid">
-                <div class="form-group">
-                    <label for="uf-f-codigo">Código</label>
-                    <input type="number" min="1" id="uf-f-codigo" placeholder="ID del perfil" value="${escapeHtml(usuarios.codigo)}">
-                </div>
-            </div>
             <div class="form-group">
                 <label>Estado del perfil</label>
                 <div style="display:flex;gap:6px;flex-wrap:wrap" id="uf-f-estado">
@@ -1391,7 +1412,6 @@
 
         const aplicarEnVivo = () => { pintarBadgeFiltrosUsuarios(); cargarUsuarios(); };
 
-        $('#uf-f-codigo').addEventListener('input',  (e) => { usuarios.codigo = e.target.value.trim(); aplicarEnVivo(); });
         $('#uf-f-limite').addEventListener('change', (e) => { usuarios.limite = +e.target.value || 100; aplicarEnVivo(); });
         $('#uf-f-orden').addEventListener('change',  (e) => { usuarios.orden  = e.target.value; aplicarEnVivo(); });
         $('#uf-f-dir').addEventListener('change',    (e) => { usuarios.dir    = e.target.value; aplicarEnVivo(); });
@@ -1407,7 +1427,6 @@
 
         $('[data-act="limpiar"]').addEventListener('click', () => {
             Object.assign(usuarios, USUARIOS_DEFAULTS);
-            $('#uf-f-codigo').value = '';
             $('#uf-f-limite').value = USUARIOS_DEFAULTS.limite;
             $('#uf-f-orden').value  = USUARIOS_DEFAULTS.orden;
             $('#uf-f-dir').value    = USUARIOS_DEFAULTS.dir;
@@ -1422,13 +1441,14 @@
     /* =========================================================
      * Modulo ABM: Dispositivos  (convenciones de la skill abm_design)
      * Portado de reactor-panel/dispositivos/listar.php: mismo recorte por
-     * dominio, mismos filtros (codigo, identificador, nombre, enlace,
-     * habilitado, limite) y las mismas columnas del listado legacy.
+     * dominio y mismos filtros (identificador, nombre, enlace, habilitado,
+     * limite) que el listado legacy. El `codigo` (el id) ya no se filtra ni
+     * se muestra: es un dato interno que al cliente no le dice nada.
      * El filtro por dominio lo aplica el backend (api/dispositivos.php ->
      * requireDominioId()), aca solo se muestra de que dominio se trata.
      * ======================================================= */
 
-    const DISPOSITIVOS_DEFAULTS = { codigo: '', modelo: 0, enlace: 'todos', estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
+    const DISPOSITIVOS_DEFAULTS = { modelo: 0, enlace: 'todos', estado: 'todos', limite: 100, orden: 'id', dir: 'desc' };
 
     const dispositivos = {
         q: '',
@@ -1440,7 +1460,6 @@
 
     function dispositivosFiltrosActivos() {
         let n = 0;
-        if (String(dispositivos.codigo) !== DISPOSITIVOS_DEFAULTS.codigo) n++;
         if (dispositivos.modelo !== DISPOSITIVOS_DEFAULTS.modelo)         n++;
         if (dispositivos.enlace !== DISPOSITIVOS_DEFAULTS.enlace)         n++;
         if (dispositivos.estado !== DISPOSITIVOS_DEFAULTS.estado)         n++;
@@ -1452,8 +1471,8 @@
 
     function badgeEnlace(online) {
         return online
-            ? '<span class="badge badge-success">En línea</span>'
-            : '<span class="badge badge-warn">Fuera de línea</span>';
+            ? '<span class="badge badge-success">Online</span>'
+            : '<span class="badge badge-warn">Offline</span>';
     }
 
     function badgeHabilitado(habilitado) {
@@ -1508,7 +1527,6 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Código</th>
                                 <th>Identificador</th>
                                 <th>Nombre</th>
                                 <th>Modelo</th>
@@ -1519,7 +1537,7 @@
                             </tr>
                         </thead>
                         <tbody id="dv-tbody">
-                            <tr><td colspan="8" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="7" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1549,11 +1567,10 @@
     async function cargarDispositivos() {
         const tbody = document.getElementById('dv-tbody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Cargando…</td></tr>';
 
         const qs = new URLSearchParams({
             q:      dispositivos.q,
-            codigo: dispositivos.codigo || '',
             modelo: dispositivos.modelo || '',
             enlace: dispositivos.enlace,
             estado: dispositivos.estado,
@@ -1568,7 +1585,7 @@
             dispositivos.catalogos = data.catalogos || dispositivos.catalogos;
             dispositivos.resumen   = data.resumen   || null;
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
         }
 
@@ -1576,7 +1593,7 @@
         pintarBadgeFiltrosDispositivos();
 
         if (dispositivos.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No hay dispositivos que coincidan con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No hay dispositivos que coincidan con la búsqueda.</td></tr>';
             return;
         }
 
@@ -1605,7 +1622,7 @@
         if (!el || !r) return;
         el.innerHTML = `
             <div class="stat-card"><span class="stat-label">Total del dominio</span><span class="stat-value">${r.total}</span></div>
-            <div class="stat-card"><span class="stat-label">En línea</span><span class="stat-value green">${r.enlazados}</span></div>
+            <div class="stat-card"><span class="stat-label">Online</span><span class="stat-value green">${r.enlazados}</span></div>
             <div class="stat-card"><span class="stat-label">Habilitados</span><span class="stat-value">${r.habilitados}</span></div>
             <div class="stat-card"><span class="stat-label">Mostrados</span><span class="stat-value">${r.mostrados}</span></div>
         `;
@@ -1624,7 +1641,6 @@
     function filaDispositivo(d) {
         return `
             <tr data-id="${d.id}" class="row-clickable">
-                <td class="td-id">#${d.id}</td>
                 <td>${d.uuid ? `<code>${escapeHtml(d.uuid)}</code>` : DASH}</td>
                 <td class="td-nombre">${d.nombre ? escapeHtml(d.nombre) : DASH}</td>
                 <td>${d.modelo_nombre ? escapeHtml(d.modelo_nombre) : DASH}</td>
@@ -1715,7 +1731,7 @@
             </div>
         `;
 
-        const m = openModal(`Consultar dispositivo <span class="muted">#${d.id}</span>`, body, {
+        const m = openModal('Consultar dispositivo', body, {
             wide:        true,
             primaryHtml: '<button class="btn btn-primary" data-act="editar"><i class="fa-solid fa-pen-to-square"></i> Editar</button>',
         });
@@ -2283,22 +2299,18 @@
             `<button type="button" class="filter-chip${dispositivos[grupo] === val ? ' active' : ''}" data-valor="${val}">${label}</button>`;
 
         const body = `
-            <div class="filters-grid">
-                <div class="form-group">
-                    <label for="df-f-codigo">Código</label>
-                    <input type="number" min="1" id="df-f-codigo" placeholder="ID del dispositivo" value="${escapeHtml(dispositivos.codigo)}">
-                </div>
-                <div class="form-group">
-                    <label for="df-f-modelo">Modelo</label>
-                    <select id="df-f-modelo">${modeloOpts}</select>
-                </div>
+            <!-- Modelo va solo y a lo ancho: al sacarse "Codigo" quedaba
+                 media columna vacia a su derecha. -->
+            <div class="form-group">
+                <label for="df-f-modelo">Modelo</label>
+                <select id="df-f-modelo">${modeloOpts}</select>
             </div>
             <div class="form-group">
                 <label>Enlace</label>
                 <div style="display:flex;gap:6px;flex-wrap:wrap" id="df-f-enlace">
                     ${chip('enlace', 'todos', 'Todos')}
-                    ${chip('enlace', 'online', 'En línea')}
-                    ${chip('enlace', 'offline', 'Fuera de línea')}
+                    ${chip('enlace', 'online', 'Online')}
+                    ${chip('enlace', 'offline', 'Offline')}
                 </div>
             </div>
             <div class="form-group">
@@ -2355,7 +2367,6 @@
 
         const aplicarEnVivo = () => { pintarBadgeFiltrosDispositivos(); cargarDispositivos(); };
 
-        $('#df-f-codigo').addEventListener('input',  (e) => { dispositivos.codigo = e.target.value.trim(); aplicarEnVivo(); });
         $('#df-f-modelo').addEventListener('change', (e) => { dispositivos.modelo = +e.target.value || 0;  aplicarEnVivo(); });
         $('#df-f-limite').addEventListener('change', (e) => { dispositivos.limite = +e.target.value || 100; aplicarEnVivo(); });
         $('#df-f-orden').addEventListener('change',  (e) => { dispositivos.orden  = e.target.value; aplicarEnVivo(); });
@@ -2374,7 +2385,6 @@
 
         $('[data-act="limpiar"]').addEventListener('click', () => {
             Object.assign(dispositivos, DISPOSITIVOS_DEFAULTS);
-            $('#df-f-codigo').value = '';
             $('#df-f-modelo').value = '0';
             $('#df-f-limite').value = DISPOSITIVOS_DEFAULTS.limite;
             $('#df-f-orden').value  = DISPOSITIVOS_DEFAULTS.orden;
@@ -2406,10 +2416,11 @@
        busqueda sin resultados barre la tabla entera (14 s medidos).
        NO es un filtro de la UI: es fija en 200.000 y viaja siempre igual
        en el GET (api/actividad.php la valida contra su lista VENTANAS).
-       Para llegar al historial viejo esta la busqueda por codigo, que el
-       backend resuelve sin ventana. */
+       Desde que se saco la busqueda por codigo (el unico camino que el
+       backend resolvia sin ventana) el historial viejo no tiene atajo:
+       se llega acotando por fecha dentro de la misma ventana. */
     const ACTIVIDAD_DEFAULTS = {
-        codigo: '', usuario: 0, dispositivo: 0, sentido: 'S',
+        usuario: 0, dispositivo: 0, sentido: 'S',
         desde: '', hasta: '', ventana: 200000, limite: 100, orden: 'id', dir: 'desc',
     };
 
@@ -2498,7 +2509,6 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Código</th>
                                 <th>Fecha</th>
                                 <th>Usuario</th>
                                 <th>Dispositivo</th>
@@ -2509,7 +2519,7 @@
                             </tr>
                         </thead>
                         <tbody id="ac-tbody">
-                            <tr><td colspan="8" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="7" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -2540,12 +2550,11 @@
     async function cargarActividad() {
         const tbody = document.getElementById('ac-tbody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Cargando…</td></tr>';
         pintarNotaVentanaActividad();
 
         const qs = new URLSearchParams({
             q:           actividad.q,
-            codigo:      actividad.codigo || '',
             usuario:     actividad.usuario     || '',
             dispositivo: actividad.dispositivo || '',
             sentido:     actividad.sentido,
@@ -2563,7 +2572,7 @@
             actividad.catalogos = data.catalogos || { usuarios: [], dispositivos: [] };
             actividad.resumen   = data.resumen   || null;
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
         }
 
@@ -2571,7 +2580,7 @@
         pintarBadgeFiltrosActividad();
 
         if (actividad.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No hay actividad que coincida con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No hay actividad que coincida con la búsqueda.</td></tr>';
             return;
         }
 
@@ -2611,11 +2620,9 @@
     function pintarNotaVentanaActividad() {
         const el = document.getElementById('ac-ventana-nota');
         if (!el) return;
-        if (actividad.codigo) {
-            el.textContent = 'Búsqueda por código: alcanza a todo el historial.';
-        } else if (actividad.ventana > 0) {
+        if (actividad.ventana > 0) {
             el.textContent = `Se busca dentro de los ${actividad.ventana.toLocaleString('es-AR')} registros más `
-                           + 'recientes del sistema. Para llegar al historial viejo, buscá por código.';
+                           + 'recientes del sistema.';
         } else {
             el.textContent = 'Se busca en todo el historial: la consulta puede tardar varios segundos.';
         }
@@ -2648,7 +2655,6 @@
 
         return `
             <tr data-id="${r.id}" class="row-clickable">
-                <td class="td-id">#${r.id}</td>
                 <td>${escapeHtml(formatDate(r.fecha) || '') || DASH}</td>
                 <td>${usuario}</td>
                 <td>${dispositivo}</td>
@@ -2695,15 +2701,16 @@
             return;
         }
 
-        /* Las tres fichas son `view-grid` de tarjetas al 50% y las tres
-           tienen una cantidad PAR de campos (8 / 8 / 8). La grilla es flex
-           con `flex-grow: 1` (CSS §11): con la cuenta impar la ultima
+        /* Las tres fichas son `view-grid` de tarjetas al 50%. La grilla es
+           flex con `flex-grow: 1` (CSS §11): con la cuenta impar la ultima
            tarjeta se estira a todo el ancho y se lee como un campo
-           destacado a proposito. Al tocar cualquiera de las tres, mantener
-           la paridad -- o marcar una `full` en ranura impar. */
+           destacado a proposito. Usuario y Dispositivo son 8 y cierran
+           solas; General quedo en 7 al sacarse `Codigo`, asi que `Fecha`
+           va `full` en la ranura IMPAR (la primera) y las seis restantes
+           cierran de a dos. Al tocar cualquiera de las tres, mantener la
+           paridad -- o marcar una `full` en ranura impar. */
         const general = `<div class="view-grid">${[
-            viewCard('Código',      `<code>#${r.id}</code>`),
-            viewCard('Fecha',       escapeHtml(actividadFechaLarga(r.fecha))),
+            viewCard('Fecha',       escapeHtml(actividadFechaLarga(r.fecha)), true),
             viewCard('Usuario',     ref(r.usuario_nombre, r.usuario)),
             viewCard('Cuenta',      escapeHtml(r.usuario_login || '')),
             viewCard('Dispositivo', ref(r.dispositivo_nombre, r.dispositivo)),
@@ -2739,7 +2746,7 @@
            Pie solo con "Cerrar": no hay modal de edicion para este recurso,
            y los atajos (filtrar por usuario / dispositivo, copiar detalle)
            viven en el menu contextual de la fila. */
-        const m = openModal(`Consultar actividad <span class="muted">#${r.id}</span>`, body, { wide: true });
+        const m = openModal('Consultar actividad', body, { wide: true });
         montarPestanas(m.backdrop);
     }
 
@@ -2802,21 +2809,18 @@
             `<button type="button" class="filter-chip${actividad.sentido === val ? ' active' : ''}" data-valor="${val}">${label}</button>`;
 
         const body = `
+            <!-- Los dos selects comparten renglon: al sacarse "Codigo",
+                 Usuario quedaba con media columna vacia a su derecha y
+                 Dispositivo solo a lo ancho debajo. -->
             <div class="filters-grid">
-                <div class="form-group">
-                    <label for="af-f-codigo">Código</label>
-                    <input type="number" min="1" id="af-f-codigo" placeholder="ID del registro" value="${escapeHtml(actividad.codigo)}">
-                </div>
                 <div class="form-group">
                     <label for="af-f-usuario">Usuario</label>
                     <select id="af-f-usuario">${opciones(actividad.catalogos.usuarios, actividad.usuario)}</select>
                 </div>
-            </div>
-            <!-- Dispositivo va solo y a lo ancho: al sacarse "Ventana de
-                 busqueda" quedaba media columna vacia a su derecha. -->
-            <div class="form-group">
-                <label for="af-f-dispositivo">Dispositivo</label>
-                <select id="af-f-dispositivo">${opciones(actividad.catalogos.dispositivos, actividad.dispositivo)}</select>
+                <div class="form-group">
+                    <label for="af-f-dispositivo">Dispositivo</label>
+                    <select id="af-f-dispositivo">${opciones(actividad.catalogos.dispositivos, actividad.dispositivo)}</select>
+                </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -2878,7 +2882,6 @@
 
         const aplicarEnVivo = () => { pintarBadgeFiltrosActividad(); cargarActividad(); };
 
-        $('#af-f-codigo').addEventListener('input',       (e) => { actividad.codigo      = e.target.value.trim(); aplicarEnVivo(); });
         $('#af-f-usuario').addEventListener('change',     (e) => { actividad.usuario     = +e.target.value || 0;  aplicarEnVivo(); });
         $('#af-f-dispositivo').addEventListener('change', (e) => { actividad.dispositivo = +e.target.value || 0;  aplicarEnVivo(); });
         $('#af-f-desde').addEventListener('change',       (e) => { actividad.desde       = e.target.value;        aplicarEnVivo(); });
@@ -2898,7 +2901,6 @@
 
         $('[data-act="limpiar"]').addEventListener('click', () => {
             Object.assign(actividad, ACTIVIDAD_DEFAULTS);
-            $('#af-f-codigo').value      = '';
             $('#af-f-usuario').value     = '0';
             $('#af-f-dispositivo').value = '0';
             $('#af-f-desde').value       = '';
@@ -2917,8 +2919,8 @@
     /* =========================================================
      * Modulo ABM: Chips  (convenciones de la skill abm_design)
      * Portado de reactor-panel/chips/listar.php: mismo recorte por dominio
-     * y las mismas columnas del listado legacy (codigo, compania, numero,
-     * estado), ampliadas con plan, titular y serie.
+     * y las mismas columnas del listado legacy (compania, numero, estado),
+     * ampliadas con plan, titular y serie.
      * `compania`, `plan`, `responsable` y `pais` se guardan como codigos
      * cortos; el texto sale de la tabla `combos` — lo mismo que hacia
      * comboTraducir() en el legacy — y lo resuelve api/chips.php, que
@@ -2926,7 +2928,7 @@
      * ======================================================= */
 
     const CHIPS_DEFAULTS = {
-        codigo: '', compania: '', plan: '', responsable: '',
+        compania: '', plan: '', responsable: '',
         estado: 'todos', limite: 100, orden: 'id', dir: 'desc',
     };
 
@@ -2940,7 +2942,6 @@
 
     function chipsFiltrosActivos() {
         let n = 0;
-        if (String(chips.codigo) !== CHIPS_DEFAULTS.codigo)   n++;
         if (chips.compania    !== CHIPS_DEFAULTS.compania)    n++;
         if (chips.plan        !== CHIPS_DEFAULTS.plan)        n++;
         if (chips.responsable !== CHIPS_DEFAULTS.responsable) n++;
@@ -3009,7 +3010,6 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Código</th>
                                 <th>Teléfono</th>
                                 <th>Compañía</th>
                                 <th>Plan</th>
@@ -3020,7 +3020,7 @@
                             </tr>
                         </thead>
                         <tbody id="ch-tbody">
-                            <tr><td colspan="8" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="7" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3049,11 +3049,10 @@
     async function cargarChips() {
         const tbody = document.getElementById('ch-tbody');
         if (!tbody) return;
-        tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Cargando…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Cargando…</td></tr>';
 
         const qs = new URLSearchParams({
             q:           chips.q,
-            codigo:      chips.codigo || '',
             compania:    chips.compania,
             plan:        chips.plan,
             responsable: chips.responsable,
@@ -3069,7 +3068,7 @@
             chips.combos    = data.combos    || chips.combos;
             chips.resumen   = data.resumen   || null;
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="table-empty">${escapeHtml(err.message)}</td></tr>`;
             return;
         }
 
@@ -3077,7 +3076,7 @@
         pintarBadgeFiltrosChips();
 
         if (chips.filas.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No hay chips que coincidan con la búsqueda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No hay chips que coincidan con la búsqueda.</td></tr>';
             return;
         }
 
@@ -3125,7 +3124,6 @@
     function filaChip(c) {
         return `
             <tr data-id="${c.id}" class="row-clickable">
-                <td class="td-id">#${c.id}</td>
                 <td class="td-nombre">${c.telefono ? escapeHtml(c.telefono) : DASH}</td>
                 <td>${textoCombo(c.compania_texto, c.compania) || DASH}</td>
                 <td>${textoCombo(c.plan_texto, c.plan) || DASH}</td>
@@ -3172,7 +3170,7 @@
 
         // Solo lectura: el chip se administra desde cloud, asi que el modal no
         // lleva accion primaria ni menu de pie — unicamente "Cerrar".
-        openModal(`Consultar chip <span class="muted">#${c.id}</span>`, body);
+        openModal('Consultar chip', body);
     }
 
     /* ---------- Modal de filtros (skill abm_design §Modal de filtros) ----
@@ -3186,17 +3184,13 @@
             `<button type="button" class="filter-chip${chips.estado === val ? ' active' : ''}" data-valor="${val}">${label}</button>`;
 
         const body = `
-            <div class="filters-grid">
-                <div class="form-group">
-                    <label for="cf-f-codigo">Código</label>
-                    <input type="number" min="1" id="cf-f-codigo" placeholder="ID del chip" value="${escapeHtml(chips.codigo)}">
-                </div>
+            <!-- Los tres selects en un solo renglon: al sacarse "Codigo",
+                 Compania quedaba con media columna vacia a su derecha. -->
+            <div class="form-row form-row-3">
                 <div class="form-group">
                     <label for="cf-f-compania">Compañía</label>
                     <select id="cf-f-compania">${opcionesCombo(chips.combos.compania, chips.compania, 'Todas')}</select>
                 </div>
-            </div>
-            <div class="form-row">
                 <div class="form-group">
                     <label for="cf-f-plan">Plan</label>
                     <select id="cf-f-plan">${opcionesCombo(chips.combos.plan, chips.plan, 'Todos')}</select>
@@ -3260,7 +3254,6 @@
 
         const aplicarEnVivo = () => { pintarBadgeFiltrosChips(); cargarChips(); };
 
-        $('#cf-f-codigo').addEventListener('input',       (e) => { chips.codigo      = e.target.value.trim(); aplicarEnVivo(); });
         $('#cf-f-compania').addEventListener('change',    (e) => { chips.compania    = e.target.value; aplicarEnVivo(); });
         $('#cf-f-plan').addEventListener('change',        (e) => { chips.plan        = e.target.value; aplicarEnVivo(); });
         $('#cf-f-responsable').addEventListener('change', (e) => { chips.responsable = e.target.value; aplicarEnVivo(); });
@@ -3279,7 +3272,6 @@
 
         $('[data-act="limpiar"]').addEventListener('click', () => {
             Object.assign(chips, CHIPS_DEFAULTS);
-            $('#cf-f-codigo').value      = '';
             $('#cf-f-compania').value    = '';
             $('#cf-f-plan').value        = '';
             $('#cf-f-responsable').value = '';
@@ -3824,7 +3816,7 @@
      * ======================================================= */
 
     const COMPROBANTES_DEFAULTS = {
-        codigo: '', numero: '', estado: '', desde: '', hasta: '',
+        numero: '', estado: '', desde: '', hasta: '',
         limite: 10, orden: 'id', dir: 'desc',
     };
 
@@ -3913,7 +3905,6 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Código</th>
                                 <th>Número</th>
                                 <th>Emisión</th>
                                 ${esF ? '<th>Vencimiento</th>' : ''}
@@ -3924,7 +3915,7 @@
                             </tr>
                         </thead>
                         <tbody id="cp-tbody">
-                            <tr><td colspan="${esF ? 8 : 7}" class="table-empty">Cargando…</td></tr>
+                            <tr><td colspan="${esF ? 7 : 6}" class="table-empty">Cargando…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3960,13 +3951,12 @@
 
         const tipo    = comprobantes.activo;
         const s       = cp();
-        const columns = tipo === 'F' ? 8 : 7;
+        const columns = tipo === 'F' ? 7 : 6;
         tbody.innerHTML = `<tr><td colspan="${columns}" class="table-empty">Cargando…</td></tr>`;
 
         const qs = new URLSearchParams({
             tipo,
             q:      s.q,
-            codigo: s.codigo || '',
             numero: s.numero,
             estado: s.estado,
             desde:  s.desde,
@@ -4066,7 +4056,6 @@
         const esF = comprobantes.activo === 'F';
         return `
             <tr data-id="${r.id}" class="row-clickable">
-                <td class="td-id">#${r.id}</td>
                 <td class="td-nombre">${escapeHtml(r.numero)}</td>
                 <td>${escapeHtml(formatDate(r.emision) || '') || DASH}</td>
                 ${esF ? `<td>${escapeHtml(formatDate(r.vencimiento) || '') || DASH}</td>` : ''}
@@ -4134,7 +4123,6 @@
             r.fiscal ? viewCard('CAE',      r.caenro ? `<code>${escapeHtml(r.caenro)}</code>` : '') : null,
             r.fiscal ? viewCard('Vto. CAE', escapeHtml(formatDate(r.caevto) || '')) : null,
             r.observaciones ? viewCard('Observaciones', escapeHtml(r.observaciones), true) : null,
-            viewCard('Código', `<code>#${r.id}</code>`),
         ].filter(Boolean).join('');
 
         const body = `<div class="view-grid">${cards}</div>
@@ -4149,7 +4137,7 @@
         // acciones extra van en el desplegable `Acciones`, que abre el mismo
         // ctx-menu flotante del listado.
         const m = openModal(
-            `${escapeHtml(r.numero)} <span class="muted">#${r.id}</span>`,
+            escapeHtml(r.numero),
             body,
             {
                 wide: true,
@@ -4222,15 +4210,11 @@
         ).join('');
 
         const body = `
-            <div class="filters-grid">
-                <div class="form-group">
-                    <label for="cf-f-codigo">Código</label>
-                    <input type="number" min="1" id="cf-f-codigo" placeholder="ID del comprobante" value="${escapeHtml(s.codigo)}">
-                </div>
-                <div class="form-group">
-                    <label for="cf-f-numero">Número</label>
-                    <input type="text" id="cf-f-numero" placeholder="Ej. 003340" value="${escapeHtml(s.numero)}">
-                </div>
+            <!-- Numero va solo y a lo ancho: al sacarse "Codigo" quedaba
+                 media columna vacia a su derecha. -->
+            <div class="form-group">
+                <label for="cf-f-numero">Número</label>
+                <input type="text" id="cf-f-numero" placeholder="Ej. 003340" value="${escapeHtml(s.numero)}">
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -4295,7 +4279,6 @@
 
         const aplicarEnVivo = () => { pintarBadgeFiltrosComprobantes(); cargarComprobantes(); };
 
-        $('#cf-f-codigo').addEventListener('input',  (e) => { s.codigo = e.target.value.trim(); aplicarEnVivo(); });
         $('#cf-f-numero').addEventListener('input',  (e) => {
             const v = e.target.value.trim();
             clearTimeout(debounceNumero);
@@ -4319,7 +4302,6 @@
         $('[data-act="limpiar"]').addEventListener('click', () => {
             clearTimeout(debounceNumero);
             Object.assign(s, COMPROBANTES_DEFAULTS);
-            $('#cf-f-codigo').value = '';
             $('#cf-f-numero').value = '';
             $('#cf-f-desde').value  = '';
             $('#cf-f-hasta').value  = '';

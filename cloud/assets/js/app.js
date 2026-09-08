@@ -231,6 +231,31 @@
             <div class="view-card-value">${value}</div>
         </div>`;
     }
+
+    /* Tarjeta read-only EN FILA: el nombre (con su glosa debajo) a la izquierda
+       y la píldora de estado a la derecha.
+
+       Es para las listas de "esto lo tiene / esto no" —los permisos y los
+       paneles del perfil—, donde la pregunta no es qué dice cada tarjeta sino
+       cuáles están prendidas. Con la píldora a la derecha las tres o siete
+       quedan alineadas en la misma columna y eso se contesta de un vistazo;
+       apiladas hay que leer tarjeta por tarjeta, porque el badge arranca donde
+       termine el rótulo de arriba y nunca dos en el mismo x.
+
+       `detalle` entra como HTML —lo escapa quien llama— y es OPCIONAL: sin él no
+       se dibuja el `.view-card-value`, en vez de dejar un div vacío que el `gap`
+       de 4px separaría igual del rótulo. Los rótulos del estado son los de
+       siempre —`habilitado` es 1 o 0 y nada más—, por eso los fija la tarjeta y
+       no cada llamador. */
+    function viewCardEstado(label, detalle, activo) {
+        return `<div class="view-card view-card-full view-card-row">
+            <div class="view-card-main">
+                <div class="view-card-label">${escape(label)}</div>
+                ${detalle ? `<div class="view-card-value">${detalle}</div>` : ''}
+            </div>
+            <span class="badge ${activo ? 'badge-success' : 'badge-danger'}">${activo ? 'Habilitado' : 'Deshabilitado'}</span>
+        </div>`;
+    }
     function viewGrid(cards) {
         return `<div class="view-grid">${cards.join('')}</div>`;
     }
@@ -1296,7 +1321,7 @@
                     ]))}
                     ${devSection('Estado', 'fa-toggle-on', viewGrid([
                         viewCardHalf('Habilitado',        si(dev.habilitado, 'Habilitado', 'Deshabilitado')),
-                        viewCardHalf('Enlace',            si(dev.enlace, 'En línea', 'Fuera de línea')),
+                        viewCardHalf('Enlace',            si(dev.enlace, 'Online', 'Offline')),
                         viewCardHalf('Adoptado',          si(dev.adoptado, 'Sí', 'No')),
                         viewCardHalf('Adopción',          dev.adopcion ? `<code>#${dev.adopcion}</code>` : DEV_DASH),
                         viewCardHalf('Límite de señales', num(dev.senalesLimite)),
@@ -1494,7 +1519,7 @@
                     ${devSection('Estado', 'fa-toggle-on', `
                         <div class="form-row">
                             ${flag('habilitado', 'Habilitado', 'Habilitado', 'Deshabilitado')}
-                            ${flag('enlace', 'Enlace', 'En línea', 'Fuera de línea')}
+                            ${flag('enlace', 'Enlace', 'Online', 'Offline')}
                         </div>
                         <div class="form-row">
                             ${flag('adoptado', 'Adoptado', 'Sí', 'No')}
@@ -3329,6 +3354,9 @@
             try {
                 const data = await api('profiles?usuario_id=' + encodeURIComponent(usr.id));
                 const perfiles = data.perfiles || [];
+                // Para que la ficha que se abre desde acá tenga los nombres de
+                // los paneles aunque nunca se haya entrado al módulo Perfiles.
+                sembrarCatalogosPerfiles(data);
                 perfBody.innerHTML = perfilesUsuarioTableBody(perfiles);
                 // Click sobre un perfil -> Consultar perfil, apilado sobre este modal.
                 perfBody.querySelectorAll('tbody tr[data-id]').forEach(tr => {
@@ -3841,9 +3869,21 @@
         }, {});
     }
 
-    /* Catálogo de paneles (con su dominio) para el selector del editor. Lo deja
-       el render del listado, que ya lo trae en el mismo GET. */
+    /* Catálogo de paneles (con su dominio) para el selector del editor y para la
+       pestaña Paneles de la ficha. Lo deja el render del listado, que ya lo trae
+       en el mismo GET.
+
+       Lo siembra TAMBIÉN la solapa Perfiles de Consultar usuario: desde ahí se
+       abre la ficha del perfil sin haber pasado nunca por el módulo, y sin
+       catálogo los paneles salen como `#id` pelado. Es el mismo GET y el mismo
+       catálogo completo (no viene acotado por el `usuario_id` del filtro), así
+       que sembrarlo no cuesta un request ni deja un catálogo parcial. */
     let perfilesCtx = { catalogos: { paneles: [] } };
+
+    function sembrarCatalogosPerfiles(data) {
+        const paneles = (data && data.catalogos && data.catalogos.paneles) || [];
+        if (paneles.length) perfilesCtx = { catalogos: { paneles } };
+    }
 
     const ORDEN_PERFILES = [
         { value: 'id',             label: 'Código'   },
@@ -4007,18 +4047,28 @@
 
        Va una tarjeta FULL por permiso y no tres medias: con tres, la grilla flex
        estira la última a todo el ancho y se lee como un destaque deliberado
-       (ABM.md, sección Consultar). Y las tres full además dejan lugar para decir
-       en la misma línea qué abre cada una y en qué app — que es el dato que
-       vuelve entendible una lista de permisos de OTRO producto. */
+       (ABM.md, sección Consultar).
+
+       En FILA (`viewCardEstado()`) y no apiladas: el nombre a la izquierda y la
+       píldora de estado a la derecha, igual que la pestaña Paneles. La frase de
+       qué abre queda bajo el nombre, del lado izquierdo: es la glosa del
+       permiso, no del estado.
+
+       SIN el host donde vale el permiso. La glosa cerraba con
+       `(app.reactor.com.ar)` y ahí el dominio no aporta: la ficha se abre para
+       ver qué tiene este perfil, no para averiguar en qué máquina se ejerce, y
+       tres hosts repetidos en tres renglones seguidos le comen la atención a la
+       frase que sí se lee. `donde` SIGUE EN `PERMISOS_PERFIL` y no se toca: lo
+       usan el `title` de la columna del listado —donde un ícono suelto no
+       distingue `app` de `panel` y sin eso la columna miente por omisión— y la
+       `.form-nota` del modal de Filtros. */
     function perfilPermisosFicha(prf) {
         const activos = permisosDelPerfil(prf);
 
-        return PERMISOS_PERFIL.map(p => viewCardFull(
+        return PERMISOS_PERFIL.map(p => viewCardEstado(
             p.label,
-            `${activos[p.clave]
-                ? '<span class="badge badge-success">Habilitado</span>'
-                : '<span class="badge badge-danger">Deshabilitado</span>'}
-             <span class="muted">— ${escape(p.detalle)} (${escape(p.donde)})</span>`
+            `<span class="muted">${escape(p.detalle)}</span>`,
+            activos[p.clave]
         ));
     }
 
@@ -4256,17 +4306,55 @@
         return perfilesCatalogos;
     }
 
-    /* Paneles en la ficha. Sin filas el perfil no ve ninguno, y eso hay que
-       decirlo con todas las letras: es lo que un listado vacío no comunica. */
+    /* Paneles en la ficha, en el MISMO formato en fila que la pestaña Permisos:
+       el nombre del panel a la izquierda y la píldora a la derecha diciendo si
+       el perfil lo ve o no. Las dos pestañas son la misma pregunta —qué tiene
+       prendido este perfil— y contestarla con dos formas distintas obliga a
+       releer la segunda.
+
+       SE LISTAN TODOS LOS PANELES DEL DOMINIO, no sólo los asignados. Antes iban
+       los asignados como badges sueltas y ahí "le faltan dos" no se ve: sin las
+       filas apagadas no hay con qué comparar. La píldora en `Deshabilitado` dice
+       lo que el perfil NO ve, que es justo lo que se va a mirar antes de mandar
+       a editar.
+
+       El universo es el catálogo del dominio UNIDO a lo que el perfil ya tiene,
+       nunca sólo el catálogo: ése trae únicamente paneles con `habilitado = 1`,
+       así que un panel asignado que después se deshabilitó desaparecería de la
+       ficha aunque el perfil lo siga teniendo en `perfiles_paneles`. Y si la
+       ficha se abrió desde Consultar usuario el catálogo puede estar vacío —el
+       módulo Perfiles nunca se renderizó—, con lo que la unión es lo único que
+       deja algo en pantalla; ahí las filas salen con `#id` por nombre.
+
+       Sin ningún panel el perfil no ve nada en la app, y eso hay que decirlo con
+       todas las letras: es lo que un listado vacío no comunica. */
     function perfilPanelesFicha(prf) {
-        const ids = prf.paneles || [];
-        if (!ids.length) {
-            return '<span class="badge badge-warn">Ninguno</span> <span class="muted">— este perfil no ve ningún panel en la app</span>';
+        const asignados = new Set((prf.paneles || []).map(Number));
+
+        const filas = (perfilesCtx.catalogos.paneles || [])
+            .filter(p => p.dominio === prf.dominio_id)
+            .map(p => ({ id: Number(p.id), nombre: p.nombre }));
+
+        const enCatalogo = new Set(filas.map(p => p.id));
+        asignados.forEach(id => {
+            if (!enCatalogo.has(id)) filas.push({ id, nombre: '' });
+        });
+
+        if (!filas.length) {
+            return [viewCardFull(
+                'Paneles',
+                '<span class="badge badge-warn">Ninguno</span> <span class="muted">— este dominio no tiene paneles habilitados</span>'
+            )];
         }
-        const porId = new Map((perfilesCtx.catalogos.paneles || []).map(x => [x.id, x.nombre]));
-        return ids.map(id =>
-            `<span class="badge badge-info">${escape(porId.get(id) || ('#' + id))}</span>`
-        ).join(' ');
+
+        // Sin segundo renglón: el `#id` que iba bajo el nombre se sacó por
+        // pedido. Sobrevive sólo como nombre de reemplazo cuando la fila salió
+        // de la unión y no del catálogo, que es el único caso sin nombre.
+        return filas.map(p => viewCardEstado(
+            p.nombre || `Panel #${p.id}`,
+            '',
+            asignados.has(p.id)
+        ));
     }
 
     /* Pastilla clickeable de la ficha de perfil. Sin id no hay a dónde ir —el
@@ -4364,10 +4452,12 @@
                     <div class="modal-tabpanel" data-panel="permisos" hidden>
                         ${viewGrid(perfilPermisosFicha(prf))}
                     </div>
+                    <!-- Una tarjeta por panel del dominio, sin tarjeta madre que
+                         las envuelva: el rótulo "Paneles en la app (N)" repetía
+                         el nombre de la pestaña y encerraba la lista en un
+                         segundo marco. La cuenta la dicen las píldoras. -->
                     <div class="modal-tabpanel" data-panel="paneles" hidden>
-                        ${viewGrid([
-                            viewCardFull(`Paneles en la app (${(prf.paneles || []).length})`, perfilPanelesFicha(prf)),
-                        ])}
+                        ${viewGrid(perfilPanelesFicha(prf))}
                     </div>
                 </div>
             </div>
@@ -4461,40 +4551,26 @@
         // El `input` va pegado al `.toggle-track` porque el CSS del switch (§17)
         // pinta el estado con `input:checked + .toggle-track`: cualquier nodo en
         // el medio lo deja siempre apagado.
+        //
+        // Sin el `<code>#id</code>` al lado del nombre (se sacó por pedido, igual
+        // que en la pestaña Paneles de Consultar): el id no es un dato que ayude
+        // a elegir. El `value` del checkbox lo sigue llevando, que es lo único
+        // que necesita el guardado. Por eso el panel sin nombre ahora cae a
+        // `Panel #id` — antes el `<code>` lo identificaba solo.
         const filas = delDominio.map(p => `
             <label class="toggle-switch panel-item">
-                <span class="panel-item-nombre">${escape(p.nombre)} <code>#${p.id}</code></span>
+                <span class="panel-item-nombre">${escape(p.nombre) || `Panel #${p.id}`}</span>
                 <input type="checkbox" value="${p.id}"${sel.has(Number(p.id)) ? ' checked' : ''}>
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
             </label>
         `).join('');
 
-        return `
-            <div class="paneles-acciones">
-                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-todos">
-                    <i class="fa-solid fa-check-double"></i> Seleccionar todo
-                </button>
-                <button type="button" class="btn btn-sm btn-ghost" data-act="paneles-ninguno">
-                    <i class="fa-solid fa-xmark"></i> Deseleccionar todo
-                </button>
-            </div>
-            <div class="paneles-lista">${filas}</div>
-        `;
-    }
-
-    /* Cablea los dos botones. Van sobre TODA la lista y no sobre "lo visible"
-       como en el selector de ids: sin buscador no hay nada oculto que puedan
-       pisar por sorpresa. */
-    function wirePanelesLista(scope) {
-        const wrap = scope.querySelector('#prf-paneles-wrap');
-        if (!wrap) return;
-
-        wrap.querySelectorAll('[data-act^="paneles-"]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const valor = btn.dataset.act === 'paneles-todos';
-                wrap.querySelectorAll('.panel-item input').forEach(i => { i.checked = valor; });
-            });
-        });
+        // Sin `Seleccionar todo` / `Deseleccionar todo` (07/09/2026, pedido
+        // explícito): eran dos botones sobre una lista de a lo sumo 7 filas,
+        // donde tildar a mano cuesta lo mismo. Con ellos se fue `.paneles-acciones`
+        // de este control —el `gap` de `.paneles-wrap` ya no separa nada— y el
+        // `wirePanelesLista()` que los cableaba.
+        return `<div class="paneles-lista">${filas}</div>`;
     }
 
     function readPanelesLista(scope) {
@@ -4648,12 +4724,12 @@
 
         // El selector de paneles depende del dominio: en el alta hay que rearmarlo
         // cada vez que cambia, porque los paneles de un dominio no son los de
-        // otro. Se re-renderiza entero y se vuelve a cablear — es más simple y
-        // más difícil de romper que ir tachando opciones.
+        // otro. Se re-renderiza entero — es más simple y más difícil de romper
+        // que ir tachando opciones. Ya no hay nada que volver a cablear: los
+        // switches son `<label>` + `<input>` y se leen recién al guardar.
         const panelesWrap = backdrop.querySelector('#prf-paneles-wrap');
         function montarPaneles(dominioId, seleccion) {
             panelesWrap.innerHTML = panelesListaHtml(dominioId, seleccion || []);
-            wirePanelesLista(backdrop);
         }
         montarPaneles(dominioInicial, prf?.paneles ?? []);
 

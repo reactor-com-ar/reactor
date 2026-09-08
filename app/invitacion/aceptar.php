@@ -15,6 +15,10 @@ declare(strict_types=1);
  * guardan concatenados en `nombre`, que es como el legacy y el resto del
  * sistema leen el nombre completo. No se toca el esquema por esto.
  *
+ * EL CELULAR SE GUARDA CRUDO: exactamente 10 digitos y nada mas — sin espacios,
+ * guiones, parentesis, puntos ni el signo +. Ver CELULAR_DIGITOS y
+ * validarDatosInvitado().
+ *
  * LOS TRES CAMINOS, que son los que pidio el negocio:
  *
  *   1. La persona NO esta registrada  -> se crea `usuarios` + `perfiles` y se le
@@ -42,6 +46,32 @@ require_once dirname(__DIR__) . '/lib/perfiles.php';
 // mismo punto que usan el login por contrasena, el de codigo y el canje de un
 // enlace magico. Ver `sesionAbiertaSiCorresponde()` al pie.
 require_once dirname(__DIR__) . '/lib/auth.php';
+
+/**
+ * Largo EXACTO del celular, en digitos.
+ *
+ * 10, que es el formato argentino sin el 0 de la caracteristica y sin el 15:
+ * `2644123456`. No es un numero elegido de memoria — es lo que tiene el 100% de
+ * los datos: las 351 filas no vacias de `usuarios`.`celular` y las 33 de
+ * `invitaciones`.`celular` medidas el 07/09/2026 tienen los 10 digitos y NINGUNA
+ * trae un caracter que no sea un digito.
+ *
+ * POR ESO EL CAMPO NO ADMITE SEPARADORES NI PREFIJOS. Antes aceptaba
+ * `+ ( ) - .` y espacios con un minimo de 8 digitos, asi que `+54 9 264
+ * 412-3456` entraba tal cual y quedaba escrito distinto de las otras 384 filas:
+ * la columna es texto (`usuarios`.`celular` es varchar(15)) y nadie normaliza al
+ * leer, asi que dos formas del mismo numero no se cruzan ni se buscan igual —
+ * el buscador de Invitaciones hace `LIKE` sobre la columna cruda
+ * (panel/api/invitaciones.php).
+ *
+ * Se declara una sola vez y de aca salen todas las apariciones del numero: el
+ * `placeholder` / `maxlength` / `pattern` / `title` del input y el corte del
+ * servidor. El filtro de tecleo NO la usa a proposito — saca separadores pero no
+ * recorta, ver el `<script>` del formulario. Es copia de la constante homonima
+ * de panel/invitacion/aceptar.php, como todo lo que comparten las dos
+ * invitaciones sin compartir docroot.
+ */
+const CELULAR_DIGITOS = 10;
 
 $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uuid   = (string) ($_POST['uid'] ?? $_GET['uid'] ?? '');
@@ -107,8 +137,12 @@ $cuerpo = '
         </div>
 
         <div class="sesion-campo">
-            <input type="tel" name="celular" class="sesion-input" placeholder="Tu celular"
-                   maxlength="15" value="' . e($celular) . '" autocomplete="tel" required>
+            <input type="tel" id="inv-celular" name="celular" class="sesion-input"
+                   placeholder="Tu celular (' . CELULAR_DIGITOS . ' dígitos)"
+                   inputmode="numeric" pattern="[0-9]{' . CELULAR_DIGITOS . '}"
+                   maxlength="' . CELULAR_DIGITOS . '"
+                   title="' . CELULAR_DIGITOS . ' dígitos, sin el 0 de la característica y sin el 15"
+                   value="' . e($celular) . '" autocomplete="tel" required>
             <i class="fa-solid fa-mobile-screen sesion-input-icono"></i>
         </div>
 
@@ -127,6 +161,39 @@ $cuerpo = '
             </button>
         </div>
     </form>
+
+    <script>
+    // El celular va a la base CRUDO, asi que se escribe solo con digitos: esto
+    // le saca al vuelo espacios, guiones, parentesis, puntos y el +, y de paso
+    // resuelve el caso comun de pegar un numero copiado de la agenda del
+    // telefono ("264 412-3456"). En el celular importa mas que en el panel:
+    // esta pantalla se abre casi siempre desde el correo del telefono.
+    //
+    // SACA SEPARADORES, NUNCA RECORTA. Quitar un guion deja el MISMO numero;
+    // cortarlo en el digito 10 lo cambia por otro — pegar "+5492644123456"
+    // quedaria como "5492644123", que no es el celular de nadie y la persona no
+    // tendria como notarlo. El sobrante se deja a la vista y lo rechaza
+    // validarDatosInvitado() diciendo cuantos digitos van, que es la misma razon
+    // por la que el servidor tampoco normaliza. El `maxlength` sigue frenando el
+    // tecleo, que es donde si alcanza.
+    //
+    // NO ES EL CONTROL: el `pattern` de arriba tampoco, porque el form lleva
+    // `novalidate`. Lo unico que corre siempre es la validacion del servidor;
+    // esto solo evita que la persona llegue al error.
+    (function () {
+        var campo = document.getElementById("inv-celular");
+        if (!campo) { return; }
+        function soloDigitos() {
+            // Se reescribe SOLO si cambio. Asignar `value` manda el cursor al
+            // final del campo, asi que hacerlo en cada tecla volveria imposible
+            // corregir un digito del medio.
+            var limpio = campo.value.replace(/[^0-9]/g, "");
+            if (limpio !== campo.value) { campo.value = limpio; }
+        }
+        campo.addEventListener("input", soloDigitos);
+        campo.addEventListener("blur", soloDigitos);
+    })();
+    </script>
 ';
 
 invitacionLayout('Completá tus datos', $cuerpo, $error);
@@ -135,7 +202,16 @@ invitacionLayout('Completá tus datos', $cuerpo, $error);
 /* Logica                                                              */
 /* ------------------------------------------------------------------ */
 
-/** Devuelve el mensaje de error, o '' si los datos estan bien. */
+/**
+ * Devuelve el mensaje de error, o '' si los datos estan bien.
+ *
+ * EL CELULAR NO SE NORMALIZA, SE RECHAZA. Lo que llegue con separadores no se
+ * limpia en silencio: si alguien manda `+54 9 264 412-3456` (13 digitos) y esto
+ * se quedara con los 10 ultimos, la persona terminaria registrada con un numero
+ * que no escribio y sin enterarse. El filtro de tecleo del formulario ya evita
+ * que se llegue hasta aca en el caso normal; este corte es para el POST sin
+ * JavaScript, que es el unico que corre siempre.
+ */
 function validarDatosInvitado(string $nombre, string $apellido, string $celular): string
 {
     if ($nombre === '' || $apellido === '' || $celular === '') {
@@ -145,14 +221,17 @@ function validarDatosInvitado(string $nombre, string $apellido, string $celular)
     if (mb_strlen($nombre) > 60 || mb_strlen($apellido) > 60) {
         return 'El nombre y el apellido no pueden superar 60 caracteres cada uno.';
     }
-    if (mb_strlen($celular) > 15) {
-        return 'El celular no puede superar 15 caracteres.';
+    // `ctype_digit()` y no una expresion regular: `/^[0-9]+$/` da por buena una
+    // cadena terminada en salto de linea (`$` matchea antes del \n final), y
+    // aunque el `trim()` del llamador ya lo saque, el criterio no deberia
+    // depender de eso. Tambien devuelve false con la cadena vacia.
+    if (!ctype_digit($celular)) {
+        return 'El celular se escribe solo con números: sin espacios, guiones, paréntesis ni el signo +.';
     }
-    if (!preg_match('/^[+0-9\s().-]+$/', $celular)) {
-        return 'El celular solo admite números y los signos + ( ) - .';
-    }
-    if (preg_match_all('/\d/', $celular) < 8) {
-        return 'El celular parece incompleto: ingresá el número con característica.';
+    // Con solo digitos, `strlen()` ES la cantidad de digitos: son todos ASCII.
+    if (strlen($celular) !== CELULAR_DIGITOS) {
+        return 'El celular tiene que tener ' . CELULAR_DIGITOS . ' dígitos: la característica sin el 0 '
+             . 'y el número sin el 15 (ej. 2644123456).';
     }
     return '';
 }

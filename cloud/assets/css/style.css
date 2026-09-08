@@ -1121,6 +1121,25 @@ th.action-col, td.action-col {
     word-break: break-word;
     white-space: pre-wrap;
 }
+/* Variante EN FILA: rotulo (mas su glosa) a la izquierda y pildora de estado a
+   la derecha. La usan las pestanas Permisos y Paneles de Consultar perfil, que
+   son listas de "esto lo tiene / esto no": con las pildoras alineadas contra el
+   borde derecho se leen todas en la misma columna. `min-width: 0` en el bloque
+   izquierdo para que la glosa larga corte por palabra en vez de empujar la
+   pildora fuera de la tarjeta. */
+.view-card-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.view-card-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.view-card-row > .badge { flex: none; }
 .view-card-value.muted { color: var(--muted); font-style: italic; }
 .view-card-value code  {
     font-family: monospace;
@@ -1586,7 +1605,6 @@ body.login-page { background: var(--bg); }
  * `input:checked + .toggle-track`. Lo único que agrega esta sección es el
  * reparto horizontal: el nombre se estira y el switch queda pegado a la derecha.
  */
-.paneles-acciones      { display: flex; gap: 8px; flex-wrap: wrap; }
 .paneles-lista         { border: 1px solid var(--border); border-radius: var(--radius);
                          background: var(--bg); overflow: hidden; }
 .paneles-lista .panel-item              { padding: 9px 12px; }
@@ -1596,12 +1614,13 @@ body.login-page { background: var(--bg); }
  * que un nombre largo corte en vez de desbordar la caja. */
 .panel-item-nombre     { flex: 1 1 auto; min-width: 0; font-size: .88rem;
                          color: var(--text); word-break: break-word; }
-.panel-item-nombre code{ font-size: .76rem; color: var(--muted); margin-left: 6px; }
 /* La misma fila la reusa la pestaña Permisos de Alta/Edición de perfil, donde
- * el segundo renglón no es un `<code>` con el id sino la frase que dice QUÉ
- * abre el permiso y EN QUÉ APP: va en bloque abajo, no colgada al lado del
- * nombre. Sin el `display:block` los tres permisos quedan en una línea sola y
- * la frase se lee como parte del título. */
+ * el nombre lleva un segundo renglón: la frase que dice QUÉ abre el permiso y
+ * EN QUÉ APP. Va en bloque abajo, no colgada al lado del nombre — sin el
+ * `display:block` los tres permisos quedan en una línea sola y la frase se lee
+ * como parte del título. La fila de PANEL no tiene segundo renglón: llevó el
+ * `<code>` con el id hasta el 07/09/2026 y se sacó por pedido, junto con los
+ * botones de selección masiva (`.paneles-acciones`, que quedó sin uso). */
 .panel-item-nombre .muted { display: block; margin-top: 2px; font-size: .78rem; }
 .paneles-vacio         { padding: 16px 12px; text-align: center;
                          color: var(--muted); font-size: .85rem; }

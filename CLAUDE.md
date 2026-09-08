@@ -156,6 +156,28 @@ emite y quién puede hacerlo:
   `usuarios` + `perfiles`; con cuenta y sin perfil → sólo el perfil, sin tocarle
   contraseña ni dominio activo; con perfil habilitado en ese dominio → **no se
   hace nada** y la invitación se cierra igual.
+- **El celular que completa el invitado son EXACTAMENTE 10 DÍGITOS Y NADA MÁS**
+  (07/09/2026): sin espacios, guiones, paréntesis, puntos ni el signo `+`. Es el
+  formato argentino sin el `0` de la característica y sin el `15` (`2644123456`),
+  y es lo que tiene el **100%** de los datos — las 351 filas no vacías de
+  `usuarios`.`celular` y las 33 de `invitaciones`.`celular`, ninguna con un
+  caracter que no sea un dígito. Antes se admitía `+ ( ) - .` y espacios con un
+  mínimo de 8 dígitos, así que un `+54 9 264 412-3456` quedaba escrito distinto
+  de las otras 384 filas: **la columna es texto y nadie normaliza al leer**, así
+  que dos formas del mismo número no se cruzan ni se buscan igual (el buscador de
+  Invitaciones hace `LIKE` sobre la columna cruda). El largo sale de
+  `CELULAR_DIGITOS`, declarada en cada `invitacion/aceptar.php` — copias
+  idénticas, como todo lo que comparten las dos apps sin compartir docroot.
+- **Lo que llega mal se rechaza, no se limpia en silencio.** El formulario le saca
+  los separadores mientras se tipea (quitar un guion deja **el mismo** número),
+  pero **nunca recorta**: cortar `+5492644123456` en el dígito 10 daría
+  `5492644123`, un número que no es de nadie y que la persona no tendría cómo
+  notar. El sobrante queda a la vista y lo corta `validarDatosInvitado()`
+  diciendo cuántos dígitos van. **El filtro del navegador no es el control** —los
+  dos formularios llevan `novalidate`, así que el `pattern` tampoco—: lo único
+  que corre siempre es la validación del servidor, con `ctype_digit()` y no una
+  expresión regular (`/^[0-9]+$/` da por buena una cadena terminada en salto de
+  línea).
 - **Ese tercer caso ya no se resuelve distinto en cada una**: las dos se quedan
   con **cualquier** perfil habilitado del dominio, cualquiera sea su `tipo`
   (`perfilAsegurado()` en [panel/invitacion/aceptar.php](panel/invitacion/aceptar.php),

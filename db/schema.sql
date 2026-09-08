@@ -1152,6 +1152,57 @@ CREATE TABLE `dashboardscomparticiones` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `difusiones`
+--
+
+DROP TABLE IF EXISTS `difusiones`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `difusiones` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `asunto` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `cuerpo` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `dominio` int DEFAULT NULL,
+  `estado` enum('pendiente','enviando','enviada','cancelada') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pendiente',
+  `destinatarios` int NOT NULL DEFAULT '0',
+  `enviados` int NOT NULL DEFAULT '0',
+  `fallidos` int NOT NULL DEFAULT '0',
+  `emisor` int DEFAULT NULL,
+  `creada` datetime NOT NULL,
+  `terminada` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `fk_difusiones_dominio` (`dominio`),
+  KEY `fk_difusiones_emisor` (`emisor`),
+  CONSTRAINT `fk_difusiones_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
+  CONSTRAINT `fk_difusiones_emisor` FOREIGN KEY (`emisor`) REFERENCES `controladores` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `difusiones_destinatarios`
+--
+
+DROP TABLE IF EXISTS `difusiones_destinatarios`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `difusiones_destinatarios` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `difusion` int NOT NULL,
+  `usuario` int DEFAULT NULL,
+  `correo` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `nombre` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `estado` enum('pendiente','enviado','fallido') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pendiente',
+  `error` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `enviado` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `ix_difusiones_dest_difusion_estado` (`difusion`,`estado`,`id`),
+  KEY `fk_difusiones_dest_usuario` (`usuario`),
+  CONSTRAINT `fk_difusiones_dest_difusion` FOREIGN KEY (`difusion`) REFERENCES `difusiones` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT `fk_difusiones_dest_usuario` FOREIGN KEY (`usuario`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `dispositivos`
 --
 

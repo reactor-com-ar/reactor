@@ -40,6 +40,11 @@
         dispositivos: { title: 'Dispositivos',  render: renderDispositivos, group: 'inventario' },
         chips:        { title: 'Chips',         render: renderChips,        group: 'inventario' },
         transceptores: { title: 'Transceptores', render: renderTransceptores, group: 'inventario' },
+        contratos:    { title: 'Contratos',    render: renderContratos,    group: 'comercial' },
+        comprobantes: { title: 'Comprobantes', render: renderComprobantes, group: 'comercial' },
+        talonarios:   { title: 'Talonarios',   render: renderTalonarios,   group: 'comercial' },
+        notificaciones: { title: 'Notificaciones', render: renderNotificaciones, group: 'comunicacion' },
+        difusion:       { title: 'Difusión',       render: renderDifusion,       group: 'comunicacion' },
         signals:   { title: 'Señales',              render: renderSignals,   group: 'registros'  },
         registros: { title: 'Historial de registros', render: renderRegistros, group: 'registros'  },
         alerts:    { title: 'Alertas',              render: renderStub,      group: 'registros'  },
@@ -111,6 +116,24 @@
         const pedido = pendingUsuarioFilter;
         pendingUsuarioFilter = null;
         return pedido && pedido.route === route ? pedido : null;
+    }
+
+    // Mismo par, para el contrato. Lo usa Comprobantes → "Ver contrato"; en
+    // Contratos el contrato es la fila misma y no una FK, así que el destino
+    // lo vuelca en su filtro `Código` — igual que Contratos → "Ver dominio"
+    // sobre Dominios.
+    let pendingContratoFilter = null;   // { route: 'contratos', id: 12 }
+
+    function pedirFiltroContrato(route, id) {
+        pendingContratoFilter = { route, id };
+        if (currentRoute() === route) navigate();
+        else window.location.hash = '#/' + route;
+    }
+
+    function tomarFiltroContrato(route) {
+        const pedido = pendingContratoFilter;
+        pendingContratoFilter = null;
+        return pedido && pedido.route === route ? String(pedido.id) : '';
     }
 
     // Estado del listado que un módulo se deja preparado a sí mismo antes de
@@ -2571,6 +2594,3125 @@
         );
     }
 
+    /* ---------- Views: Contratos ----------
+     * ABM de `contratos`: el contrato comercial de un dominio. Todas las
+     * columnas son editables menos `id` y `promo` — la segunda porque el
+     * esquema y el sistema histórico no coinciden en qué significa (la FK
+     * apunta a `articulos`, el legacy la factura como porcentaje de descuento),
+     * así que se muestra traducida y no se escribe. El detalle vive en la
+     * cabecera de `api/contratos.php`.
+     *
+     * Las fechas "sin valor" del sistema histórico no son NULL: son
+     * `1500-01-01` y, en `baja`, `2500-01-01`. El backend las traduce en los
+     * dos sentidos, así que acá un `null` ya significa "sin fecha" y un input
+     * vacío vuelve a guardarse como el centinela que le corresponde.
+     *
+     * `plan` lista TODOS los planes, no sólo los habilitados como el combo del
+     * legacy: hay 9 contratos vivos sobre un plan deshabilitado y con el filtro
+     * viejo abrir uno y guardarlo lo dejaba sin plan.
+     */
+    const ORDEN_CONTRATOS = [
+        { value: 'id',             label: 'Código'    },
+        { value: 'dominio_nombre', label: 'Dominio'   },
+        { value: 'cliente_nombre', label: 'Cliente'   },
+        { value: 'facturado',      label: 'Facturado' },
+        { value: 'facturar',       label: 'Facturar'  },
+    ];
+
+    // Catálogos que deja el render del listado para los modales (mismo patrón
+    // que `sembrarCatalogosPerfiles`): el GET del listado ya los trae.
+    let CATALOGOS_CONTRATOS = { clientes: [], dominios: [], planes: [], tipos: [], promos: [], remitir: [] };
+
+    function contratosDefaults() {
+        return {
+            codigo: '', texto: '', cliente: '', dominio: '', plan: '', tipo: '',
+            estado: '', remitir: '', facturarDesde: '', facturarHasta: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderContratos(root) {
+        try {
+            const data = await api('contratos');
+            const r         = data.resumen;
+            const contratos = data.contratos;
+            CATALOGOS_CONTRATOS = data.catalogos;
+
+            const state = tomarEstadoVista('contratos', contratosDefaults());
+            const domPedido = tomarFiltroDominio('contratos');
+            if (domPedido) state.dominio = domPedido;
+            // "Ver contrato" desde Comprobantes. Acá el contrato es la fila y
+            // no una FK, así que el pedido se vuelca en el filtro `Código`.
+            const cntPedido = tomarFiltroContrato('contratos');
+            if (cntPedido) state.codigo = cntPedido;
+
+            root.innerHTML = `
+                ${moduleHeader('Contratos', 'El acuerdo comercial de cada dominio: cliente, plan y las fechas del ciclo de facturación.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.habilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Deshabilitados</span>
+                        <span class="stat-value muted">${r.deshabilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Facturables</span>
+                        <span class="stat-value orange">${r.facturables}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Remisibles</span>
+                        <span class="stat-value">${r.remisibles}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'con',
+                    quickPlaceholder: 'Buscar dominio, cliente, plan o identificador…',
+                    newLabel:         'Nuevo contrato',
+                })}
+                <div class="table-card" id="con-table"></div>
+            `;
+
+            wireContratosView(state, contratos);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    // Fecha `date` de la fila: el backend ya mandó `null` cuando el valor era
+    // un centinela del sistema histórico, así que acá no hay que conocerlos.
+    function contratoFecha(v) {
+        return v ? escape(formatDateOnly(v)) : `<span class="muted">—</span>`;
+    }
+    function contratoFechaHora(v) {
+        return v ? escape(formatDate(v)) : `<span class="muted">—</span>`;
+    }
+
+    // Tipo/Plan en una sola celda, como el listado del sistema histórico:
+    // el tipo en negrita y el plan como glosa debajo.
+    function contratoTipoPlanCelda(c) {
+        const tipo = c.tipo
+            ? `<strong>${escape(c.tipo_texto || c.tipo)}</strong>`
+            : `<span class="muted">Sin tipo</span>`;
+        const plan = c.plan
+            ? `<span class="muted">${escape(c.plan_nombre || ('#' + c.plan))}</span>`
+            : `<span class="muted">Sin plan</span>`;
+        return `${tipo}<br>${plan}`;
+    }
+
+    function contratoEstadoBadge(habilitado) {
+        return habilitado === 1
+            ? `<span class="badge badge-success">Habilitado</span>`
+            : `<span class="badge badge-danger">Deshabilitado</span>`;
+    }
+
+    function contratosTableBody(contratos) {
+        if (!contratos.length) {
+            return `<div class="table-empty">No hay contratos que coincidan. Creá el primero con "Nuevo contrato".</div>`;
+        }
+
+        const rows = contratos.map(c => `
+            <tr class="row-clickable" data-id="${c.id}">
+                <td><span class="td-id">#${c.id}</span></td>
+                <td class="td-nombre">${c.dominio ? escape(c.dominio_nombre || ('#' + c.dominio)) : '<span class="muted">Sin dominio</span>'}</td>
+                <td>${c.cliente ? escape(c.cliente_nombre || ('#' + c.cliente)) : '<span class="muted">Sin cliente</span>'}</td>
+                <td>${contratoTipoPlanCelda(c)}</td>
+                <td>${contratoFecha(c.facturado)}</td>
+                <td>${contratoFecha(c.facturar)}</td>
+                <td>${contratoEstadoBadge(c.habilitado)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Dominio</th>
+                        <th>Cliente</th>
+                        <th>Tipo / Plan</th>
+                        <th>Facturado</th>
+                        <th>Facturar</th>
+                        <th>Habilitado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireContratosView(state, allContratos) {
+        const tableWrap = document.getElementById('con-table');
+        const quick     = document.getElementById('con-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('con-filters');
+        const btnNew    = document.getElementById('con-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            const filtered = allContratos.filter(c => {
+                if (Number.isFinite(codigo) && c.id !== codigo) return false;
+                if (state.cliente && String(c.cliente) !== state.cliente) return false;
+                if (state.dominio && String(c.dominio) !== state.dominio) return false;
+                if (state.plan    && String(c.plan)    !== state.plan)    return false;
+                if (state.tipo    && c.tipo            !== state.tipo)    return false;
+                if (state.remitir && c.remitir         !== state.remitir) return false;
+                if (state.estado  && String(c.habilitado) !== state.estado) return false;
+                // El rango es sobre `facturar`, igual que los atajos
+                // "Facturables" del listado histórico. Un contrato sin fecha
+                // (centinela) queda fuera de cualquier rango: no es que
+                // facture en el año 1500, es que no tiene fecha.
+                if (state.facturarDesde && (!c.facturar || c.facturar < state.facturarDesde)) return false;
+                if (state.facturarHasta && (!c.facturar || c.facturar > state.facturarHasta)) return false;
+                if (q && !(
+                    (c.dominio_nombre || '') + ' ' + (c.cliente_nombre || '') + ' ' +
+                    (c.plan_nombre || '')    + ' ' + (c.plan_descripcion || '') + ' ' +
+                    (c.tipo_texto || '')     + ' ' + (c.uuid || '')
+                ).toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = contratosTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(c) {
+            const extra = [];
+            if (c.dominio) {
+                extra.push({ act: 'go-dominio', label: 'Ver dominio', icon: 'fa-flag',
+                             onSelect: () => pedirFiltroDominio('dominios', c.dominio) });
+            }
+            if (c.uuid) {
+                extra.push({ act: 'estado', label: 'Ver estado de cuenta', icon: 'fa-arrow-up-right-from-square',
+                             onSelect: () => abrirEstadoDeCuenta(c) });
+                extra.push({ act: 'copy-uuid', label: 'Copiar identificador', icon: 'fa-regular fa-copy',
+                             onSelect: () => copyToClipboard(c.uuid) });
+            }
+            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(c.id)) });
+
+            return standardRowMenuItems({
+                view:   true, onView:   () => openContratoViewModal(c),
+                edit:   true, onEdit:   () => openContratoModal(c),
+                delete: true, onDelete: () => pedirImpactoContrato(c),
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const c  = allContratos.find(x => x.id === id);
+                if (!c) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(c), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openContratoViewModal(c));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openContratosFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openContratoModal(null));
+        wireRefresh('con', 'contratos', state);
+
+        applyAndRender();
+    }
+
+    // El estado de cuenta del cliente vive fuera de cloud: es la pantalla
+    // pública del sitio institucional, indexada por el `uuid` del contrato.
+    function abrirEstadoDeCuenta(c) {
+        window.open('https://www.reactor.com.ar/contrato/estado?uid=' + encodeURIComponent(c.uuid),
+                    '_blank', 'noopener');
+    }
+
+    // Etiqueta de un plan en los desplegables: nombre + glosa, y el aviso de
+    // deshabilitado cuando corresponde (el catálogo los trae a todos).
+    function contratoPlanLabel(p) {
+        const glosa = p.descripcion ? ' · ' + p.descripcion : '';
+        return p.nombre + glosa + (p.habilitado === 1 ? '' : ' (deshabilitado)');
+    }
+
+    function openContratosFiltersModal(state, onApply) {
+        const cat = CATALOGOS_CONTRATOS;
+
+        const opciones = (items, valorSel, todos, mapear) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === valorSel ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const cliOpts  = opciones(cat.clientes, state.cliente, 'Todos los clientes',
+                                  c => ({ valor: String(c.id), texto: c.nombre || ('#' + c.id) }));
+        const domOpts  = opciones(cat.dominios, state.dominio, 'Todos los dominios',
+                                  d => ({ valor: String(d.id), texto: d.nombre || ('#' + d.id) }));
+        const plaOpts  = opciones(cat.planes, state.plan, 'Todos los planes',
+                                  p => ({ valor: String(p.id), texto: contratoPlanLabel(p) }));
+        const tipOpts  = opciones(cat.tipos, state.tipo, 'Todos los tipos',
+                                  t => ({ valor: t.valor, texto: t.texto }));
+        const remOpts  = opciones(cat.remitir, state.remitir, 'Indistinto',
+                                  t => ({ valor: t.valor, texto: t.texto }));
+        const ordOpts  = ORDEN_CONTRATOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="con-fm-codigo">Código</label>
+                    <input type="number" id="con-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-texto">Buscar (dominio / cliente / plan / identificador)</label>
+                    <input type="search" id="con-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-dominio">Dominio</label>
+                    <select id="con-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-cliente">Cliente</label>
+                    <select id="con-fm-cliente">${cliOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-tipo">Tipo</label>
+                    <select id="con-fm-tipo">${tipOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-plan">Plan</label>
+                    <select id="con-fm-plan">${plaOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-facturar-desde">Facturar desde</label>
+                    <input type="date" id="con-fm-facturar-desde" value="${escape(state.facturarDesde)}">
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-facturar-hasta">Facturar hasta</label>
+                    <input type="date" id="con-fm-facturar-hasta" value="${escape(state.facturarHasta)}">
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-remitir">Remitir</label>
+                    <select id="con-fm-remitir">${remOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-estado">Habilitado</label>
+                    <select id="con-fm-estado">
+                        <option value="">Todos</option>
+                        <option value="1"${state.estado === '1' ? ' selected' : ''}>Habilitado</option>
+                        <option value="0"${state.estado === '0' ? ' selected' : ''}>Deshabilitado</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-limit">Límite</label>
+                    <input type="number" id="con-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="con-fm-orden">Ordenar por</label>
+                    <select id="con-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="con-fm-dir">Dirección</label>
+                    <select id="con-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            wide: true,
+            bodyHtml,
+            onApply(modal) {
+                state.codigo        = modal.querySelector('#con-fm-codigo').value.trim();
+                state.texto         = modal.querySelector('#con-fm-texto').value.trim();
+                state.dominio       = modal.querySelector('#con-fm-dominio').value;
+                state.cliente       = modal.querySelector('#con-fm-cliente').value;
+                state.tipo          = modal.querySelector('#con-fm-tipo').value;
+                state.plan          = modal.querySelector('#con-fm-plan').value;
+                state.facturarDesde = modal.querySelector('#con-fm-facturar-desde').value;
+                state.facturarHasta = modal.querySelector('#con-fm-facturar-hasta').value;
+                state.remitir       = modal.querySelector('#con-fm-remitir').value;
+                state.estado        = modal.querySelector('#con-fm-estado').value;
+                state.orden         = modal.querySelector('#con-fm-orden').value;
+                state.dir           = modal.querySelector('#con-fm-dir').value;
+                state.limit         = readLimit(modal.querySelector('#con-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = contratosDefaults();
+                modal.querySelector('#con-fm-codigo').value         = d.codigo;
+                modal.querySelector('#con-fm-texto').value          = d.texto;
+                modal.querySelector('#con-fm-dominio').value        = d.dominio;
+                modal.querySelector('#con-fm-cliente').value        = d.cliente;
+                modal.querySelector('#con-fm-tipo').value           = d.tipo;
+                modal.querySelector('#con-fm-plan').value           = d.plan;
+                modal.querySelector('#con-fm-facturar-desde').value = d.facturarDesde;
+                modal.querySelector('#con-fm-facturar-hasta').value = d.facturarHasta;
+                modal.querySelector('#con-fm-remitir').value        = d.remitir;
+                modal.querySelector('#con-fm-estado').value         = d.estado;
+                modal.querySelector('#con-fm-orden').value          = d.orden;
+                modal.querySelector('#con-fm-dir').value            = d.dir;
+                modal.querySelector('#con-fm-limit').value          = String(d.limit);
+            },
+        });
+    }
+
+    function openContratoViewModal(c) {
+        // Abono del plan y abono final con la promo aplicada, la misma cuenta
+        // que hace el consultar del sistema histórico. Se muestra sólo cuando
+        // hay plan con precio; y el descuento, sólo dentro de la vigencia
+        // `desde`–`hasta`, que es la condición con la que `facturar()` agrega
+        // el renglón de la promoción.
+        // El importe lo formatea el `moneda()` compartido (§Utils): Contratos y
+        // Comprobantes muestran plata de la misma entidad y dos formatos
+        // distintos se notan enseguida.
+        const hoy    = new Date().toISOString().slice(0, 10);
+        const vigente = !!(c.desde && c.hasta && c.desde <= hoy && hoy <= c.hasta);
+        const promoPct = Number(c.promo);
+        const aplicaPromo = vigente && Number.isFinite(promoPct) && promoPct > 0;
+
+        const abono = c.plan_venta == null
+            ? `<span class="muted">—</span>`
+            : aplicaPromo
+                ? `${escape(moneda(c.plan_venta * (1 - promoPct / 100)))}
+                   <span class="muted">· lista ${escape(moneda(c.plan_venta))}</span>`
+                : escape(moneda(c.plan_venta));
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar contrato</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del contrato">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${/* 22 tarjetas: 20 `half` + 2 `full` (§25 de DESIGN.md).
+                        `.view-grid` es flex con `flex-grow`, así que una `half`
+                        que quede sola en su renglón se estira al 100% y se lee
+                        como un destaque deliberado cuando en realidad es el
+                        sobrante de una cuenta impar. Por eso los `half` tienen
+                        que ser PARES y cada `full` tiene que caer después de un
+                        renglón cerrado: `Identificador` en la ranura 3 (con
+                        Código y Dominio arriba) y `Plan` en la 6 (con Cliente y
+                        Tipo). Los dos son campos anchos de verdad — el nombre
+                        del plan trae su glosa y su id.
+                        Agregar o quitar un campo obliga a rehacer esta cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código',         `<code>#${c.id}</code>`),
+                        viewCardHalf('Dominio',        refValue(c.dominio, c.dominio_nombre)),
+                        viewCardFull('Identificador',  c.uuid
+                            ? `<code>${escape(c.uuid)}</code>`
+                            : `<span class="muted">Sin identificador</span>`),
+                        viewCardHalf('Cliente',        refValue(c.cliente, c.cliente_nombre)),
+                        viewCardHalf('Tipo',           c.tipo
+                            ? `<span class="badge badge-info">${escape(c.tipo_texto || c.tipo)}</span>`
+                            : `<span class="muted">Sin tipo</span>`),
+                        viewCardFull('Plan',           c.plan
+                            ? `${escape(c.plan_nombre || '')} <code>#${c.plan}</code>${
+                                c.plan_descripcion ? ` <span class="muted">· ${escape(c.plan_descripcion)}</span>` : ''}`
+                            : `<span class="muted">Sin plan</span>`),
+                        viewCardHalf('Abono',          abono),
+                        viewCardHalf('Promo',          c.promo == null
+                            ? `<span class="muted">Sin promoción</span>`
+                            : `${escape(c.promo_texto || c.promo)}${aplicaPromo ? '' : ' <span class="muted">· fuera de vigencia</span>'}`),
+                        viewCardHalf('Vigencia promo', c.desde || c.hasta
+                            ? `${contratoFecha(c.desde)} <span class="muted">a</span> ${contratoFecha(c.hasta)}`
+                            : `<span class="muted">Sin vigencia</span>`),
+                        viewCardHalf('Habilitado',     contratoEstadoBadge(c.habilitado)),
+                        viewCardHalf('Registro',       contratoFechaHora(c.registro)),
+                        viewCardHalf('Firma',          contratoFechaHora(c.firma)),
+                        viewCardHalf('Alta',           contratoFecha(c.alta)),
+                        viewCardHalf('Baja',           contratoFecha(c.baja)),
+                        viewCardHalf('Facturado',      contratoFecha(c.facturado)),
+                        viewCardHalf('Facturar',       contratoFecha(c.facturar)),
+                        viewCardHalf('Tolerancia',     contratoFecha(c.tolerancia)),
+                        viewCardHalf('Facturable',     c.facturable
+                            ? `<span class="badge badge-warn">Sí</span>`
+                            : `<span class="badge badge-info">No</span>`),
+                        viewCardHalf('Remitir',        c.remitir === ''
+                            ? `<span class="muted">—</span>`
+                            : `<span class="badge ${c.remitir === '1' ? 'badge-warn' : 'badge-info'}">${escape(c.remitir_texto || c.remitir)}</span>`),
+                        viewCardHalf('Remitido',       contratoFechaHora(c.remitido)),
+                        viewCardHalf('Comprobantes',   `<span class="badge badge-info">${c.comprobantes_count}</span>`),
+                        viewCardHalf('Pagos',          `<span class="badge badge-info">${c.pagos_count}</span>`),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
+            const items = [
+                { act: 'edit', label: 'Editar contrato', icon: 'fa-pencil',
+                  onSelect: () => { close(); openContratoModal(c); } },
+            ];
+            if (c.uuid) {
+                items.push({ divider: true });
+                items.push({ act: 'estado', label: 'Ver estado de cuenta', icon: 'fa-arrow-up-right-from-square',
+                             onSelect: () => abrirEstadoDeCuenta(c) });
+                items.push({ act: 'copy-uuid', label: 'Copiar identificador', icon: 'fa-regular fa-copy',
+                             onSelect: () => copyToClipboard(c.uuid) });
+            }
+            items.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(c.id)) });
+            items.push({ divider: true });
+            items.push({ act: 'delete', label: 'Eliminar contrato', icon: 'fa-trash', danger: true,
+                         onSelect: () => { close(); pedirImpactoContrato(c); } });
+            return items;
+        });
+    }
+
+    // Valor para un <input type="datetime-local">: el backend manda
+    // "AAAA-MM-DD HH:MM:SS" y el input quiere "AAAA-MM-DDTHH:MM".
+    function toInputFechaHora(v) {
+        if (!v) return '';
+        return String(v).replace(' ', 'T').slice(0, 16);
+    }
+
+    function openContratoModal(c) {
+        const isEdit = !!c;
+        const cat    = CATALOGOS_CONTRATOS;
+
+        const selectOpts = (items, valorSel, vacio, mapear) =>
+            ['<option value="">' + escape(vacio) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === String(valorSel ?? '') ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const domOpts = selectOpts(cat.dominios, c?.dominio, 'Sin dominio',
+                                   d => ({ valor: String(d.id), texto: (d.nombre || ('#' + d.id)) + (d.habilitado === 1 ? '' : ' (deshabilitado)') }));
+        const cliOpts = selectOpts(cat.clientes, c?.cliente, 'Sin cliente',
+                                   x => ({ valor: String(x.id), texto: x.nombre || ('#' + x.id) }));
+        const plaOpts = selectOpts(cat.planes, c?.plan, 'Sin plan',
+                                   p => ({ valor: String(p.id), texto: contratoPlanLabel(p) }));
+        const tipOpts = selectOpts(cat.tipos, c?.tipo, 'Sin tipo',
+                                   t => ({ valor: t.valor, texto: t.texto }));
+
+        // `remitir` y `habilitado` son banderas de dos valores: no llevan
+        // opción vacía. En el alta arrancan como el `nuevo()` del sistema
+        // histórico — no remitir, contrato habilitado.
+        const remActual = isEdit ? (c.remitir === '1' ? '1' : '0') : '0';
+        const habActual = isEdit ? String(c.habilitado) : '1';
+        const remOpts = (cat.remitir.length ? cat.remitir : [{ valor: '1', texto: 'Si' }, { valor: '0', texto: 'No' }])
+            .map(t => `<option value="${escape(t.valor)}"${t.valor === remActual ? ' selected' : ''}>${escape(t.texto)}</option>`)
+            .join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar contrato' : 'Nuevo contrato'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">Identificación</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-dominio">Dominio</label>
+                                <select id="con-dominio">${domOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="con-cliente">Cliente</label>
+                                <select id="con-cliente">${cliOpts}</select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-uuid">Identificador</label>
+                                <input type="text" id="con-uuid" maxlength="8" inputmode="numeric"
+                                       value="${escape(c?.uuid ?? '')}"
+                                       placeholder="${isEdit ? '8 dígitos' : 'Se genera solo si lo dejás vacío'}">
+                                <div class="field-error" id="con-uuid-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="con-habilitado">Habilitado</label>
+                                <select id="con-habilitado">
+                                    <option value="1"${habActual === '1' ? ' selected' : ''}>Habilitado</option>
+                                    <option value="0"${habActual === '0' ? ' selected' : ''}>Deshabilitado</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Servicio</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-tipo">Tipo</label>
+                                <select id="con-tipo">${tipOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="con-plan">Plan</label>
+                                <select id="con-plan">${plaOpts}</select>
+                            </div>
+                        </div>
+                        ${/* `promo` es de SOLO LECTURA a propósito: el esquema
+                             la declara FK contra `articulos` y el sistema
+                             histórico la factura como porcentaje, y ninguno de
+                             los once valores del combo existe como artículo.
+                             Se muestra para que la ficha esté completa; el
+                             endpoint no la escribe. Ver api/contratos.php. */''}
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-promo">Promo</label>
+                                <input type="text" id="con-promo" readonly
+                                       value="${escape(c?.promo == null ? 'Sin promoción' : (c.promo_texto || c.promo))}">
+                                <div class="form-nota">
+                                    Sólo lectura: la columna está declarada como referencia a
+                                    <code>articulos</code> pero el sistema histórico la factura como
+                                    porcentaje de descuento. Hasta que se defina cuál de las dos es,
+                                    el ABM no la escribe.
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="con-desde">Promo vigente desde</label>
+                                <input type="date" id="con-desde" value="${escape(c?.desde ?? '')}">
+                                <div class="field-error" id="con-desde-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-hasta">Promo vigente hasta</label>
+                                <input type="date" id="con-hasta" value="${escape(c?.hasta ?? '')}">
+                            </div>
+                            <div class="form-group"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Vida del contrato</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-registro">Registro</label>
+                                <input type="datetime-local" id="con-registro" value="${escape(toInputFechaHora(c?.registro))}">
+                            </div>
+                            <div class="form-group">
+                                <label for="con-firma">Firma</label>
+                                <input type="datetime-local" id="con-firma" value="${escape(toInputFechaHora(c?.firma))}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-alta">Alta</label>
+                                <input type="date" id="con-alta" value="${escape(c?.alta ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="con-baja">Baja</label>
+                                <input type="date" id="con-baja" value="${escape(c?.baja ?? '')}">
+                                <div class="field-error" id="con-baja-err" style="display:none"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Facturación</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-facturado">Facturado</label>
+                                <input type="date" id="con-facturado" value="${escape(c?.facturado ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="con-facturar">Facturar</label>
+                                <input type="date" id="con-facturar" value="${escape(c?.facturar ?? '')}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-tolerancia">Tolerancia</label>
+                                <input type="date" id="con-tolerancia" value="${escape(c?.tolerancia ?? '')}">
+                            </div>
+                            <div class="form-group"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="con-remitir">Remitir estado de cuenta</label>
+                                <select id="con-remitir">${remOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="con-remitido">Remitido</label>
+                                <input type="datetime-local" id="con-remitido" value="${escape(toInputFechaHora(c?.remitido))}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-nota">
+                        Las fechas que se dejan vacías se guardan con el "sin fecha" del sistema
+                        histórico (<code>1500-01-01</code>, y <code>2500-01-01</code> en Baja), que es
+                        lo que ya tienen el resto de los contratos.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const val     = id => backdrop.querySelector('#con-' + id).value.trim();
+        const saveBtn = backdrop.querySelector('[data-act="save"]');
+        const uuidEl  = backdrop.querySelector('#con-uuid');
+        const uuidErr = backdrop.querySelector('#con-uuid-err');
+        const desdeEl = backdrop.querySelector('#con-desde');
+        const hastaEl = backdrop.querySelector('#con-hasta');
+        const desdeErr = backdrop.querySelector('#con-desde-err');
+        const altaEl  = backdrop.querySelector('#con-alta');
+        const bajaEl  = backdrop.querySelector('#con-baja');
+        const bajaErr = backdrop.querySelector('#con-baja-err');
+
+        backdrop.querySelector('#con-dominio').focus();
+
+        // El dominio ya tiene cliente: elegirlo precarga el cliente cuando el
+        // campo está vacío, igual que el alta desde un dominio del sistema
+        // histórico. No lo pisa si ya hay uno elegido — un contrato puede
+        // facturarse a un cliente distinto del titular del dominio.
+        backdrop.querySelector('#con-dominio').addEventListener('change', e => {
+            const dom = cat.dominios.find(d => String(d.id) === e.target.value);
+            const cliSel = backdrop.querySelector('#con-cliente');
+            if (dom && dom.cliente && !cliSel.value) cliSel.value = String(dom.cliente);
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            [uuidErr, desdeErr, bajaErr].forEach(el => { el.style.display = 'none'; });
+            [uuidEl, desdeEl, bajaEl].forEach(el => el.classList.remove('input-invalid'));
+
+            const marcar = (el, err, msg) => {
+                err.textContent = msg;
+                err.style.display = 'block';
+                el.classList.add('input-invalid');
+                return el;
+            };
+
+            const uuid = val('uuid');
+            let firstInvalid = null;
+
+            // El identificador es la credencial del estado de cuenta público:
+            // el formato lo valida igual el backend, pero avisar acá evita el
+            // viaje. En el alta puede ir vacío — se genera del lado del server.
+            if (uuid !== '' && !/^[0-9]{8}$/.test(uuid)) {
+                firstInvalid = marcar(uuidEl, uuidErr, 'El identificador debe tener exactamente 8 dígitos');
+            } else if (isEdit && uuid === '') {
+                firstInvalid = marcar(uuidEl, uuidErr, 'El identificador es obligatorio');
+            }
+
+            const desde = val('desde');
+            const hasta = val('hasta');
+            if (desde && hasta && desde > hasta) {
+                firstInvalid = firstInvalid || marcar(desdeEl, desdeErr, 'La vigencia "desde" no puede ser posterior a "hasta"');
+            }
+
+            const alta = val('alta');
+            const baja = val('baja');
+            if (alta && baja && baja < alta) {
+                firstInvalid = firstInvalid || marcar(bajaEl, bajaErr, 'La baja no puede ser anterior al alta');
+            }
+
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            // `promo` no viaja: el endpoint no la escribe (ver el comentario del
+            // campo de arriba). El resto son las 17 columnas editables.
+            const payload = {
+                uuid,
+                dominio:    val('dominio'),
+                cliente:    val('cliente'),
+                tipo:       val('tipo'),
+                plan:       val('plan'),
+                desde,
+                hasta,
+                registro:   val('registro'),
+                firma:      val('firma'),
+                alta,
+                baja,
+                facturado:  val('facturado'),
+                facturar:   val('facturar'),
+                tolerancia: val('tolerancia'),
+                remitir:    val('remitir'),
+                remitido:   val('remitido'),
+                habilitado: val('habilitado'),
+            };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('contratos', { method: 'PUT', body: { id: c.id, ...payload } });
+                    toast('Contrato actualizado');
+                } else {
+                    await api('contratos', { method: 'POST', body: payload });
+                    toast('Contrato creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    // Un contrato es el lado padre de tres FKs — dos RESTRICT (`comprobantes`,
+    // `pagos`) y una SET NULL (`dominios`) —, así que la baja no usa el
+    // confirmDialog simple sino el modal con desglose (ABM.md, "Eliminar";
+    // DESIGN.md §15.1). Las cantidades las pide el backend.
+    async function pedirImpactoContrato(c) {
+        try {
+            const impacto = await api('contratos?impacto=1&id=' + encodeURIComponent(c.id));
+            openContratoDeleteModal(c, impacto);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openContratoDeleteModal(c, impacto) {
+        const bloqueos   = impacto.bloqueos   || [];
+        const elimina    = impacto.elimina    || [];
+        const desvincula = impacto.desvincula || [];
+        const bloqueado  = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const seccion = (titulo, icono, cls, items, badge) => !items.length ? '' : `
+            <div class="del-section">
+                <div class="del-section-title ${cls}"><i class="fa-solid ${icono}"></i> ${escape(titulo)}</div>
+                <ul class="del-list">${items.map(it => linea(it, badge)).join('')}</ul>
+            </div>`;
+
+        const avisoBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Son comprobantes y pagos ya registrados del cliente: anulalos o reasignalos
+                    desde el sistema de facturación antes de borrar el contrato.
+                </div>
+            </div>`;
+
+        const sinDatos = (elimina.length || desvincula.length || bloqueado) ? '' : `
+            <div class="del-empty">No tiene datos asociados en el resto del sistema.</div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar contrato</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar contrato
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el contrato
+                        <code>#${c.id}</code>
+                        ${c.dominio_nombre ? `de <strong>${escape(c.dominio_nombre)}</strong>` : ''}
+                        ${c.cliente_nombre ? `<span class="muted">· ${escape(c.cliente_nombre)}</span>` : ''}
+                    </div>
+                    ${avisoBloqueo}
+                    ${sinDatos}
+                    ${seccion('Se eliminarán junto con el contrato', 'fa-trash', 'del-danger', elimina, 'badge-danger')}
+                    ${seccion('Se conservarán, sin la referencia a este contrato', 'fa-link-slash', 'del-warn', desvincula, 'badge-warn')}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                const res = await api('contratos?id=' + encodeURIComponent(c.id), { method: 'DELETE' });
+                close();
+                toast(res && res.dominios
+                    ? `Contrato eliminado — ${res.dominios} dominio(s) quedaron sin contrato`
+                    : 'Contrato eliminado');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---------- Views: Comprobantes ----------
+     * Factura, prefactura, recibo, remito… — la cabecera vive en
+     * `comprobantes` y sus renglones en `comprobantesrenglones`. El tipo, el
+     * subtipo, el punto de venta y la empresa NO son columnas suyas: salen del
+     * talonario que le da la numeración.
+     *
+     * ESTE MÓDULO ESCRIBE MUCHO MENOS QUE CONTRATOS Y TALONARIOS, a propósito
+     * y con el mismo criterio del back office viejo: el alta pide sólo el
+     * talonario, la edición existe únicamente en Preparación y sobre doce
+     * campos, y los totales / la serie / el CAE no se tocan a mano nunca. El
+     * porqué de cada restricción está en la cabecera de `api/comprobantes.php`.
+     * Lo que sí se muestra es todo — la restricción es de escritura, no de
+     * lectura — y la ficha explica qué no se puede editar y por qué.
+     *
+     * FILTRADO EN EL BACKEND. Los otros módulos de Comercial se traen la tabla
+     * entera y filtran en el navegador; acá hay 2.326 comprobantes y crecen con
+     * cada facturación, así que el modal de Filtros manda todo al SQL y el
+     * buscador rápido de la toolbar opera sobre la ventana traída. Por eso su
+     * placeholder dice "en los resultados": son dos cosas distintas y confundir
+     * una con otra hace pensar que un comprobante no existe.
+     */
+    const ORDEN_COMPROBANTES = null;   // el listado sale siempre por id DESC del SQL
+
+    let CATALOGOS_COMPROBANTES = {
+        talonarios: [], empresas: [], medios: [],
+        tipos: [], estados: [], condiciones: [], ivas: [], visor_base: '',
+    };
+
+    function comprobantesDefaults() {
+        return {
+            texto: '',
+            id: '', talonario: '', contrato: '', cliente: '', medio: '',
+            estado: '', tipo: '', empresa: '', razon: '',
+            emisionDesde: '', emisionHasta: '', vtoDesde: '', vtoHasta: '',
+            limit: 100,
+        };
+    }
+
+    // Los filtros que viajan al backend, sin las claves vacías: así la query
+    // string dice exactamente qué se está filtrando.
+    function comprobantesQuery(state) {
+        const p = new URLSearchParams();
+        ['id', 'talonario', 'contrato', 'cliente', 'medio', 'estado', 'tipo',
+         'empresa', 'razon', 'emisionDesde', 'emisionHasta', 'vtoDesde', 'vtoHasta']
+            .forEach(k => { if (state[k] !== '') p.set(k, state[k]); });
+        p.set('limit', String(state.limit));
+        return p.toString();
+    }
+
+    async function renderComprobantes(root) {
+        try {
+            const state = tomarEstadoVista('comprobantes', comprobantesDefaults());
+            const data  = await api('comprobantes?' + comprobantesQuery(state));
+            CATALOGOS_COMPROBANTES = data.catalogos;
+
+            const r = data.resumen;
+
+            root.innerHTML = `
+                ${moduleHeader('Comprobantes', 'Los documentos que emite cada talonario: qué se facturó, a quién, por cuánto y en qué estado.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Preparación</span>
+                        <span class="stat-value orange">${r.preparacion}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Pendientes</span>
+                        <span class="stat-value">${r.pendientes}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Cancelados</span>
+                        <span class="stat-value green">${r.cancelados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Anulados</span>
+                        <span class="stat-value muted">${r.anulados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Pendiente de cobro</span>
+                        <span class="stat-value orange">${escape(moneda(r.monto_pendiente))}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'cpb',
+                    quickPlaceholder: 'Buscar en los resultados (razón social, número, identificador…)',
+                    newLabel:         'Nuevo comprobante',
+                })}
+                <div class="table-card" id="cpb-table"></div>
+            `;
+
+            wireComprobantesView(state, data);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    // Los cuatro estados y su tono. `estado` es varchar(1) y '0' (Anulado) es
+    // un valor real, así que se compara como string en todos lados.
+    const TONO_ESTADO_COMPROBANTE = {
+        '0': 'badge-danger',
+        '1': 'badge-warn',
+        '2': 'badge-info',
+        '3': 'badge-success',
+    };
+    function comprobanteEstadoBadge(c) {
+        if (!c.estado) return `<span class="muted">—</span>`;
+        const cls = TONO_ESTADO_COMPROBANTE[c.estado] || 'badge-info';
+        return `<span class="badge ${cls}">${escape(c.estado_texto || c.estado)}</span>`;
+    }
+
+    function comprobantesTableBody(comprobantes, consulta) {
+        if (!comprobantes.length) {
+            return `<div class="table-empty">No hay comprobantes que coincidan con el filtro.</div>`;
+        }
+
+        const rows = comprobantes.map(c => `
+            <tr class="row-clickable" data-id="${c.id}">
+                <td><span class="td-id">#${c.id}</span></td>
+                <td>${c.emision ? escape(formatDateOnly(c.emision)) : '<span class="muted">—</span>'}</td>
+                <td>${c.empresa_nombre ? escape(c.empresa_nombre) : '<span class="muted">—</span>'}</td>
+                <td>${c.tipo_completo ? escape(c.tipo_completo) : '<span class="muted">—</span>'}</td>
+                <td>${c.numero
+                    ? `<span class="td-id">${escape(c.numero)}</span>`
+                    : '<span class="muted">Sin numerar</span>'}</td>
+                <td class="td-nombre">${c.razon ? escape(c.razon) : '<span class="muted">Sin razón social</span>'}</td>
+                <td class="td-num">${c.total == null ? '<span class="muted">—</span>' : escape(moneda(c.total))}</td>
+                <td>${comprobanteEstadoBadge(c)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        // Pie con lo que dice la CONSULTA, no la ventana: con 100 de 2.326
+        // traídos, sumar sólo lo visible daría un número que no es de nadie.
+        const recortado = consulta && consulta.filas > consulta.traidos;
+        const pie = !consulta ? '' : `
+            <div class="table-foot">
+                <span>${consulta.filas} comprobante(s) · Total ${escape(moneda(consulta.total))}</span>
+                ${recortado
+                    ? `<span class="muted">Se muestran los ${consulta.traidos} más recientes — subí el <strong>Límite</strong> en Filtros para ver más</span>`
+                    : ''}
+            </div>`;
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Emisión</th>
+                        <th>Empresa</th>
+                        <th>Tipo</th>
+                        <th>Número</th>
+                        <th>Razón Social</th>
+                        <th class="td-num">Total</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+            ${pie}
+        `;
+    }
+
+    function wireComprobantesView(state, data) {
+        const tableWrap = document.getElementById('cpb-table');
+        const quick     = document.getElementById('cpb-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('cpb-filters');
+        const btnNew    = document.getElementById('cpb-new');
+
+        // La ventana que trajo el backend. La búsqueda rápida filtra sobre
+        // esto; los filtros del modal vuelven a pedirla.
+        let ventana  = data.comprobantes;
+        let consulta = data.consulta;
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const filtrados = !q ? ventana : ventana.filter(c => (
+                (c.razon || '') + ' ' + (c.numero || '') + ' ' + (c.uuid || '') + ' ' +
+                (c.cliente_nombre || '') + ' ' + (c.empresa_nombre || '') + ' ' +
+                (c.tipo_completo || '') + ' ' + (c.cuit || '')
+            ).toLowerCase().includes(q));
+
+            // Con la búsqueda rápida activa el pie mostraría los totales de la
+            // consulta entera debajo de una tabla ya recortada: se recalcula
+            // sobre lo que realmente se ve.
+            const pie = q
+                ? { filas: filtrados.length, traidos: filtrados.length,
+                    total: filtrados.reduce((a, c) => a + (c.total || 0), 0) }
+                : consulta;
+
+            tableWrap.innerHTML = comprobantesTableBody(filtrados, pie);
+            wireRowActions();
+        }
+
+        // Vuelve a pedirle la ventana al backend con los filtros vigentes, sin
+        // re-renderizar el módulo entero: los KPIs son del universo completo y
+        // no cambian al filtrar.
+        async function recargar() {
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const fresca = await api('comprobantes?' + comprobantesQuery(state));
+                ventana  = fresca.comprobantes;
+                consulta = fresca.consulta;
+                CATALOGOS_COMPROBANTES = fresca.catalogos;
+                applyAndRender();
+            } catch (e) {
+                tableWrap.innerHTML = errorBox(e.message);
+            }
+        }
+
+        function rowMenuFor(c) {
+            const extraAfterView = [];
+            if (c.uuid) {
+                extraAfterView.push({ act: 'abrir', label: 'Abrir comprobante', icon: 'fa-arrow-up-right-from-square',
+                                      onSelect: () => abrirVisor(c, 'abrir') });
+            }
+
+            const extra = [];
+            if (c.puede_autorizar) {
+                extra.push({ act: 'autorizar', label: 'Autorizar', icon: 'fa-stamp',
+                             onSelect: () => confirmarAutorizar(c, recargar) });
+            }
+            if (c.puede_anular) {
+                extra.push({ act: 'anular', label: 'Anular', icon: 'fa-ban',
+                             onSelect: () => confirmarAnular(c, recargar) });
+                extra.push({ act: 'pago', label: 'Registrar pago', icon: 'fa-hand-holding-dollar',
+                             onSelect: () => openPagoModal(c, recargar) });
+            }
+            extra.push({ act: 'duplicar', label: 'Duplicar', icon: 'fa-clone',
+                         onSelect: () => confirmarDuplicar(c, recargar) });
+            if (c.correo) {
+                extra.push({ act: 'correo', label: 'Enviar por correo', icon: 'fa-regular fa-envelope',
+                             onSelect: () => confirmarCorreo(c) });
+            }
+            if (c.contrato) {
+                extra.push({ act: 'contrato', label: 'Ver contrato', icon: 'fa-file-contract',
+                             onSelect: () => pedirFiltroContrato('contratos', c.contrato) });
+            }
+            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(c.id)) });
+
+            return standardRowMenuItems({
+                view: true, onView: () => openComprobanteViewModal(c.id, recargar),
+                // La edición sólo existe en Preparación: el ítem no se dibuja
+                // cuando no corresponde, y el endpoint corta igual con 409.
+                edit: c.puede_editar, onEdit: () => openComprobanteEditModal(c, recargar),
+                delete: true, onDelete: () => pedirImpactoComprobante(c, recargar),
+                extraAfterView,
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const c  = ventana.find(x => x.id === id);
+                if (!c) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(c), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openComprobanteViewModal(c.id, recargar));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openComprobantesFiltersModal(state, recargar));
+        btnNew.addEventListener('click',  () => openComprobanteNuevoModal(recargar));
+        wireRefresh('cpb', 'comprobantes', state);
+
+        applyAndRender();
+    }
+
+    // Los tres links del visor público, indexados por el `uuid`. Viven fuera
+    // de cloud (www.reactor.com.ar), así que se abren en otra pestaña.
+    function abrirVisor(c, modo) {
+        const base = CATALOGOS_COMPROBANTES.visor_base || 'https://www.reactor.com.ar/comprobante';
+        window.open(`${base}/${modo}?uuid=${encodeURIComponent(c.uuid)}`, '_blank', 'noopener');
+    }
+
+    function openComprobantesFiltersModal(state, onApply) {
+        const cat = CATALOGOS_COMPROBANTES;
+
+        const opciones = (items, valorSel, todos, mapear) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === valorSel ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const talOpts = opciones(cat.talonarios, state.talonario, 'Todos los talonarios',
+                                 t => ({ valor: String(t.id), texto: (t.nombre || ('#' + t.id)) + (t.estado === 1 ? '' : ' (deshabilitado)') }));
+        const empOpts = opciones(cat.empresas, state.empresa, 'Todas las empresas',
+                                 e => ({ valor: String(e.id), texto: e.nombre || ('#' + e.id) }));
+        const medOpts = opciones(cat.medios, state.medio, 'Todos los medios',
+                                 m => ({ valor: String(m.id), texto: m.nombre || ('#' + m.id) }));
+        const tipOpts = opciones(cat.tipos,   state.tipo,   'Todos los tipos', t => t);
+        const estOpts = opciones(cat.estados, state.estado, 'Todos los estados', t => t);
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="cpb-fm-id">Código</label>
+                    <input type="number" id="cpb-fm-id" min="1" placeholder="ID exacto" value="${escape(state.id)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-razon">Razón social</label>
+                    <input type="search" id="cpb-fm-razon" placeholder="Contiene…" value="${escape(state.razon)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-estado">Estado</label>
+                    <select id="cpb-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-tipo">Tipo</label>
+                    <select id="cpb-fm-tipo">${tipOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-empresa">Empresa</label>
+                    <select id="cpb-fm-empresa">${empOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-talonario">Talonario</label>
+                    <select id="cpb-fm-talonario">${talOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-emision-desde">Emisión desde</label>
+                    <input type="date" id="cpb-fm-emision-desde" value="${escape(state.emisionDesde)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-emision-hasta">Emisión hasta</label>
+                    <input type="date" id="cpb-fm-emision-hasta" value="${escape(state.emisionHasta)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-vto-desde">Vencimiento desde</label>
+                    <input type="date" id="cpb-fm-vto-desde" value="${escape(state.vtoDesde)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-vto-hasta">Vencimiento hasta</label>
+                    <input type="date" id="cpb-fm-vto-hasta" value="${escape(state.vtoHasta)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-contrato">Contrato</label>
+                    <input type="number" id="cpb-fm-contrato" min="1" placeholder="ID del contrato" value="${escape(state.contrato)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-cliente">Cliente</label>
+                    <input type="number" id="cpb-fm-cliente" min="1" placeholder="ID del cliente" value="${escape(state.cliente)}">
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-medio">Medio de pago</label>
+                    <select id="cpb-fm-medio">${medOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cpb-fm-limit">Límite</label>
+                    <input type="number" id="cpb-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+            </div>
+            <div class="form-nota">
+                Estos filtros los resuelve el servidor sobre los 2.300+ comprobantes. El buscador
+                de la barra, en cambio, filtra sólo lo que ya está en pantalla.
+            </div>
+        `;
+
+        openFiltersModal({
+            wide: true,
+            bodyHtml,
+            onApply(modal) {
+                const v = id => modal.querySelector('#cpb-fm-' + id).value.trim();
+                state.id           = v('id');
+                state.razon        = v('razon');
+                state.estado       = v('estado');
+                state.tipo         = v('tipo');
+                state.empresa      = v('empresa');
+                state.talonario    = v('talonario');
+                state.emisionDesde = v('emision-desde');
+                state.emisionHasta = v('emision-hasta');
+                state.vtoDesde     = v('vto-desde');
+                state.vtoHasta     = v('vto-hasta');
+                state.contrato     = v('contrato');
+                state.cliente      = v('cliente');
+                state.medio        = v('medio');
+                state.limit        = readLimit(modal.querySelector('#cpb-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = comprobantesDefaults();
+                const set = (id, val) => { modal.querySelector('#cpb-fm-' + id).value = val; };
+                set('id', d.id);                     set('razon', d.razon);
+                set('estado', d.estado);             set('tipo', d.tipo);
+                set('empresa', d.empresa);           set('talonario', d.talonario);
+                set('emision-desde', d.emisionDesde); set('emision-hasta', d.emisionHasta);
+                set('vto-desde', d.vtoDesde);        set('vto-hasta', d.vtoHasta);
+                set('contrato', d.contrato);         set('cliente', d.cliente);
+                set('medio', d.medio);               set('limit', String(d.limit));
+            },
+        });
+    }
+
+    /* ---- Ficha: cabecera + renglones + pagos ---- */
+
+    async function openComprobanteViewModal(id, onCambio) {
+        let detalle;
+        try {
+            detalle = await api('comprobantes?detalle=1&id=' + encodeURIComponent(id));
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+            return;
+        }
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar comprobante</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del comprobante">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('imprimir', 'Imprimir', 'fa-print')}
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body" id="cpb-ficha"></div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        // La ficha se repinta sola tras cada cambio de renglón: así el total
+        // de arriba y la grilla de abajo no pueden quedar contando distinto.
+        async function repintar() {
+            try {
+                detalle = await api('comprobantes?detalle=1&id=' + encodeURIComponent(id));
+            } catch (e) {
+                toast(e.message, { error: true, duration: 6000 });
+                return;
+            }
+            pintarFicha();
+        }
+
+        function pintarFicha() {
+            const c = detalle.comprobante;
+            backdrop.querySelector('#cpb-ficha').innerHTML = comprobanteFichaHtml(detalle);
+            wireFichaRenglones(backdrop, c, repintar);
+            cablearMenus(c);
+        }
+
+        function cablearMenus(c) {
+            const menubar = backdrop.querySelector('.modal-menubar');
+
+            wireMenubarMenu(menubar, 'imprimir', () => {
+                if (!c.uuid) return [{ act: 'sin', label: 'Sin identificador', icon: 'fa-ban', onSelect: () => {} }];
+                return [
+                    { act: 'abrir',      label: 'Abrir',      icon: 'fa-eye',       onSelect: () => abrirVisor(c, 'abrir') },
+                    { act: 'descargar',  label: 'Descargar',  icon: 'fa-download',  onSelect: () => abrirVisor(c, 'descargar') },
+                    { act: 'compartir',  label: 'Compartir',  icon: 'fa-share',     onSelect: () => abrirVisor(c, 'visor') },
+                    { divider: true },
+                    { act: 'copy-link',  label: 'Copiar enlace del visor', icon: 'fa-regular fa-copy',
+                      onSelect: () => copyToClipboard(
+                          `${CATALOGOS_COMPROBANTES.visor_base || 'https://www.reactor.com.ar/comprobante'}/visor?uuid=${c.uuid}`) },
+                ];
+            });
+
+            wireMenubarMenu(menubar, 'acciones', () => {
+                const items = [];
+                const tras = () => { close(); if (typeof onCambio === 'function') onCambio(); };
+
+                if (c.puede_editar) {
+                    items.push({ act: 'edit', label: 'Editar', icon: 'fa-pencil',
+                                 onSelect: () => { close(); openComprobanteEditModal(c, onCambio); } });
+                    items.push({ act: 'autorizar', label: 'Autorizar', icon: 'fa-stamp',
+                                 onSelect: () => confirmarAutorizar(c, tras) });
+                }
+                if (c.puede_anular) {
+                    items.push({ act: 'pago', label: 'Registrar pago', icon: 'fa-hand-holding-dollar',
+                                 onSelect: () => openPagoModal(c, repintar) });
+                    if (c.boton_pago) {
+                        items.push({ act: 'boton-pago', label: 'Botón de pago', icon: 'fa-credit-card',
+                                     onSelect: () => window.open(c.boton_pago, '_blank', 'noopener') });
+                    }
+                    items.push({ act: 'anular', label: 'Anular', icon: 'fa-ban',
+                                 onSelect: () => confirmarAnular(c, tras) });
+                }
+                items.push({ act: 'duplicar', label: 'Duplicar', icon: 'fa-clone',
+                             onSelect: () => confirmarDuplicar(c, tras) });
+                if (c.correo) {
+                    items.push({ act: 'correo', label: 'Enviar por correo', icon: 'fa-regular fa-envelope',
+                                 onSelect: () => confirmarCorreo(c) });
+                }
+                items.push({ divider: true });
+                items.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                             onSelect: () => copyToClipboard(String(c.id)) });
+                items.push({ divider: true });
+                items.push({ act: 'delete', label: 'Eliminar comprobante', icon: 'fa-trash', danger: true,
+                             onSelect: () => { close(); pedirImpactoComprobante(c, onCambio); } });
+                return items;
+            });
+        }
+
+        pintarFicha();
+    }
+
+    // Cuerpo de la ficha: las tarjetas de la cabecera, la grilla de renglones
+    // con sus totales y la de pagos.
+    function comprobanteFichaHtml(detalle) {
+        const c = detalle.comprobante;
+
+        const oVacio = (v, glosa) => v ? escape(v) : `<span class="muted">${escape(glosa)}</span>`;
+        const fecha  = v => v ? escape(formatDateOnly(v)) : `<span class="muted">—</span>`;
+
+        // El CAE sólo existe en los talonarios fiscales; en los demás las dos
+        // tarjetas serían siempre "—" y sólo agregarían ruido. Es la misma
+        // condición que usa el consultar del sistema viejo.
+        const esFiscal = c.fiscal === '1';
+        const cae = !esFiscal ? [] : [
+            viewCardHalf('CAE Nro', oVacio(c.caenro, 'Sin CAE')),
+            viewCardHalf('CAE Vto', oVacio(c.caevto, 'Sin vencimiento')),
+        ];
+
+        /* Las tarjetas: los `half` tienen que ser PARES y cada `full` tiene que
+           caer después de un renglón cerrado (§25 de DESIGN.md), o la tarjeta
+           suelta se estira y se lee como un destaque que nadie decidió. El
+           bloque de CAE suma DOS `half`, así que la paridad se mantiene esté o
+           no esté. Agregar o quitar un campo obliga a rehacer la cuenta. */
+        const tarjetas = [
+            viewCardHalf('Código',            `<code>#${c.id}</code>`),
+            viewCardHalf('Estado',            comprobanteEstadoBadge(c)),
+            viewCardFull('Talonario',         c.talonario
+                ? `${escape(c.talonario_nombre || '')} <code>#${c.talonario}</code>`
+                : `<span class="muted">Sin talonario</span>`),
+            viewCardHalf('Tipo',              c.tipo_completo
+                ? `<span class="badge badge-info">${escape(c.tipo_completo)}</span>`
+                : `<span class="muted">—</span>`),
+            viewCardHalf('Número',            c.numero
+                ? `<code>${escape(c.numero)}</code>`
+                : `<span class="muted">Sin numerar (se asigna al autorizar)</span>`),
+            viewCardHalf('Empresa',           refValue(c.empresa, c.empresa_nombre)),
+            viewCardHalf('Comprobante fiscal',
+                `<span class="badge ${esFiscal ? 'badge-warn' : 'badge-info'}">${escape(c.fiscal_texto || (esFiscal ? 'Sí' : 'No'))}</span>`),
+            ...cae,
+            viewCardHalf('Emisión',           fecha(c.emision)),
+            viewCardHalf('Vencimiento',       fecha(c.vencimiento)),
+            viewCardFull('Identificador',     c.uuid
+                ? `<code>${escape(c.uuid)}</code>`
+                : `<span class="muted">Sin identificador</span>`),
+            viewCardHalf('Cliente',           refValue(c.cliente, c.cliente_nombre)),
+            viewCardHalf('Contrato',          refValue(c.contrato, '')),
+            viewCardFull('Razón social',      oVacio(c.razon, 'Sin razón social')),
+            viewCardHalf('Condición fiscal',  oVacio(c.condicion_texto || c.condicion, 'Sin condición')),
+            viewCardHalf('CUIT',              oVacio(c.cuit, 'Sin CUIT')),
+            viewCardFull('Domicilio',         oVacio(c.domicilio, 'Sin domicilio')),
+            viewCardHalf('Correo',            oVacio(c.correo, 'Sin correo')),
+            viewCardHalf('Celular',           oVacio(c.celular, 'Sin celular')),
+            viewCardHalf('Medio de pago',     refValue(c.medio, c.medio_nombre)),
+            viewCardHalf('Cotización USD/ARS', c.cotizacion ? escape(moneda(c.cotizacion)) : `<span class="muted">—</span>`),
+        ];
+
+        return `
+            ${viewGrid(tarjetas)}
+            ${comprobanteRenglonesHtml(detalle)}
+            ${comprobantePagosHtml(detalle)}
+            ${viewGrid([
+                viewCardFull('Observaciones', c.observaciones
+                    ? escape(c.observaciones).replace(/\n/g, '<br>')
+                    : `<span class="muted">Sin observaciones</span>`),
+                viewCardFull('Comentarios', c.comentarios
+                    ? escape(c.comentarios).replace(/\n/g, '<br>')
+                    : `<span class="muted">Sin comentarios</span>`),
+            ])}
+        `;
+    }
+
+    function comprobanteRenglonesHtml(detalle) {
+        const c   = detalle.comprobante;
+        const rs  = detalle.renglones || [];
+        const ed  = c.puede_editar;
+
+        const filas = !rs.length
+            ? `<tr><td colspan="${ed ? 7 : 6}" class="muted" style="text-align:center">Sin renglones.</td></tr>`
+            : rs.map(r => `
+                <tr data-renglon="${r.id}">
+                    <td class="td-num">${r.orden}</td>
+                    <td class="td-num">${r.cantidad == null ? '—' : escape(numero(r.cantidad))}</td>
+                    <td>${escape(r.detalle)}${r.articulo
+                        ? ` <span class="muted">· ${escape(r.articulo_nombre || ('#' + r.articulo))}</span>` : ''}</td>
+                    <td class="td-num">${r.iva == null ? '—' : escape(numero(r.iva)) + ' %'}</td>
+                    <td class="td-num">${r.unitario == null ? '—' : escape(moneda(r.unitario))}</td>
+                    <td class="td-num">${r.monto == null ? '—' : escape(moneda(r.monto))}</td>
+                    ${ed ? `<td class="action-col">
+                        <button class="btn-icon-sm" data-ren="edit" data-id="${r.id}" title="Editar renglón">
+                            <i class="fa-solid fa-pencil"></i></button>
+                        <button class="btn-icon-sm" data-ren="del" data-id="${r.id}" title="Eliminar renglón">
+                            <i class="fa-solid fa-trash"></i></button>
+                    </td>` : ''}
+                </tr>`).join('');
+
+        return `
+            <div class="ficha-bloque">
+                <div class="ficha-bloque-head">
+                    <span><i class="fa-solid fa-list-ul"></i> Renglones</span>
+                    ${ed
+                        ? `<button class="btn btn-sm btn-primary" data-ren="new">
+                               <i class="fa-solid fa-plus"></i> Agregar renglón
+                           </button>`
+                        : `<span class="muted">Sólo se editan en Preparación</span>`}
+                </div>
+                <table class="ficha-tabla">
+                    <thead>
+                        <tr>
+                            <th class="td-num">#</th>
+                            <th class="td-num">Cantidad</th>
+                            <th>Detalle</th>
+                            <th class="td-num">IVA</th>
+                            <th class="td-num">Unitario</th>
+                            <th class="td-num">Monto</th>
+                            ${ed ? '<th class="action-col"></th>' : ''}
+                        </tr>
+                    </thead>
+                    <tbody>${filas}</tbody>
+                    <tfoot>
+                        <tr><td colspan="${ed ? 6 : 5}" class="td-num">Subtotal</td>
+                            <td class="td-num">${escape(moneda(c.subtotal || 0))}</td></tr>
+                        <tr><td colspan="${ed ? 6 : 5}" class="td-num">IVA</td>
+                            <td class="td-num">${escape(moneda(c.iva || 0))}</td></tr>
+                        <tr><td colspan="${ed ? 6 : 5}" class="td-num"><strong>Total</strong></td>
+                            <td class="td-num"><strong>${escape(moneda(c.total || 0))}</strong></td></tr>
+                    </tfoot>
+                </table>
+                <div class="form-nota">
+                    Los tres totales los recalcula el servidor desde los renglones cada vez que uno
+                    cambia — no se escriben a mano. El IVA se <em>desagrega</em> del monto (los
+                    renglones van con IVA incluido), que es como los tiene calculados el sistema
+                    histórico.
+                </div>
+            </div>
+        `;
+    }
+
+    function comprobantePagosHtml(detalle) {
+        const ps = detalle.pagos || [];
+        if (!ps.length) return '';
+
+        const filas = ps.map(p => `
+            <tr>
+                <td><span class="td-id">#${p.id}</span></td>
+                <td>${p.fecha ? escape(formatDate(p.fecha)) : '<span class="muted">—</span>'}</td>
+                <td>${p.medio_nombre ? escape(p.medio_nombre) : '<span class="muted">—</span>'}</td>
+                <td>${p.operacion ? escape(p.operacion) : '<span class="muted">—</span>'}</td>
+                <td class="td-num">${p.monto == null ? '—' : escape(moneda(p.monto))}</td>
+                <td><span class="badge ${p.estado === '2' ? 'badge-success' : p.estado === '0' ? 'badge-danger' : 'badge-warn'}">${
+                    escape(p.estado_texto || p.estado || '—')}</span></td>
+            </tr>`).join('');
+
+        return `
+            <div class="ficha-bloque">
+                <div class="ficha-bloque-head">
+                    <span><i class="fa-solid fa-hand-holding-dollar"></i> Pagos registrados</span>
+                    <span class="muted">${ps.length}</span>
+                </div>
+                <table class="ficha-tabla">
+                    <thead>
+                        <tr><th>Código</th><th>Fecha</th><th>Medio</th><th>Operación</th>
+                            <th class="td-num">Monto</th><th>Estado</th></tr>
+                    </thead>
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function wireFichaRenglones(scope, c, repintar) {
+        scope.querySelector('[data-ren="new"]')?.addEventListener('click', () => {
+            openRenglonModal(null, c, repintar);
+        });
+        scope.querySelectorAll('[data-ren="edit"]').forEach(b => {
+            b.addEventListener('click', () => {
+                const id = +b.dataset.id;
+                // El renglón sale del último detalle pintado, no de una copia
+                // vieja: la ficha se repinta entera tras cada cambio.
+                const r = Array.from(scope.querySelectorAll('tr[data-renglon]'))
+                    .map(tr => +tr.dataset.renglon).includes(id) ? id : null;
+                if (r === null) return;
+                openRenglonModal(id, c, repintar);
+            });
+        });
+        scope.querySelectorAll('[data-ren="del"]').forEach(b => {
+            b.addEventListener('click', () => {
+                confirmDialog(
+                    'Eliminar renglón',
+                    '¿Eliminar este renglón? El total del comprobante se recalcula solo.',
+                    async () => {
+                        try {
+                            await api('comprobantes_renglones?id=' + b.dataset.id, { method: 'DELETE' });
+                            toast('Renglón eliminado');
+                            repintar();
+                        } catch (e) {
+                            toast(e.message, { error: true, duration: 6000 });
+                        }
+                    }
+                );
+            });
+        });
+    }
+
+    /* ---- Renglón: alta / edición ---- */
+
+    async function openRenglonModal(renglonId, comprobante, onGuardado) {
+        let r = null;
+        if (renglonId) {
+            try {
+                const d = await api('comprobantes_renglones?comprobante=' + comprobante.id);
+                r = (d.renglones || []).find(x => x.id === renglonId) || null;
+                if (!r) { toast('El renglón ya no existe', { error: true }); onGuardado(); return; }
+            } catch (e) {
+                toast(e.message, { error: true, duration: 6000 });
+                return;
+            }
+        }
+
+        const ivaOpts = (CATALOGOS_COMPROBANTES.ivas || []).map(o => {
+            const sel = r ? Number(o.valor) === Number(r.iva) : Number(o.valor) === 0;
+            return `<option value="${escape(o.valor)}"${sel ? ' selected' : ''}>${escape(o.texto)}</option>`;
+        }).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${r ? 'Editar renglón' : 'Nuevo renglón'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del renglón">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="ren-detalle">Detalle</label>
+                        <input type="text" id="ren-detalle" maxlength="500" value="${escape(r?.detalle ?? '')}"
+                               placeholder="Lo que se imprime en el renglón">
+                        <div class="field-error" id="ren-detalle-err" style="display:none"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ren-cantidad">Cantidad</label>
+                            <input type="text" id="ren-cantidad" inputmode="decimal"
+                                   value="${escape(String(r?.cantidad ?? 1))}">
+                            <div class="field-error" id="ren-cantidad-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="ren-iva">IVA</label>
+                            <select id="ren-iva">${ivaOpts}</select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ren-unitario">Unitario</label>
+                            <input type="text" id="ren-unitario" inputmode="decimal"
+                                   value="${escape(String(r?.unitario ?? 0))}">
+                            <div class="field-error" id="ren-unitario-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="ren-monto">Monto</label>
+                            <input type="text" id="ren-monto" inputmode="decimal"
+                                   value="${escape(String(r?.monto ?? 0))}">
+                            <div class="field-error" id="ren-monto-err" style="display:none"></div>
+                            <div class="form-nota" id="ren-monto-nota"></div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ren-orden">Orden</label>
+                            <input type="number" id="ren-orden" min="0" max="9999"
+                                   value="${escape(String(r?.orden ?? ''))}"
+                                   placeholder="${r ? '' : 'Al final'}">
+                        </div>
+                        <div class="form-group">
+                            <label for="ren-articulo">Artículo</label>
+                            <input type="number" id="ren-articulo" min="1"
+                                   value="${escape(String(r?.articulo ?? ''))}"
+                                   placeholder="ID, opcional">
+                            ${r?.articulo_nombre
+                                ? `<div class="form-nota">${escape(r.articulo_nombre)}</div>` : ''}
+                        </div>
+                    </div>
+                    <div class="form-nota">
+                        El <strong>monto</strong> no se deriva de cantidad × unitario: se manda tal cual.
+                        Los renglones de descuento van con monto <strong>negativo</strong> y los de
+                        encabezado en cero, y derivarlo rompería los dos casos.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el  = id => backdrop.querySelector('#ren-' + id);
+        const val = id => el(id).value.trim();
+
+        // Sugerencia de monto: cantidad × unitario. Es una ayuda visible, no
+        // un cálculo que se imponga — el campo sigue siendo el que manda.
+        function sugerir() {
+            const c = parseFloat(val('cantidad').replace(',', '.'));
+            const u = parseFloat(val('unitario').replace(',', '.'));
+            el('monto-nota').innerHTML = (Number.isFinite(c) && Number.isFinite(u))
+                ? `Cantidad × unitario = <code>${escape(moneda(c * u))}</code>`
+                : '';
+        }
+        ['cantidad', 'unitario'].forEach(id => el(id).addEventListener('input', sugerir));
+        sugerir();
+
+        el('detalle').focus();
+
+        backdrop.querySelector('[data-act="save"]').addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            ['detalle', 'cantidad', 'unitario', 'monto'].forEach(id => {
+                el(id + '-err').style.display = 'none';
+                el(id).classList.remove('input-invalid');
+            });
+
+            const marcar = (id, msg) => {
+                el(id + '-err').textContent = msg;
+                el(id + '-err').style.display = 'block';
+                el(id).classList.add('input-invalid');
+                return el(id);
+            };
+
+            let bad = null;
+            if (!val('detalle')) bad = marcar('detalle', 'El detalle es obligatorio');
+            ['cantidad', 'unitario', 'monto'].forEach(id => {
+                const v = val(id).replace(',', '.');
+                if (v !== '' && !Number.isFinite(parseFloat(v))) {
+                    bad = bad || marcar(id, 'Tiene que ser un número');
+                }
+            });
+            if (bad) { bad.focus(); return; }
+
+            const payload = {
+                comprobante: comprobante.id,
+                detalle:  val('detalle'),
+                cantidad: val('cantidad'),
+                unitario: val('unitario'),
+                monto:    val('monto'),
+                iva:      val('iva'),
+                orden:    val('orden'),
+                articulo: val('articulo'),
+            };
+
+            btn.disabled = true;
+            try {
+                if (r) await api('comprobantes_renglones', { method: 'PUT',  body: { id: r.id, ...payload } });
+                else   await api('comprobantes_renglones', { method: 'POST', body: payload });
+                toast(r ? 'Renglón actualizado' : 'Renglón agregado');
+                close();
+                onGuardado();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---- Alta: sólo el talonario ---- */
+
+    function openComprobanteNuevoModal(onCreado) {
+        const cat = CATALOGOS_COMPROBANTES;
+        const opts = ['<option value="">Elegí un talonario…</option>'].concat(
+            (cat.talonarios || []).map(t =>
+                `<option value="${t.id}">${escape((t.nombre || ('#' + t.id)) + (t.estado === 1 ? '' : ' (deshabilitado)'))}</option>`)
+        ).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Nuevo comprobante</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Crear
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="cpb-nuevo-talonario">Talonario</label>
+                        <select id="cpb-nuevo-talonario">${opts}</select>
+                        <div class="field-error" id="cpb-nuevo-talonario-err" style="display:none"></div>
+                    </div>
+                    <div class="form-nota">
+                        El alta pide sólo el talonario, como el back office viejo: el comprobante nace
+                        en <strong>Preparación</strong>, sin número y sin renglones. Los datos del
+                        cliente y los renglones se cargan después, desde la ficha. El número recién se
+                        toma del talonario al <strong>autorizar</strong>, así un borrador no consume
+                        numeración.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const sel = backdrop.querySelector('#cpb-nuevo-talonario');
+        const err = backdrop.querySelector('#cpb-nuevo-talonario-err');
+        sel.focus();
+
+        backdrop.querySelector('[data-act="save"]').addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            err.style.display = 'none';
+            sel.classList.remove('input-invalid');
+
+            if (!sel.value) {
+                err.textContent = 'Elegí un talonario';
+                err.style.display = 'block';
+                sel.classList.add('input-invalid');
+                sel.focus();
+                return;
+            }
+
+            btn.disabled = true;
+            try {
+                const res = await api('comprobantes', { method: 'POST', body: { talonario: sel.value } });
+                toast('Comprobante creado en Preparación');
+                close();
+                if (typeof onCreado === 'function') await onCreado();
+                // Se abre la ficha del recién creado: el alta no termina acá,
+                // falta cargarle cliente y renglones.
+                openComprobanteViewModal(res.id, onCreado);
+            } catch (err2) {
+                btn.disabled = false;
+                toast(err2.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---- Edición: los doce campos, sólo en Preparación ---- */
+
+    function openComprobanteEditModal(c, onGuardado) {
+        const cat = CATALOGOS_COMPROBANTES;
+
+        const condOpts = ['<option value="">Sin condición</option>'].concat(
+            (cat.condiciones || []).map(o =>
+                `<option value="${escape(o.valor)}"${o.valor === c.condicion ? ' selected' : ''}>${escape(o.texto)}</option>`)
+        ).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Editar comprobante</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">Cliente</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cpb-cliente">Cliente (ID)</label>
+                                <input type="number" id="cpb-cliente" min="1"
+                                       value="${escape(String(c.cliente ?? ''))}" placeholder="Opcional">
+                                ${c.cliente_nombre ? `<div class="form-nota">${escape(c.cliente_nombre)}</div>` : ''}
+                            </div>
+                            <div class="form-group">
+                                <label for="cpb-condicion">Condición fiscal</label>
+                                <select id="cpb-condicion">${condOpts}</select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpb-razon">Razón social</label>
+                            <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}">
+                            <div class="field-error" id="cpb-razon-err" style="display:none"></div>
+                            <div class="form-nota">Sin razón social el comprobante no se puede autorizar.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpb-domicilio">Domicilio</label>
+                            <input type="text" id="cpb-domicilio" maxlength="250" value="${escape(c.domicilio ?? '')}">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cpb-cuit">CUIT</label>
+                                <input type="text" id="cpb-cuit" maxlength="50" value="${escape(c.cuit ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="cpb-celular">Celular</label>
+                                <input type="text" id="cpb-celular" maxlength="100" value="${escape(c.celular ?? '')}">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpb-correo">Correo</label>
+                            <input type="email" id="cpb-correo" maxlength="100" value="${escape(c.correo ?? '')}">
+                            <div class="field-error" id="cpb-correo-err" style="display:none"></div>
+                            <div class="form-nota">Es a donde va el comprobante cuando se envía por correo.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Fechas y notas</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cpb-emision">Emisión</label>
+                                <input type="date" id="cpb-emision" value="${escape(c.emision ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="cpb-vencimiento">Vencimiento</label>
+                                <input type="date" id="cpb-vencimiento" value="${escape(c.vencimiento ?? '')}">
+                                <div class="field-error" id="cpb-vencimiento-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpb-cotizacion">Cotización USD/ARS</label>
+                            <input type="text" id="cpb-cotizacion" inputmode="decimal"
+                                   value="${escape(String(c.cotizacion ?? 0))}">
+                            <div class="field-error" id="cpb-cotizacion-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpb-observaciones">Observaciones</label>
+                            <textarea id="cpb-observaciones" rows="3" maxlength="2000">${escape(c.observaciones ?? '')}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="cpb-comentarios">Comentarios</label>
+                            <textarea id="cpb-comentarios" rows="3" maxlength="2000">${escape(c.comentarios ?? '')}</textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-nota">
+                        El talonario, el número, el CAE, los totales y el estado no se editan acá:
+                        el número lo asigna <strong>Autorizar</strong>, los totales salen de los
+                        renglones y el CAE viene de AFIP.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el  = id => backdrop.querySelector('#cpb-' + id);
+        const val = id => el(id).value.trim();
+
+        el('razon').focus();
+
+        backdrop.querySelector('[data-act="save"]').addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            ['razon', 'correo', 'vencimiento', 'cotizacion'].forEach(id => {
+                el(id + '-err').style.display = 'none';
+                el(id).classList.remove('input-invalid');
+            });
+            const marcar = (id, msg) => {
+                el(id + '-err').textContent = msg;
+                el(id + '-err').style.display = 'block';
+                el(id).classList.add('input-invalid');
+                return el(id);
+            };
+
+            let bad = null;
+            const correo = val('correo');
+            if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+                bad = marcar('correo', 'El correo no es válido');
+            }
+            const emi = val('emision'), vto = val('vencimiento');
+            if (emi && vto && vto < emi) {
+                bad = bad || marcar('vencimiento', 'El vencimiento no puede ser anterior a la emisión');
+            }
+            const cot = val('cotizacion').replace(',', '.');
+            if (cot !== '' && (!Number.isFinite(parseFloat(cot)) || parseFloat(cot) < 0)) {
+                bad = bad || marcar('cotizacion', 'Tiene que ser un número de 0 o más');
+            }
+            if (bad) { bad.focus(); return; }
+
+            btn.disabled = true;
+            try {
+                await api('comprobantes', { method: 'PUT', body: {
+                    id: c.id,
+                    cliente:       val('cliente'),
+                    razon:         val('razon'),
+                    domicilio:     val('domicilio'),
+                    correo,
+                    celular:       val('celular'),
+                    condicion:     val('condicion'),
+                    cuit:          val('cuit'),
+                    emision:       emi,
+                    vencimiento:   vto,
+                    cotizacion:    val('cotizacion'),
+                    observaciones: el('observaciones').value,
+                    comentarios:   el('comentarios').value,
+                } });
+                toast('Comprobante actualizado');
+                close();
+                if (typeof onGuardado === 'function') onGuardado();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---- Acciones ---- */
+
+    async function accionComprobante(c, accion, body) {
+        return api('comprobantes_accion?accion=' + accion + '&id=' + encodeURIComponent(c.id),
+                   { method: 'POST', body: body || {} });
+    }
+
+    function confirmarAutorizar(c, despues) {
+        confirmDialog(
+            'Autorizar comprobante',
+            `Se le va a asignar el próximo número del talonario "${c.talonario_nombre || '#' + c.talonario}" ` +
+            'y va a pasar a Pendiente. Después de autorizarlo ya no se pueden editar sus datos ni sus renglones.',
+            async () => {
+                try {
+                    const res = await accionComprobante(c, 'autorizar');
+                    toast('Comprobante autorizado — ' + (res.numero || 'sin número'));
+                    if (typeof despues === 'function') despues();
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 8000 });
+                }
+            },
+            { label: 'Autorizar', tono: 'primary' }
+        );
+    }
+
+    function confirmarAnular(c, despues) {
+        confirmDialog(
+            'Anular comprobante',
+            `¿Anular el comprobante ${c.numero || '#' + c.id}? El número queda consumido — anular no ` +
+            'lo devuelve a la serie. Esta acción no se puede deshacer.',
+            async () => {
+                try {
+                    await accionComprobante(c, 'anular');
+                    toast('Comprobante anulado');
+                    if (typeof despues === 'function') despues();
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 8000 });
+                }
+            }
+        );
+    }
+
+    function confirmarDuplicar(c, despues) {
+        confirmDialog(
+            'Duplicar comprobante',
+            'Se crea un comprobante nuevo en Preparación con los mismos datos y renglones, ' +
+            'con fecha de hoy, sin número y sin CAE.',
+            async () => {
+                try {
+                    const res = await accionComprobante(c, 'duplicar');
+                    toast('Duplicado creado — #' + res.id);
+                    if (typeof despues === 'function') despues();
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 8000 });
+                }
+            },
+            { label: 'Duplicar', tono: 'primary' }
+        );
+    }
+
+    function confirmarCorreo(c) {
+        confirmDialog(
+            'Enviar por correo',
+            `Se le va a enviar a ${c.correo} el enlace para ver y descargar el comprobante.`,
+            async () => {
+                try {
+                    await accionComprobante(c, 'correo');
+                    toast('Correo encolado para ' + c.correo);
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 8000 });
+                }
+            },
+            { label: 'Enviar', tono: 'primary' }
+        );
+    }
+
+    function openPagoModal(c, despues) {
+        const medios = (CATALOGOS_COMPROBANTES.medios || []);
+        // Para registrar se ofrecen sólo los medios habilitados: los otros
+        // están en el catálogo para poder filtrar comprobantes viejos.
+        const habilitados = medios.filter(m => m.habilitado === 1);
+        const opts = ['<option value="">Elegí el medio…</option>'].concat(
+            (habilitados.length ? habilitados : medios).map(m =>
+                `<option value="${m.id}">${escape(m.nombre || ('#' + m.id))}</option>`)
+        ).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Registrar pago</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del pago">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Registrar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Contra el comprobante <strong>${escape(c.numero || '#' + c.id)}</strong>
+                        ${c.razon ? `<span class="muted">· ${escape(c.razon)}</span>` : ''}
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pag-monto">Monto</label>
+                            <input type="text" id="pag-monto" inputmode="decimal"
+                                   value="${escape(String(c.total ?? 0))}">
+                            <div class="field-error" id="pag-monto-err" style="display:none"></div>
+                            <div class="form-nota">Viene con el total del comprobante; se puede cambiar.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="pag-medio">Medio de pago</label>
+                            <select id="pag-medio">${opts}</select>
+                            <div class="field-error" id="pag-medio-err" style="display:none"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="pag-operacion">Número de operación</label>
+                        <input type="text" id="pag-operacion" maxlength="100" placeholder="Opcional">
+                    </div>
+                    <div class="form-nota">
+                        El pago se registra en estado <strong>Pendiente</strong> y no cambia el estado
+                        del comprobante. Imputarlo —y emitir el recibo— es un paso aparte.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el  = id => backdrop.querySelector('#pag-' + id);
+        const val = id => el(id).value.trim();
+        el('medio').focus();
+
+        backdrop.querySelector('[data-act="save"]').addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            ['monto', 'medio'].forEach(id => {
+                el(id + '-err').style.display = 'none';
+                el(id).classList.remove('input-invalid');
+            });
+            const marcar = (id, msg) => {
+                el(id + '-err').textContent = msg;
+                el(id + '-err').style.display = 'block';
+                el(id).classList.add('input-invalid');
+                return el(id);
+            };
+
+            let bad = null;
+            const monto = parseFloat(val('monto').replace(',', '.'));
+            if (!Number.isFinite(monto) || monto <= 0) bad = marcar('monto', 'El monto tiene que ser mayor a cero');
+            if (!val('medio')) bad = bad || marcar('medio', 'Elegí el medio de pago');
+            if (bad) { bad.focus(); return; }
+
+            btn.disabled = true;
+            try {
+                await accionComprobante(c, 'pago', {
+                    monto:     val('monto'),
+                    medio:     val('medio'),
+                    operacion: val('operacion'),
+                });
+                toast('Pago registrado');
+                close();
+                if (typeof despues === 'function') despues();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 8000 });
+            }
+        });
+    }
+
+    /* ---- Baja con desglose ---- */
+
+    async function pedirImpactoComprobante(c, despues) {
+        try {
+            const impacto = await api('comprobantes?impacto=1&id=' + encodeURIComponent(c.id));
+            openComprobanteDeleteModal(c, impacto, despues);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openComprobanteDeleteModal(c, impacto, despues) {
+        const bloqueos  = impacto.bloqueos || [];
+        const elimina   = impacto.elimina  || [];
+        const bloqueado = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const seccion = (titulo, icono, cls, items, badge) => !items.length ? '' : `
+            <div class="del-section">
+                <div class="del-section-title ${cls}"><i class="fa-solid ${icono}"></i> ${escape(titulo)}</div>
+                <ul class="del-list">${items.map(it => linea(it, badge)).join('')}</ul>
+            </div>`;
+
+        const avisoBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Anulá esos pagos antes de borrar el comprobante.
+                </div>
+            </div>`;
+
+        // Borrar un comprobante ya numerado deja un hueco en la serie fiscal.
+        // Anular es la salida prevista; borrar es para los borradores.
+        const avisoNumero = (bloqueado || !impacto.comprobante.numero) ? '' : `
+            <div class="del-warning">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                Este comprobante ya tiene el número <strong>${escape(impacto.comprobante.numero)}</strong>:
+                borrarlo deja un salto en la numeración del talonario. Para dar de baja uno emitido,
+                lo que corresponde es <strong>Anular</strong>.
+            </div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar comprobante</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar comprobante
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el comprobante
+                        <code>#${c.id}</code>
+                        ${impacto.comprobante.numero ? `<strong>${escape(impacto.comprobante.numero)}</strong>` : ''}
+                        ${impacto.comprobante.razon ? `<span class="muted">· ${escape(impacto.comprobante.razon)}</span>` : ''}
+                    </div>
+                    ${avisoBloqueo}
+                    ${avisoNumero}
+                    ${(!bloqueado && !elimina.length) ? `<div class="del-empty">No tiene renglones ni pagos asociados.</div>` : ''}
+                    ${seccion('Se eliminarán junto con el comprobante', 'fa-trash', 'del-danger', elimina, 'badge-danger')}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                const res = await api('comprobantes?id=' + encodeURIComponent(c.id), { method: 'DELETE' });
+                close();
+                toast(res && res.renglones
+                    ? `Comprobante eliminado — ${res.renglones} renglón(es)`
+                    : 'Comprobante eliminado');
+                if (typeof despues === 'function') despues();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---------- Views: Talonarios ----------
+     * ABM de `talonarios`: la numeración de comprobantes de cada empresa.
+     * Todas las columnas son editables menos `id` y `nombre`.
+     *
+     * `nombre` es DERIVADO — `<empresa> - <texto del tipo> - <subtipo> -
+     * <punto con 3 dígitos>`, que es lo que arma `cTalonario::nombrar()` — así
+     * que el formulario lo muestra de sólo lectura y con vista previa en vivo,
+     * igual que el legacy. Lo que NO hace es reescribirlo a ciegas: el
+     * talonario 35 se llama "Interno - Wescom - Abono - X - 001" y su tipo no
+     * está en el combo, así que la derivación le comería el prefijo. El
+     * backend conserva los nombres propios y el modal avisa cuál es cuál.
+     *
+     * `estado` es la misma bandera de dos valores que `habilitado` aunque la
+     * columna se llame distinto (smallint 1/0, con el combo traduciéndolos
+     * como Habilitado / Deshabilitado).
+     */
+    const ORDEN_TALONARIOS = [
+        { value: 'id',             label: 'Código'  },
+        { value: 'nombre',         label: 'Nombre'  },
+        { value: 'empresa_nombre', label: 'Empresa' },
+        { value: 'serie',          label: 'Serie'   },
+    ];
+
+    // Catálogos que deja el render del listado para los modales, igual que en
+    // Contratos: el GET del listado ya los trae.
+    let CATALOGOS_TALONARIOS = { empresas: [], tipos: [], subtipos: [], fiscal: [], estados: [] };
+
+    function talonariosDefaults() {
+        return {
+            codigo: '', texto: '', empresa: '', tipo: '', subtipo: '',
+            fiscal: '', estado: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderTalonarios(root) {
+        try {
+            const data = await api('talonarios');
+            const r          = data.resumen;
+            const talonarios = data.talonarios;
+            CATALOGOS_TALONARIOS = data.catalogos;
+
+            const state = tomarEstadoVista('talonarios', talonariosDefaults());
+
+            root.innerHTML = `
+                ${moduleHeader('Talonarios', 'La numeración de comprobantes de cada empresa: punto de venta, próximo número y los datos que se imprimen al pie.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.habilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Deshabilitados</span>
+                        <span class="stat-value muted">${r.deshabilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Fiscales</span>
+                        <span class="stat-value orange">${r.fiscales}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Empresas</span>
+                        <span class="stat-value">${r.empresas}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'tal',
+                    quickPlaceholder: 'Buscar nombre, empresa, correo o web…',
+                    newLabel:         'Nuevo talonario',
+                })}
+                <div class="table-card" id="tal-table"></div>
+            `;
+
+            wireTalonariosView(state, talonarios);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function talonarioEstadoBadge(estado) {
+        return estado === 1
+            ? `<span class="badge badge-success">Habilitado</span>`
+            : `<span class="badge badge-danger">Deshabilitado</span>`;
+    }
+
+    // `fiscal` decide si el comprobante va a AFIP: se destaca en ámbar cuando
+    // sí, que es la condición que importa mirar de un vistazo.
+    function talonarioFiscalBadge(t) {
+        return t.fiscal === '1'
+            ? `<span class="badge badge-warn">${escape(t.fiscal_texto || 'Sí')}</span>`
+            : `<span class="badge badge-info">${escape(t.fiscal_texto || 'No')}</span>`;
+    }
+
+    function talonariosTableBody(talonarios) {
+        if (!talonarios.length) {
+            return `<div class="table-empty">No hay talonarios que coincidan. Creá el primero con "Nuevo talonario".</div>`;
+        }
+
+        const rows = talonarios.map(t => `
+            <tr class="row-clickable" data-id="${t.id}">
+                <td><span class="td-id">#${t.id}</span></td>
+                <td class="td-nombre">${escape(t.nombre)}</td>
+                <td>${t.empresa ? escape(t.empresa_nombre || ('#' + t.empresa)) : '<span class="muted">Sin empresa</span>'}</td>
+                <td>${t.tipo
+                    ? `<span class="badge badge-info">${escape(t.tipo_texto || t.tipo)}</span>`
+                    : '<span class="muted">—</span>'}</td>
+                <td><span class="td-id">${escape(t.proximo)}</span></td>
+                <td>${talonarioFiscalBadge(t)}</td>
+                <td>${talonarioEstadoBadge(t.estado)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Empresa</th>
+                        <th>Tipo</th>
+                        <th>Próximo número</th>
+                        <th>Fiscal</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireTalonariosView(state, allTalonarios) {
+        const tableWrap = document.getElementById('tal-table');
+        const quick     = document.getElementById('tal-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('tal-filters');
+        const btnNew    = document.getElementById('tal-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            const filtered = allTalonarios.filter(t => {
+                if (Number.isFinite(codigo) && t.id !== codigo) return false;
+                if (state.empresa && String(t.empresa) !== state.empresa) return false;
+                if (state.tipo    && t.tipo    !== state.tipo)    return false;
+                if (state.subtipo && t.subtipo !== state.subtipo) return false;
+                if (state.fiscal  && t.fiscal  !== state.fiscal)  return false;
+                if (state.estado  && String(t.estado) !== state.estado) return false;
+                if (q && !(
+                    t.nombre + ' ' + (t.empresa_nombre || '') + ' ' + (t.empresa_razon || '') + ' ' +
+                    (t.correo || '') + ' ' + (t.web || '') + ' ' + t.proximo
+                ).toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = talonariosTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(t) {
+            const extra = [];
+            if (t.correo) {
+                extra.push({ act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-envelope',
+                             onSelect: () => copyToClipboard(t.correo) });
+            }
+            extra.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(t.nombre) });
+            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(t.id)) });
+
+            return standardRowMenuItems({
+                view:   true, onView:   () => openTalonarioViewModal(t),
+                edit:   true, onEdit:   () => openTalonarioModal(t),
+                delete: true, onDelete: () => pedirImpactoTalonario(t),
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const t  = allTalonarios.find(x => x.id === id);
+                if (!t) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(t), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openTalonarioViewModal(t));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(t), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openTalonariosFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openTalonarioModal(null));
+        wireRefresh('tal', 'talonarios', state);
+
+        applyAndRender();
+    }
+
+    function openTalonariosFiltersModal(state, onApply) {
+        const cat = CATALOGOS_TALONARIOS;
+
+        const opciones = (items, valorSel, todos, mapear) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === valorSel ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const empOpts = opciones(cat.empresas, state.empresa, 'Todas las empresas',
+                                 e => ({ valor: String(e.id), texto: e.nombre || ('#' + e.id) }));
+        const tipOpts = opciones(cat.tipos,    state.tipo,    'Todos los tipos',    t => t);
+        const subOpts = opciones(cat.subtipos, state.subtipo, 'Todos los subtipos', t => t);
+        const fisOpts = opciones(cat.fiscal,   state.fiscal,  'Indistinto',         t => t);
+        const estOpts = opciones(cat.estados,  state.estado,  'Todos',              t => t);
+        const ordOpts = ORDEN_TALONARIOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="tal-fm-codigo">Código</label>
+                    <input type="number" id="tal-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-texto">Buscar (nombre / empresa / correo / web)</label>
+                    <input type="search" id="tal-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-empresa">Empresa</label>
+                    <select id="tal-fm-empresa">${empOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-tipo">Tipo</label>
+                    <select id="tal-fm-tipo">${tipOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-subtipo">Subtipo</label>
+                    <select id="tal-fm-subtipo">${subOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-fiscal">Fiscal</label>
+                    <select id="tal-fm-fiscal">${fisOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-estado">Estado</label>
+                    <select id="tal-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-limit">Límite</label>
+                    <input type="number" id="tal-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-orden">Ordenar por</label>
+                    <select id="tal-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tal-fm-dir">Dirección</label>
+                    <select id="tal-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo  = modal.querySelector('#tal-fm-codigo').value.trim();
+                state.texto   = modal.querySelector('#tal-fm-texto').value.trim();
+                state.empresa = modal.querySelector('#tal-fm-empresa').value;
+                state.tipo    = modal.querySelector('#tal-fm-tipo').value;
+                state.subtipo = modal.querySelector('#tal-fm-subtipo').value;
+                state.fiscal  = modal.querySelector('#tal-fm-fiscal').value;
+                state.estado  = modal.querySelector('#tal-fm-estado').value;
+                state.orden   = modal.querySelector('#tal-fm-orden').value;
+                state.dir     = modal.querySelector('#tal-fm-dir').value;
+                state.limit   = readLimit(modal.querySelector('#tal-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = talonariosDefaults();
+                modal.querySelector('#tal-fm-codigo').value  = d.codigo;
+                modal.querySelector('#tal-fm-texto').value   = d.texto;
+                modal.querySelector('#tal-fm-empresa').value = d.empresa;
+                modal.querySelector('#tal-fm-tipo').value    = d.tipo;
+                modal.querySelector('#tal-fm-subtipo').value = d.subtipo;
+                modal.querySelector('#tal-fm-fiscal').value  = d.fiscal;
+                modal.querySelector('#tal-fm-estado').value  = d.estado;
+                modal.querySelector('#tal-fm-orden').value   = d.orden;
+                modal.querySelector('#tal-fm-dir').value     = d.dir;
+                modal.querySelector('#tal-fm-limit').value   = String(d.limit);
+            },
+        });
+    }
+
+    function openTalonarioViewModal(t) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        const oVacio = (v, glosa) => v ? escape(v) : `<span class="muted">${escape(glosa)}</span>`;
+
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar talonario</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del talonario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${/* 15 tarjetas: 12 `half` + 3 `full` (§25 de DESIGN.md).
+                        `.view-grid` es flex con `flex-grow`, así que los `half`
+                        tienen que ser PARES y cada `full` tiene que caer
+                        después de un renglón cerrado, o la tarjeta suelta se
+                        estira y se lee como un destaque que nadie decidió.
+                        Los tres `full` son campos anchos de verdad: el nombre
+                        armado, el archivo de fondo y los términos.
+                        Agregar o quitar un campo obliga a rehacer esta cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código',        `<code>#${t.id}</code>`),
+                        viewCardHalf('Estado',        talonarioEstadoBadge(t.estado)),
+                        viewCardFull('Nombre',        escape(t.nombre) + (t.nombre_propio
+                            ? ` <span class="muted">· nombre propio, no se regenera</span>` : '')),
+                        viewCardHalf('Empresa',       refValue(t.empresa, t.empresa_nombre)),
+                        viewCardHalf('Fiscal',        talonarioFiscalBadge(t)),
+                        viewCardHalf('Tipo',          t.tipo
+                            ? `<span class="badge badge-info">${escape(t.tipo_texto || t.tipo)}</span> <code>${escape(t.tipo)}</code>`
+                            : `<span class="muted">Sin tipo</span>`),
+                        viewCardHalf('Subtipo',       t.subtipo
+                            ? `<code>${escape(t.subtipo)}</code>`
+                            : `<span class="muted">Sin subtipo</span>`),
+                        viewCardHalf('Punto de venta', `<code>${String(t.punto).padStart(4, '0')}</code>`),
+                        viewCardHalf('Próximo número', `<code>${escape(t.proximo)}</code>`),
+                        viewCardHalf('Correo',        oVacio(t.correo, 'Sin correo')),
+                        viewCardHalf('Web',           oVacio(t.web, 'Sin web')),
+                        viewCardHalf('Comprobantes',  `<span class="badge badge-info">${t.comprobantes_count}</span>`),
+                        viewCardHalf('Clientes',      `<span class="badge badge-info">${t.clientes_count}</span>`),
+                        viewCardFull('Fondo',         t.fondo ? `<code>${escape(t.fondo)}</code>` : `<span class="muted">Sin fondo</span>`),
+                        viewCardFull('Términos',      t.terminos
+                            ? escape(t.terminos).replace(/\n/g, '<br>')
+                            : `<span class="muted">Sin términos</span>`),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => [
+            { act: 'edit', label: 'Editar talonario', icon: 'fa-pencil',
+              onSelect: () => { close(); openTalonarioModal(t); } },
+            { divider: true },
+            { act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+              onSelect: () => copyToClipboard(t.nombre) },
+            { act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+              onSelect: () => copyToClipboard(String(t.id)) },
+            { divider: true },
+            { act: 'delete', label: 'Eliminar talonario', icon: 'fa-trash', danger: true,
+              onSelect: () => { close(); pedirImpactoTalonario(t); } },
+        ]);
+    }
+
+    function openTalonarioModal(t) {
+        const isEdit = !!t;
+        const cat    = CATALOGOS_TALONARIOS;
+
+        /* Un `<select>` que no tenga opción para el valor guardado lo borra en
+           silencio al guardar: el navegador cae en la primera opción, que acá
+           es la vacía. Pasa de verdad — el talonario 35 tiene `tipo = 'A'`
+           ("Abono") y ese código no está en `combos`. Por eso, cuando el valor
+           actual no figura en el catálogo, se le agrega su propia opción
+           marcada. El backend hace la contraparte: acepta el código heredado y
+           exige el catálogo sólo para los valores nuevos. */
+        const selectOpts = (items, valorSel, vacio, mapear) => {
+            const sel  = String(valorSel ?? '');
+            const opts = items.map(mapear);
+            const huerfano = sel !== '' && !opts.some(o => o.valor === sel);
+            if (huerfano) opts.unshift({ valor: sel, texto: sel + ' (fuera de catálogo)' });
+            return ['<option value="">' + escape(vacio) + '</option>'].concat(
+                opts.map(o =>
+                    `<option value="${escape(o.valor)}"${o.valor === sel ? ' selected' : ''}>${escape(o.texto)}</option>`)
+            ).join('');
+        };
+
+        const empOpts = selectOpts(cat.empresas, t?.empresa, 'Sin empresa',
+                                   e => ({ valor: String(e.id), texto: e.nombre || ('#' + e.id) }));
+        const tipOpts = selectOpts(cat.tipos,    t?.tipo,    'Sin tipo',    x => x);
+        const subOpts = selectOpts(cat.subtipos, t?.subtipo, 'Sin subtipo', x => x);
+
+        // `fiscal` y `estado` son banderas de dos valores: no llevan opción
+        // vacía. En el alta arrancan como el `nuevo()` del sistema histórico —
+        // talonario habilitado y no fiscal.
+        const fisActual = isEdit ? (t.fiscal === '1' ? '1' : '0') : '0';
+        const estActual = isEdit ? String(t.estado) : '1';
+        const dosValores = (items, actual, fallback) =>
+            (items.length ? items : fallback)
+                .map(o => `<option value="${escape(o.valor)}"${o.valor === actual ? ' selected' : ''}>${escape(o.texto)}</option>`)
+                .join('');
+        const fisOpts = dosValores(cat.fiscal,  fisActual, [{ valor: '1', texto: 'Si' },         { valor: '0', texto: 'No' }]);
+        const estOpts = dosValores(cat.estados, estActual, [{ valor: '1', texto: 'Habilitado' }, { valor: '0', texto: 'Deshabilitado' }]);
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar talonario' : 'Nuevo talonario'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">Numeración</div>
+                        ${/* `nombre` es derivado: se muestra de sólo lectura y
+                             se recalcula en vivo al cambiar empresa, tipo,
+                             subtipo o punto — igual que el legacy, que lo
+                             reescribe con `nombrar()` en cada guardado. */''}
+                        <div class="form-group">
+                            <label for="tal-nombre">Nombre</label>
+                            <input type="text" id="tal-nombre" readonly value="${escape(t?.nombre ?? '')}">
+                            <div class="form-nota" id="tal-nombre-nota"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tal-empresa">Empresa</label>
+                                <select id="tal-empresa">${empOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tal-estado">Estado</label>
+                                <select id="tal-estado">${estOpts}</select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tal-tipo">Tipo</label>
+                                <select id="tal-tipo">${tipOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tal-subtipo">Subtipo</label>
+                                <select id="tal-subtipo">${subOpts}</select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tal-punto">Punto de venta</label>
+                                <input type="number" id="tal-punto" min="0" max="999999"
+                                       value="${escape(String(t?.punto ?? 0))}">
+                                <div class="field-error" id="tal-punto-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="tal-serie">Serie (próximo número)</label>
+                                <input type="number" id="tal-serie" min="0" max="999999"
+                                       value="${escape(String(t?.serie ?? 0))}">
+                                <div class="field-error" id="tal-serie-err" style="display:none"></div>
+                                <div class="form-nota" id="tal-proximo-nota"></div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tal-fiscal">Fiscal</label>
+                                <select id="tal-fiscal">${fisOpts}</select>
+                                <div class="form-nota">Un talonario fiscal es el que se autoriza ante AFIP.</div>
+                            </div>
+                            <div class="form-group"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Pie del comprobante</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tal-correo">Correo</label>
+                                <input type="email" id="tal-correo" maxlength="100"
+                                       value="${escape(t?.correo ?? '')}" placeholder="info@reactor.com.ar">
+                                <div class="field-error" id="tal-correo-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="tal-web">Web</label>
+                                <input type="text" id="tal-web" maxlength="100"
+                                       value="${escape(t?.web ?? '')}" placeholder="www.reactor.com.ar">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="tal-fondo">Fondo</label>
+                            <input type="text" id="tal-fondo" maxlength="100"
+                                   value="${escape(t?.fondo ?? '')}" placeholder="fondo.jpg">
+                            <div class="form-nota">Nombre del archivo de fondo que imprime el comprobante.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="tal-terminos">Términos</label>
+                            <textarea id="tal-terminos" rows="4" maxlength="5000"
+                                      placeholder="Opcional">${escape(t?.terminos ?? '')}</textarea>
+                            <div class="field-error" id="tal-terminos-err" style="display:none"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el      = id => backdrop.querySelector('#tal-' + id);
+        const val     = id => el(id).value.trim();
+        const saveBtn = backdrop.querySelector('[data-act="save"]');
+
+        // Vista previa del nombre derivado y del próximo número. `nombre_propio`
+        // lo decide el backend comparando lo guardado contra la derivación; acá
+        // sólo se refleja, para que el operador vea antes de guardar si la fila
+        // se va a renombrar o no.
+        const nombrePropio = !!t?.nombre_propio;
+        function refrescarDerivados() {
+            const emp = cat.empresas.find(e => String(e.id) === val('empresa'));
+            const tip = cat.tipos.find(x => x.valor === val('tipo'));
+            const derivado = (emp?.nombre || '') + ' - ' + (tip?.texto || val('tipo')) + ' - ' +
+                             val('subtipo') + ' - ' + String(val('punto') || 0).padStart(3, '0');
+
+            const nota = el('nombre-nota');
+            if (nombrePropio) {
+                el('nombre').value = t.nombre;
+                nota.innerHTML = 'Este talonario tiene un <strong>nombre propio</strong> que no sale de la ' +
+                    'fórmula, así que se conserva tal cual. La fórmula daría: <code>' + escape(derivado) + '</code>.';
+            } else {
+                el('nombre').value = derivado;
+                nota.innerHTML = 'Se arma solo con <code>empresa - tipo - subtipo - punto</code> y se ' +
+                    'regenera al guardar; por eso no se edita a mano.';
+            }
+
+            el('proximo-nota').innerHTML = 'Próximo comprobante: <code>' +
+                escape(String(val('punto') || 0).padStart(4, '0') + '-' +
+                       String(val('serie') || 0).padStart(8, '0')) + '</code>';
+        }
+        ['empresa', 'tipo', 'subtipo', 'punto', 'serie'].forEach(id => {
+            el(id).addEventListener('input',  refrescarDerivados);
+            el(id).addEventListener('change', refrescarDerivados);
+        });
+        refrescarDerivados();
+
+        el('empresa').focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const errs = ['punto-err', 'serie-err', 'correo-err', 'terminos-err'];
+            errs.forEach(id => { el(id).style.display = 'none'; });
+            ['punto', 'serie', 'correo', 'terminos'].forEach(id => el(id).classList.remove('input-invalid'));
+
+            const marcar = (campo, msg) => {
+                const e = el(campo + '-err');
+                e.textContent = msg;
+                e.style.display = 'block';
+                el(campo).classList.add('input-invalid');
+                return el(campo);
+            };
+
+            let firstInvalid = null;
+
+            // El backend valida lo mismo; marcarlo acá evita el viaje y deja el
+            // error pegado al campo en vez de en un toast.
+            const punto = val('punto');
+            if (!/^\d+$/.test(punto) || +punto > 999999) {
+                firstInvalid = marcar('punto', 'El punto de venta va de 0 a 999999');
+            }
+            const serie = val('serie');
+            if (!/^\d+$/.test(serie) || +serie > 999999) {
+                firstInvalid = firstInvalid || marcar('serie', 'La serie va de 0 a 999999');
+            }
+            const correo = val('correo');
+            if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+                firstInvalid = firstInvalid || marcar('correo', 'El correo no es válido');
+            }
+            if (el('terminos').value.length > 5000) {
+                firstInvalid = firstInvalid || marcar('terminos', 'Los términos no pueden superar 5000 caracteres');
+            }
+
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            // `nombre` no viaja: lo deriva el backend (y conserva el propio).
+            const payload = {
+                empresa:  val('empresa'),
+                tipo:     val('tipo'),
+                subtipo:  val('subtipo'),
+                punto,
+                serie,
+                fiscal:   val('fiscal'),
+                correo,
+                web:      val('web'),
+                fondo:    val('fondo'),
+                terminos: el('terminos').value,
+                estado:   val('estado'),
+            };
+
+            saveBtn.disabled = true;
+            try {
+                const res = isEdit
+                    ? await api('talonarios', { method: 'PUT',  body: { id: t.id, ...payload } })
+                    : await api('talonarios', { method: 'POST', body: payload });
+                toast((isEdit ? 'Talonario actualizado' : 'Talonario creado') +
+                      (res && res.nombre ? ' — ' + res.nombre : ''));
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    // Las dos FK que apuntan a `talonarios` son RESTRICT y las dos bloquean, así
+    // que la baja usa el modal con desglose (ABM.md, "Eliminar"; DESIGN.md
+    // §15.1). Las cantidades las pide el backend.
+    async function pedirImpactoTalonario(t) {
+        try {
+            const impacto = await api('talonarios?impacto=1&id=' + encodeURIComponent(t.id));
+            openTalonarioDeleteModal(t, impacto);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openTalonarioDeleteModal(t, impacto) {
+        const bloqueos  = impacto.bloqueos || [];
+        const bloqueado = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const avisoBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Reasigná esos comprobantes y clientes a otro talonario antes de borrarlo.
+                </div>
+            </div>`;
+
+        const sinDatos = bloqueado ? '' : `
+            <div class="del-empty">No tiene comprobantes emitidos ni clientes asignados.</div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar talonario</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar talonario
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el talonario
+                        <strong>${escape(t.nombre)}</strong>
+                        <code>#${t.id}</code>
+                    </div>
+                    ${avisoBloqueo}
+                    ${sinDatos}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                await api('talonarios?id=' + encodeURIComponent(t.id), { method: 'DELETE' });
+                close();
+                toast('Talonario eliminado');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
     /* ---------- Views: Dominios ---------- */
     const ORDEN_DOMINIOS = [
         { value: 'id',                 label: 'Código'       },
@@ -2592,6 +5734,12 @@
             const data = await api('dominios');
             const dominios = data.dominios;
             const state = tomarEstadoVista('dominios', dominiosDefaults());
+            // "Ver dominio" desde Contratos deja pedido este id. Acá el dominio
+            // no es una FK sino la fila misma, así que el pedido se vuelca al
+            // filtro `Código` — que existe en el Modal de Filtros, como exige
+            // ABM.md §1.3 para toda navegación cruzada.
+            const domPedido = tomarFiltroDominio('dominios');
+            if (domPedido) state.codigo = domPedido;
 
             root.innerHTML = `
                 ${moduleHeader('Dominios', 'Espacios lógicos que agrupan dispositivos, chips y perfiles de acceso.')}
@@ -2926,7 +6074,7 @@
         const menubar = backdrop.querySelector('.modal-menubar');
 
         // "Listar": salta al módulo destino ya filtrado por este dominio. Los
-        // seis listados son los que tienen filtro por dominio propio; el resto
+        // ocho listados son los que tienen filtro por dominio propio; el resto
         // no entra al menú porque no habría con qué acotarlos.
         const irAListado = route => {
             close();
@@ -2941,6 +6089,13 @@
             { act: 'signals',      label: 'Señales',      icon: 'fa-signal-stream',  onSelect: () => irAListado('signals') },
             { act: 'registros',    label: 'Registros',    icon: 'fa-scroll',         onSelect: () => irAListado('registros') },
             { act: 'adopciones',   label: 'Adopciones',   icon: 'fa-handshake',      onSelect: () => irAListado('adopciones') },
+            // Comunicación: lo que el dominio recibió. `notificaciones` filtra
+            // por su columna `dominio`; `difusion`, por el alcance con el que se
+            // creó la campaña — las globales (alcance NULL) no aparecen acá
+            // aunque también le hayan llegado a esta gente, porque el filtro es
+            // por lo que se eligió al mandarlas y no por quién las recibió.
+            { act: 'notificaciones', label: 'Notificaciones', icon: 'fa-comment-dots', onSelect: () => irAListado('notificaciones') },
+            { act: 'difusion',       label: 'Difusiones',     icon: 'fa-paper-plane',  onSelect: () => irAListado('difusion') },
         ]);
 
         wireMenubarMenu(menubar, 'acciones', () => [
@@ -6388,6 +9543,1349 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+    }
+
+    /* ---------- Views: Notificaciones ----------
+     * Listado read-only de `notificaciones`, la misma tabla que alimenta el
+     * modal "Notificaciones" de `app`. Lo que cloud agrega sobre esa pantalla es
+     * el alcance: allá se ven las 50 últimas del dominio de la sesión, acá se ve
+     * la tabla entera y de los 83 dominios que la usan.
+     *
+     * MIRAR ACÁ NO MARCA COMO LEÍDO. El listado de `app` sella `leida = 2` sobre
+     * lo que acaba de mostrar, y como la fila es del DOMINIO (no de la persona),
+     * el primero que abre el modal les saca el destaque a todos los demás. Si
+     * cloud hiciera lo mismo, auditar una notificación se la marcaría como vista
+     * a un cliente que todavía no la vio. Por eso el endpoint es GET y sólo GET.
+     *
+     * La tabla la escribe un proceso del sistema legacy que está FUERA de este
+     * repositorio (el que genera los avisos "Dispositivo X Online/Offline"), así
+     * que el módulo no tiene alta, edición ni baja: el menú de la fila trae sólo
+     * Consultar, como Señales, Registros y Adopciones.
+     */
+
+    // `value` viaja al select del modal de Filtros; `key` es el campo del row
+    // por el que se ordena realmente.
+    const ORDEN_NOTIFICACIONES = [
+        { value: 'id',           label: 'Código',       key: 'id'             },
+        { value: 'fecha',        label: 'Fecha',        key: 'fecha'          },
+        { value: 'dominio',      label: 'Dominio',      key: 'dominio_nombre' },
+        { value: 'mensaje',      label: 'Mensaje',      key: 'mensaje'        },
+    ];
+
+    // `leida` vale 0 (nueva) o 2 (leída) en los datos reales: NO hay ninguna
+    // fila en 1, aunque el legacy pinte en negrita ese valor. Es nueva todo lo
+    // que no sea 2, el mismo criterio que aplica `app`.
+    const ESTADOS_NOTIFICACION = [
+        { value: 'nuevas', label: 'Nuevas' },
+        { value: 'leidas', label: 'Leídas' },
+    ];
+
+    // No es un select de usuarios como el de Adopciones a propósito: sólo 6 de
+    // las 68.717 filas tienen destinatario, así que la pregunta útil no es
+    // "cuál" sino "tiene o no".
+    const DESTINATARIOS_NOTIFICACION = [
+        { value: 'dominio', label: 'Sin destinatario (todo el dominio)' },
+        { value: 'usuario', label: 'Dirigidas a una cuenta'            },
+    ];
+
+    function notificacionesDefaults() {
+        return {
+            codigo: '', texto: '', dominio: '', estado: '', destinatario: '',
+            desde: '', hasta: '', orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    function notificacionEstadoBadge(n) {
+        return n.nueva
+            ? '<span class="badge badge-warn">Nueva</span>'
+            : '<span class="badge badge-success">Leída</span>';
+    }
+
+    // Celda Destinatario: el 99,99% de las filas no tiene ninguno y eso NO es un
+    // dato faltante — son las notificaciones del dominio, para todos los que lo
+    // operan. Por eso dice "Todo el dominio" y no un guion.
+    function notificacionDestinatarioCell(n) {
+        if (n.usuario === null) {
+            return '<span class="td-id">Todo el dominio</span>';
+        }
+        return `
+            <div class="td-nombre">${escape(n.usuario_nombre || ('#' + n.usuario))}</div>
+            ${n.usuario_login ? `<div class="td-id">${escape(n.usuario_login)}</div>` : ''}
+        `;
+    }
+
+    async function renderNotificaciones(root) {
+        try {
+            const state = tomarEstadoVista('notificaciones', notificacionesDefaults());
+            const domPedido = tomarFiltroDominio('notificaciones');
+            if (domPedido) state.dominio = domPedido;
+
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            // El backend sabe filtrar por dominio, estado y destinatario: si
+            // venimos filtrados, la ventana se pide ya acotada en vez de
+            // recortar client-side las últimas 100 de todos los dominios.
+            if (state.dominio)      qs.set('dominio',      state.dominio);
+            if (state.estado)       qs.set('estado',       state.estado);
+            if (state.destinatario) qs.set('destinatario', state.destinatario);
+
+            const [data, domData] = await Promise.all([
+                api('notificaciones?' + qs.toString()),
+                api('dominios'),
+            ]);
+
+            const r = data.resumen;
+
+            root.innerHTML = `
+                ${moduleHeader('Notificaciones', 'Los avisos que el sistema genera para cada dominio y que sus usuarios ven en la app. Consultarlos acá no los marca como leídos.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Nuevas</span>
+                        <span class="stat-value orange">${r.nuevas}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Leídas</span>
+                        <span class="stat-value green">${r.leidas}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Dominios alcanzados</span>
+                        <span class="stat-value">${r.dominios}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'not',
+                    quickPlaceholder: 'Buscar mensaje, dominio, destinatario…',
+                    newLabel:         null,
+                })}
+                <div class="table-card" id="not-table"></div>
+            `;
+
+            wireNotificacionesView(state, data.notificaciones, domData.dominios);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function notificacionesTableBody(notificaciones) {
+        if (!notificaciones.length) {
+            return `<div class="table-empty">No hay notificaciones que coincidan con los filtros.</div>`;
+        }
+
+        const rows = notificaciones.map(n => `
+            <tr class="row-clickable" data-id="${n.id}">
+                <td><span class="td-id">#${n.id}</span></td>
+                <td><span class="td-id">${escape(formatDate(n.fecha))}</span></td>
+                <td>${n.dominio
+                        ? `<span class="badge badge-info">${escape(n.dominio_nombre || ('#' + n.dominio))}</span>`
+                        : '<span class="td-id">—</span>'}</td>
+                <td>
+                    <div class="td-nombre">
+                        <i class="${escape(n.icono_clase)} noti-icono"></i>
+                        ${escape(n.mensaje || '—')}
+                    </div>
+                </td>
+                <td>${notificacionDestinatarioCell(n)}</td>
+                <td>${notificacionEstadoBadge(n)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Fecha</th>
+                        <th>Dominio</th>
+                        <th>Mensaje</th>
+                        <th>Destinatario</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireNotificacionesView(state, allNotificaciones, allDominios) {
+        const tableWrap = document.getElementById('not-table');
+        const quick     = document.getElementById('not-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('not-filters');
+
+        let notificaciones = allNotificaciones;
+
+        function applyAndRender() {
+            const q      = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = notificaciones.filter(n => {
+                if (Number.isFinite(codigo) && n.id !== codigo) return false;
+                if (state.dominio && String(n.dominio ?? '') !== state.dominio) return false;
+                if (state.estado === 'nuevas' && !n.nueva) return false;
+                if (state.estado === 'leidas' &&  n.nueva) return false;
+                if (state.destinatario === 'dominio' && n.usuario !== null) return false;
+                if (state.destinatario === 'usuario' && n.usuario === null) return false;
+                // `fecha` viene como 'YYYY-MM-DD HH:MM:SS' y los <input type=date>
+                // como 'YYYY-MM-DD': la comparación lexicográfica del prefijo alcanza.
+                if (state.desde || state.hasta) {
+                    const dia = String(n.fecha ?? '').slice(0, 10);
+                    if (!dia) return false;
+                    if (state.desde && dia < state.desde) return false;
+                    if (state.hasta && dia > state.hasta) return false;
+                }
+                if (q && !((n.mensaje        ?? '') + ' ' +
+                           (n.dominio_nombre ?? '') + ' ' +
+                           (n.usuario_nombre ?? '') + ' ' +
+                           (n.usuario_login  ?? '') + ' ' +
+                           (n.destino        ?? ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            const ordenKey = (ORDEN_NOTIFICACIONES.find(o => o.value === state.orden) || { key: 'id' }).key;
+            filtered.sort((a, b) => {
+                const va = a[ordenKey] ?? '';
+                const vb = b[ordenKey] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = notificacionesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        async function refetchFromServer() {
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dominio)      qs.set('dominio',      state.dominio);
+            if (state.estado)       qs.set('estado',       state.estado);
+            if (state.destinatario) qs.set('destinatario', state.destinatario);
+
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const data = await api('notificaciones?' + qs.toString());
+                notificaciones = data.notificaciones;
+                applyAndRender();
+            } catch (e) {
+                tableWrap.innerHTML = errorBox(e.message);
+            }
+        }
+
+        function rowMenuFor(n) {
+            return standardRowMenuItems({
+                view: true, onView: () => openNotificacionViewModal(n),
+                extra: n.dominio ? [{
+                    act: 'ver-dominio', label: 'Ver dominio', icon: 'fa-flag',
+                    onSelect: () => pedirFiltroDominio('dominios', n.dominio),
+                }] : [],
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const n  = notificaciones.find(x => x.id === id);
+                if (!n) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(n), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openNotificacionViewModal(n));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(n), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () =>
+            openNotificacionesFiltersModal(state, allDominios, ({ refetch }) => {
+                if (refetch) refetchFromServer();
+                else        applyAndRender();
+            })
+        );
+        wireRefresh('not', 'notificaciones', state);
+
+        applyAndRender();
+    }
+
+    function openNotificacionesFiltersModal(state, allDominios, onApply) {
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const estOpts = ['<option value="">Todas</option>'].concat(
+            ESTADOS_NOTIFICACION.map(e =>
+                `<option value="${e.value}"${e.value === state.estado ? ' selected' : ''}>${escape(e.label)}</option>`
+            )
+        ).join('');
+        const desOpts = ['<option value="">Todas</option>'].concat(
+            DESTINATARIOS_NOTIFICACION.map(d =>
+                `<option value="${d.value}"${d.value === state.destinatario ? ' selected' : ''}>${escape(d.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_NOTIFICACIONES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="not-fm-codigo">Código</label>
+                    <input type="number" id="not-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-texto">Buscar (mensaje / dominio / destinatario)</label>
+                    <input type="search" id="not-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-dominio">Dominio</label>
+                    <select id="not-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-estado">Estado</label>
+                    <select id="not-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-destinatario">Destinatario</label>
+                    <select id="not-fm-destinatario">${desOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-desde">Desde</label>
+                    <input type="date" id="not-fm-desde" value="${escape(state.desde)}">
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-hasta">Hasta</label>
+                    <input type="date" id="not-fm-hasta" value="${escape(state.hasta)}">
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-limit">Límite</label>
+                    <input type="number" id="not-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-orden">Ordenar por</label>
+                    <select id="not-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="not-fm-dir">Dirección</label>
+                    <select id="not-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                const prevDominio      = state.dominio;
+                const prevEstado       = state.estado;
+                const prevDestinatario = state.destinatario;
+                const prevLimit        = state.limit;
+
+                state.codigo       = modal.querySelector('#not-fm-codigo').value.trim();
+                state.texto        = modal.querySelector('#not-fm-texto').value.trim();
+                state.dominio      = modal.querySelector('#not-fm-dominio').value;
+                state.estado       = modal.querySelector('#not-fm-estado').value;
+                state.destinatario = modal.querySelector('#not-fm-destinatario').value;
+                state.desde        = modal.querySelector('#not-fm-desde').value;
+                state.hasta        = modal.querySelector('#not-fm-hasta').value;
+                state.orden        = modal.querySelector('#not-fm-orden').value;
+                state.dir          = modal.querySelector('#not-fm-dir').value;
+                state.limit        = readLimit(modal.querySelector('#not-fm-limit'), 100);
+
+                // Dominio, estado, destinatario y límite viajan al backend; el
+                // resto se aplica client-side sobre el set ya descargado.
+                const needsRefetch = state.dominio      !== prevDominio
+                                  || state.estado       !== prevEstado
+                                  || state.destinatario !== prevDestinatario
+                                  || state.limit        !== prevLimit;
+                onApply({ refetch: needsRefetch });
+            },
+            onClear(modal) {
+                const d = notificacionesDefaults();
+                modal.querySelector('#not-fm-codigo').value       = d.codigo;
+                modal.querySelector('#not-fm-texto').value        = d.texto;
+                modal.querySelector('#not-fm-dominio').value      = d.dominio;
+                modal.querySelector('#not-fm-estado').value       = d.estado;
+                modal.querySelector('#not-fm-destinatario').value = d.destinatario;
+                modal.querySelector('#not-fm-desde').value        = d.desde;
+                modal.querySelector('#not-fm-hasta').value        = d.hasta;
+                modal.querySelector('#not-fm-orden').value        = d.orden;
+                modal.querySelector('#not-fm-dir').value          = d.dir;
+                modal.querySelector('#not-fm-limit').value        = String(d.limit);
+            },
+        });
+    }
+
+    /* Consultar notificación: las NUEVE columnas de la tabla, ni una inventada
+       (ABM.md, sección Consultar). Ocho tarjetas media —cuatro renglones que
+       cierran de a dos— y `Mensaje` full en la ranura 9, que es impar: agregar o
+       quitar un campo obliga a rehacer esa cuenta.
+
+       `Destino` y `Visible` no se ven en el listado y acá sí, que es de lo que
+       se trata el modal. Las dos vienen vacías o constantes en los datos reales
+       (destino '' en las 68.717 filas, visible 1 en todas), y se muestran igual:
+       son columnas de la tabla, y esconderlas haría que la ficha no coincida con
+       lo que el Explorador DB muestra de la misma fila. */
+    function openNotificacionViewModal(n) {
+        const dominioValue = n.dominio
+            ? `<span class="badge badge-info">${escape(n.dominio_nombre || ('#' + n.dominio))}</span>`
+            : `<span class="muted">—</span>`;
+
+        const destinatarioValue = n.usuario === null
+            ? `<span class="muted">Todo el dominio</span>`
+            : `${escape(n.usuario_nombre || ('#' + n.usuario))}` +
+              (n.usuario_login ? ` <code>${escape(n.usuario_login)}</code>` : '');
+
+        const destinoValue = (n.destino ?? '').trim() !== ''
+            ? `<code>${escape(n.destino)}</code>`
+            : `<span class="muted">—</span>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar notificación</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de la notificación">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="copiar">
+                        <i class="fa-solid fa-copy"></i> Copiar mensaje
+                    </button>
+                </div>
+                <div class="modal-body">
+                    ${viewGrid([
+                        viewCardHalf('Código',        `<code>#${n.id}</code>`),
+                        viewCardHalf('Fecha',         escape(formatDate(n.fecha))),
+                        viewCardHalf('Dominio',       dominioValue),
+                        viewCardHalf('Destinatario',  destinatarioValue),
+                        viewCardHalf('Estado',        notificacionEstadoBadge(n)),
+                        viewCardHalf('Visible',       n.visible === 1
+                            ? '<span class="badge badge-success">Sí</span>'
+                            : `<code>${escape(String(n.visible ?? '—'))}</code>`),
+                        viewCardHalf('Ícono',         `<i class="${escape(n.icono_clase)}"></i> <code>${escape(n.icono || '—')}</code>`),
+                        viewCardHalf('Destino',       destinoValue),
+                        viewCardFull('Mensaje',       escape(n.mensaje || '—')),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.querySelector('[data-act="copiar"]').addEventListener('click', () => {
+            copyToClipboard(n.mensaje || '');
+        });
+    }
+
+    /* ---------- Views: Difusión ----------
+     * Envíos masivos de correo a los usuarios del sistema. Escribe `difusiones`
+     * (la campaña) y `difusiones_destinatarios` (una fila por persona); las
+     * decisiones del esquema están en la migración 20260908_1000 y las del
+     * endpoint en `api/difusion.php`.
+     *
+     * LO QUE HAY QUE SABER PARA TOCAR ESTA PANTALLA:
+     *
+     *   - La lista de destinatarios se CONGELA al crear la difusión. El número
+     *     que el operador confirma es el que se guarda: no se vuelve a resolver
+     *     al enviar.
+     *   - El envío se DRENA POR LOTES desde el navegador (`?enviar=1`, 20 por
+     *     request) porque son hasta 2.065 correos y una sola request no entra.
+     *     El bucle vive en `drenarDifusion()`, y el estado real está en la base
+     *     — no en memoria: cerrar el modal no pierde nada y `Reanudar envío`
+     *     sigue por donde iba.
+     *   - Cerrar el modal de progreso NO cancela: sólo corta el bucle. Cancelar
+     *     es una acción explícita del menú de la fila.
+     */
+
+    const ESTADOS_DIFUSION = [
+        { value: 'pendiente', label: 'Pendiente', badge: 'badge-warn'    },
+        { value: 'enviando',  label: 'Enviando',  badge: 'badge-info'    },
+        { value: 'enviada',   label: 'Enviada',   badge: 'badge-success' },
+        { value: 'cancelada', label: 'Cancelada', badge: 'badge-danger'  },
+    ];
+
+    const ORDEN_DIFUSIONES = [
+        { value: 'id',            label: 'Código',        key: 'id'            },
+        { value: 'creada',        label: 'Creada',        key: 'creada'        },
+        { value: 'asunto',        label: 'Asunto',        key: 'asunto'        },
+        { value: 'destinatarios', label: 'Destinatarios', key: 'destinatarios' },
+    ];
+
+    function difusionDefaults() {
+        return {
+            codigo: '', texto: '', dominio: '', estado: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    function difusionEstadoBadge(estado) {
+        const e = ESTADOS_DIFUSION.find(x => x.value === estado)
+               || { label: estado || '—', badge: 'badge-info' };
+        return `<span class="badge ${e.badge}">${escape(e.label)}</span>`;
+    }
+
+    // Alcance: NULL en la base significa "todos los dominios" y es un valor, no
+    // un dato faltante. Por eso no cae al guion de "sin dato".
+    function difusionAlcanceCell(d) {
+        return d.dominio
+            ? `<span class="badge badge-info">${escape(d.dominio_nombre || ('#' + d.dominio))}</span>`
+            : `<span class="badge badge-warn">Todos los dominios</span>`;
+    }
+
+    // Celda de progreso: enviados sobre el total congelado, con los fallidos
+    // debajo sólo si los hay. La barra es lo que se lee de un vistazo cuando el
+    // listado tiene varias campañas a medio mandar.
+    function difusionProgresoCell(d) {
+        const total = d.destinatarios || 0;
+        const hechos = (d.enviados || 0) + (d.fallidos || 0);
+        const pct = total > 0 ? Math.round((hechos / total) * 100) : 0;
+        return `
+            <div class="dif-progreso">
+                <div class="dif-progreso-barra">
+                    <div class="dif-progreso-relleno" style="width:${pct}%"></div>
+                </div>
+                <div class="dif-progreso-cifras">
+                    <span>${d.enviados} / ${total}</span>
+                    ${d.fallidos ? `<span class="dif-progreso-fallidos">${d.fallidos} con error</span>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    async function renderDifusion(root) {
+        try {
+            const state = tomarEstadoVista('difusion', difusionDefaults());
+            const domPedido = tomarFiltroDominio('difusion');
+            if (domPedido) state.dominio = domPedido;
+
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.dominio) qs.set('dominio', state.dominio);
+            if (state.estado)  qs.set('estado',  state.estado);
+
+            const data = await api('difusion?' + qs.toString());
+            const r    = data.resumen;
+
+            root.innerHTML = `
+                ${moduleHeader('Difusión', 'Envíos de correo a los usuarios del sistema. El alcance se elige al crear la difusión y la lista de destinatarios queda congelada: lo que se manda es lo que se confirmó.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Difusiones</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">En curso</span>
+                        <span class="stat-value orange">${r.en_curso}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Correos enviados</span>
+                        <span class="stat-value green">${r.enviados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con error</span>
+                        <span class="stat-value ${r.fallidos ? 'red' : 'muted'}">${r.fallidos}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'dif',
+                    quickPlaceholder: 'Buscar asunto, mensaje, dominio…',
+                    newLabel:         'Nueva difusión',
+                })}
+                <div class="table-card" id="dif-table"></div>
+            `;
+
+            wireDifusionView(state, data.difusiones, data.catalogos);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function difusionesTableBody(difusiones) {
+        if (!difusiones.length) {
+            return `<div class="table-empty">No hay difusiones que coincidan. Creá la primera con "Nueva difusión".</div>`;
+        }
+
+        const rows = difusiones.map(d => `
+            <tr class="row-clickable" data-id="${d.id}">
+                <td><span class="td-id">#${d.id}</span></td>
+                <td><span class="td-id">${escape(formatDate(d.creada))}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(d.asunto)}</div>
+                    ${d.emisor_nombre ? `<div class="td-id">${escape(d.emisor_nombre)}</div>` : ''}
+                </td>
+                <td>${difusionAlcanceCell(d)}</td>
+                <td>${difusionProgresoCell(d)}</td>
+                <td>${difusionEstadoBadge(d.estado)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Creada</th>
+                        <th>Asunto</th>
+                        <th>Alcance</th>
+                        <th>Progreso</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireDifusionView(state, allDifusiones, catalogos) {
+        const tableWrap = document.getElementById('dif-table');
+        const quick     = document.getElementById('dif-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('dif-filters');
+        const btnNew    = document.getElementById('dif-new');
+
+        let difusiones = allDifusiones;
+
+        function applyAndRender() {
+            const q      = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = difusiones.filter(d => {
+                if (Number.isFinite(codigo) && d.id !== codigo) return false;
+                if (state.dominio && String(d.dominio ?? '') !== state.dominio) return false;
+                if (state.estado  && d.estado !== state.estado) return false;
+                if (q && !((d.asunto         ?? '') + ' ' +
+                           (d.cuerpo         ?? '') + ' ' +
+                           (d.dominio_nombre ?? '') + ' ' +
+                           (d.emisor_nombre  ?? ''))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            const ordenKey = (ORDEN_DIFUSIONES.find(o => o.value === state.orden) || { key: 'id' }).key;
+            filtered.sort((a, b) => {
+                const va = a[ordenKey] ?? '';
+                const vb = b[ordenKey] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = difusionesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(d) {
+            const extra = [];
+            // Reanudar sólo tiene sentido si quedó algo pendiente y nadie la
+            // canceló. El estado real lo dice la fila, no la memoria del front.
+            if (d.pendientes > 0 && d.estado !== 'cancelada') {
+                extra.push({
+                    act: 'reanudar', label: d.enviados > 0 ? 'Reanudar envío' : 'Enviar ahora',
+                    icon: 'fa-paper-plane',
+                    onSelect: () => openDifusionEnvioModal(d),
+                });
+            }
+            if (d.pendientes > 0 && d.estado !== 'cancelada') {
+                extra.push({
+                    act: 'cancelar', label: 'Cancelar envío', icon: 'fa-ban',
+                    onSelect: () => confirmarCancelarDifusion(d),
+                });
+            }
+            return standardRowMenuItems({
+                view:   true, onView:   () => abrirFichaDifusion(d.id),
+                extra,
+                delete: true, onDelete: () => pedirImpactoDifusion(d),
+            });
+        }
+
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const d  = difusiones.find(x => x.id === id);
+                if (!d) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(d), e.currentTarget);
+                });
+                tr.addEventListener('click', () => abrirFichaDifusion(d.id));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(d), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () =>
+            openDifusionFiltersModal(state, catalogos.dominios, () => refrescarVista('difusion', state))
+        );
+        btnNew.addEventListener('click', () => openDifusionFormModal(catalogos.dominios));
+        wireRefresh('dif', 'difusion', state);
+
+        applyAndRender();
+    }
+
+    function openDifusionFiltersModal(state, allDominios, onApply) {
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}"${String(d.id) === state.dominio ? ' selected' : ''}>${escape(d.nombre)}</option>`
+            )
+        ).join('');
+        const estOpts = ['<option value="">Todos</option>'].concat(
+            ESTADOS_DIFUSION.map(e =>
+                `<option value="${e.value}"${e.value === state.estado ? ' selected' : ''}>${escape(e.label)}</option>`
+            )
+        ).join('');
+        const ordOpts = ORDEN_DIFUSIONES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="dif-fm-codigo">Código</label>
+                    <input type="number" id="dif-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="dif-fm-texto">Buscar (asunto / mensaje / emisor)</label>
+                    <input type="search" id="dif-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="dif-fm-dominio">Alcance</label>
+                    <select id="dif-fm-dominio">${domOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dif-fm-estado">Estado</label>
+                    <select id="dif-fm-estado">${estOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dif-fm-limit">Límite</label>
+                    <input type="number" id="dif-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="dif-fm-orden">Ordenar por</label>
+                    <select id="dif-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dif-fm-dir">Dirección</label>
+                    <select id="dif-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo  = modal.querySelector('#dif-fm-codigo').value.trim();
+                state.texto   = modal.querySelector('#dif-fm-texto').value.trim();
+                state.dominio = modal.querySelector('#dif-fm-dominio').value;
+                state.estado  = modal.querySelector('#dif-fm-estado').value;
+                state.orden   = modal.querySelector('#dif-fm-orden').value;
+                state.dir     = modal.querySelector('#dif-fm-dir').value;
+                state.limit   = readLimit(modal.querySelector('#dif-fm-limit'), 100);
+                // Alcance, estado y límite los sabe filtrar el backend, así que
+                // se re-pide todo: son pocas filas y el resumen de arriba tiene
+                // que contar sobre lo mismo que la tabla.
+                onApply();
+            },
+            onClear(modal) {
+                const d = difusionDefaults();
+                modal.querySelector('#dif-fm-codigo').value  = d.codigo;
+                modal.querySelector('#dif-fm-texto').value   = d.texto;
+                modal.querySelector('#dif-fm-dominio').value = d.dominio;
+                modal.querySelector('#dif-fm-estado').value  = d.estado;
+                modal.querySelector('#dif-fm-orden').value   = d.orden;
+                modal.querySelector('#dif-fm-dir').value     = d.dir;
+                modal.querySelector('#dif-fm-limit').value   = String(d.limit);
+            },
+        });
+    }
+
+    /* Nueva difusión.
+     *
+     * NO HAY EDICIÓN: el endpoint no tiene PUT. Una difusión ya emitida es lo
+     * que la gente recibió, y reescribirla dejaría el historial diciendo algo
+     * distinto de lo que salió. Por eso este modal es sólo de alta y su acción
+     * primaria dice `Enviar` y no `Guardar`: una difusión guardada y sin mandar
+     * no le sirve a nadie, y el paso que de verdad ocurre es el envío.
+     *
+     * EL CONTADOR DE DESTINATARIOS SE PIDE AL BACKEND cada vez que cambia el
+     * alcance, y es el mismo número que después se congela. Calcularlo en el
+     * front sería una segunda definición de "quién recibe" que se puede
+     * desincronizar de la del endpoint — que es la que manda los correos. */
+    function openDifusionFormModal(allDominios) {
+        const domOpts = ['<option value="">Todos los dominios</option>'].concat(
+            allDominios.map(d =>
+                `<option value="${d.id}">${escape(d.nombre)}${d.habilitado ? '' : ' (deshabilitado)'}</option>`
+            )
+        ).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Nueva difusión</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de la difusión">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="enviar">
+                        <i class="fa-solid fa-paper-plane"></i> Enviar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">Destinatarios</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="dif-dominio">Alcance</label>
+                                <select id="dif-dominio">${domOpts}</select>
+                                <div class="form-nota">Quién recibe el correo sale de los <strong>perfiles</strong> del dominio, no del dominio activo de cada cuenta.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="dif-habilitados">Cuentas</label>
+                                <select id="dif-habilitados">
+                                    <option value="1" selected>Sólo habilitadas</option>
+                                    <option value="0">Todas</option>
+                                </select>
+                                <div class="form-nota">Una cuenta deshabilitada no puede entrar al sistema.</div>
+                            </div>
+                        </div>
+                        <div class="dif-audiencia" id="dif-audiencia">
+                            <div class="spin"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Mensaje</div>
+                        <div class="form-group">
+                            <label for="dif-asunto">Asunto</label>
+                            <input type="text" id="dif-asunto" maxlength="200" placeholder="Asunto del correo">
+                            <div class="field-error" id="dif-asunto-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="dif-cuerpo">Texto</label>
+                            <textarea id="dif-cuerpo" rows="10" maxlength="20000"
+                                      placeholder="Escribí el mensaje. Una línea en blanco separa párrafos."></textarea>
+                            <div class="field-error" id="dif-cuerpo-err" style="display:none"></div>
+                            <div class="form-nota">Se manda como texto: los saltos de línea se respetan y el HTML que se pegue se ve tal cual, no se interpreta. El encabezado y el pie los pone la plantilla de Reactor.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el       = id => backdrop.querySelector('#dif-' + id);
+        const btnEnv   = backdrop.querySelector('[data-act="enviar"]');
+        const audienciaBox = el('audiencia');
+
+        // Último conteo confirmado por el backend. Arranca en null: hasta que no
+        // vuelva la primera consulta no se puede confirmar un envío, porque el
+        // número que el operador tiene que ver es justamente ése.
+        let audiencia = null;
+        let pedido    = 0;   // descarta respuestas viejas si se cambia rápido
+
+        async function refrescarAudiencia() {
+            const propio = ++pedido;
+            audiencia = null;
+            audienciaBox.innerHTML = `<div class="spin"></div>`;
+            const qs = new URLSearchParams();
+            if (el('dominio').value) qs.set('dominio', el('dominio').value);
+            qs.set('habilitados', el('habilitados').value);
+            try {
+                const res = await api('difusion?audiencia=1&' + qs.toString());
+                if (propio !== pedido) return;   // llegó tarde: ya hay otra en curso
+                audiencia = res;
+                const descartados = res.descartados
+                    ? `<div class="dif-audiencia-nota">${res.descartados} cuenta${res.descartados === 1 ? '' : 's'} quedaron afuera: el correo cargado no es una dirección válida.</div>`
+                    : '';
+                const muestra = res.muestra && res.muestra.length
+                    ? `<div class="dif-audiencia-nota">Por ejemplo: ${res.muestra.map(c => `<code>${escape(c)}</code>`).join(', ')}${res.total > res.muestra.length ? '…' : ''}</div>`
+                    : '';
+                audienciaBox.innerHTML = `
+                    <div class="dif-audiencia-total">
+                        <span class="dif-audiencia-numero">${res.total}</span>
+                        <span>destinatario${res.total === 1 ? '' : 's'}</span>
+                    </div>
+                    ${muestra}
+                    ${descartados}
+                `;
+            } catch (e) {
+                if (propio !== pedido) return;
+                audienciaBox.innerHTML = errorBox(e.message);
+            }
+        }
+
+        el('dominio').addEventListener('change', refrescarAudiencia);
+        el('habilitados').addEventListener('change', refrescarAudiencia);
+        refrescarAudiencia();
+        el('asunto').focus();
+
+        btnEnv.addEventListener('click', () => {
+            ['asunto-err', 'cuerpo-err'].forEach(id => { el(id).style.display = 'none'; });
+            ['asunto', 'cuerpo'].forEach(id => el(id).classList.remove('input-invalid'));
+
+            const marcar = (campo, msg) => {
+                const e = el(campo + '-err');
+                e.textContent = msg;
+                e.style.display = 'block';
+                el(campo).classList.add('input-invalid');
+                return el(campo);
+            };
+
+            let primero = null;
+            if (el('asunto').value.trim() === '') primero = marcar('asunto', 'El asunto es obligatorio');
+            if (el('cuerpo').value.trim() === '') primero = primero || marcar('cuerpo', 'El mensaje es obligatorio');
+            if (primero) { primero.focus(); return; }
+
+            if (audiencia === null) {
+                toast('Esperá a que termine de contarse la audiencia', { error: true });
+                return;
+            }
+            if (audiencia.total === 0) {
+                toast('El alcance elegido no tiene ningún destinatario con correo válido', { error: true, duration: 6000 });
+                return;
+            }
+
+            // El envío no se puede deshacer y le llega a hasta 2.000 personas: la
+            // confirmación repite el número que el operador tiene en pantalla,
+            // porque el alcance se elige con un select y es fácil de dejar en
+            // "Todos los dominios" sin querer.
+            const alcance = el('dominio').selectedOptions[0].textContent.trim();
+            confirmDialog(
+                'Enviar la difusión',
+                `Se van a mandar ${audiencia.total} correos a ${alcance.toLowerCase()}. Los correos que ya salieron no se pueden dar de baja.`,
+                async () => {
+                    btnEnv.disabled = true;
+                    try {
+                        const res = await api('difusion', {
+                            method: 'POST',
+                            body: {
+                                asunto:      el('asunto').value.trim(),
+                                cuerpo:      el('cuerpo').value,
+                                dominio:     el('dominio').value ? +el('dominio').value : 0,
+                                habilitados: el('habilitados').value === '1',
+                            },
+                        });
+                        close();
+                        openDifusionEnvioModal(res.difusion);
+                    } catch (e) {
+                        btnEnv.disabled = false;
+                        toast(e.message, { error: true, duration: 6000 });
+                    }
+                },
+                { label: 'Enviar', tono: 'primary' }
+            );
+        });
+    }
+
+    /* Modal de progreso del envío.
+     *
+     * Es el que corre el bucle: pide lotes de 20 hasta que no quedan pendientes.
+     * CERRARLO NO CANCELA NADA — sólo corta el bucle, y la difusión queda
+     * reanudable desde el menú de la fila. Cancelar de verdad es otra acción,
+     * explícita, que cambia el estado en la base.
+     *
+     * Por eso tampoco hay estado en memoria que se pueda perder: cada lote
+     * devuelve los contadores contados sobre la tabla hija, así que lo que se
+     * pinta es lo que hay en la base y no un acumulado del navegador. */
+    function openDifusionEnvioModal(difusion) {
+        let cortado = false;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Enviando difusión</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del envío">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="dif-envio-asunto">${escape(difusion.asunto)}</div>
+                    <div class="dif-progreso dif-progreso-lg">
+                        <div class="dif-progreso-barra">
+                            <div class="dif-progreso-relleno" id="dif-env-barra" style="width:0%"></div>
+                        </div>
+                        <div class="dif-progreso-cifras">
+                            <span id="dif-env-cifras">Preparando…</span>
+                            <span id="dif-env-pct"></span>
+                        </div>
+                    </div>
+                    ${/* El tamaño del lote NO se nombra acá: lo fija
+                          DIFUSION_LOTE en el endpoint y repetirlo en el texto
+                          sería una segunda declaración que se desincroniza al
+                          primer ajuste. Lo que la persona necesita saber es que
+                          puede cerrar sin romper nada. */''}
+                    <div class="form-nota" id="dif-env-nota">
+                        Se manda un correo por destinatario, en tandas. Podés cerrar esta ventana:
+                        el envío se detiene y después se reanuda desde el menú de la fila.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            cortado = true;
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+            // Volver a pedirle todo al backend: los contadores de la tabla y los
+            // KPIs de arriba tienen que reflejar lo que se acaba de mandar.
+            navigate();
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const barra  = backdrop.querySelector('#dif-env-barra');
+        const cifras = backdrop.querySelector('#dif-env-cifras');
+        const pctEl  = backdrop.querySelector('#dif-env-pct');
+        const nota   = backdrop.querySelector('#dif-env-nota');
+
+        function pintar(estado) {
+            const total  = estado.total || 0;
+            const hechos = (estado.enviados || 0) + (estado.fallidos || 0);
+            const pct    = total > 0 ? Math.round((hechos / total) * 100) : 0;
+            barra.style.width = pct + '%';
+            cifras.textContent = `${estado.enviados} enviados` +
+                (estado.fallidos ? ` · ${estado.fallidos} con error` : '') +
+                ` · ${estado.pendientes} pendientes`;
+            pctEl.textContent = pct + '%';
+        }
+
+        (async function drenar() {
+            while (!cortado) {
+                let estado;
+                try {
+                    estado = await api('difusion?enviar=1&id=' + encodeURIComponent(difusion.id), { method: 'POST' });
+                } catch (e) {
+                    nota.innerHTML = `<span class="dif-envio-error">${escape(e.message)}</span> ` +
+                        'El envío se detuvo. Lo que ya salió está registrado: reanudalo desde el menú de la fila.';
+                    return;
+                }
+                if (cortado) return;
+                pintar(estado);
+                if (estado.pendientes === 0) {
+                    nota.textContent = estado.fallidos
+                        ? `Terminó. ${estado.fallidos} destinatarios no recibieron el correo: el motivo de cada uno está en la ficha de la difusión.`
+                        : 'Terminó: todos los destinatarios recibieron el correo.';
+                    toast('Difusión enviada');
+                    return;
+                }
+            }
+        })();
+    }
+
+    function confirmarCancelarDifusion(d) {
+        confirmDialog(
+            'Cancelar el envío',
+            `Quedan ${d.pendientes} destinatarios sin recibir el correo. Los ${d.enviados} que ya salieron no se pueden dar de baja.`,
+            async () => {
+                try {
+                    await api('difusion?cancelar=1&id=' + encodeURIComponent(d.id), { method: 'POST' });
+                    toast('Envío cancelado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 6000 });
+                }
+            },
+            { label: 'Cancelar envío' }
+        );
+    }
+
+    // La ficha se pide por id: el listado no trae los destinatarios (serían
+    // hasta 2.000 filas por difusión repetidas en cada render de la tabla).
+    async function abrirFichaDifusion(id) {
+        try {
+            const data = await api('difusion?id=' + encodeURIComponent(id));
+            openDifusionViewModal(data.difusion, data.destinatarios);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    /* Consultar difusión: General (la campaña) y Destinatarios (a quién le llegó
+       y a quién no).
+     *
+     * General son DIEZ tarjetas media entre dos full (`Asunto` arriba, `Mensaje`
+     * abajo): cinco renglones que cierran de a dos. Agregar o quitar un campo
+     * deja la cuenta impar y estira la última al 100%, que se lee como un
+     * destaque deliberado (ABM.md, sección Consultar).
+     *
+     * La pestaña Destinatarios es la razón de ser del módulo cuando algo sale
+     * mal: trae su propio buscador y chips por estado porque la respuesta a "¿le
+     * llegó a Fulano?" está entre hasta 2.000 filas. */
+    function openDifusionViewModal(d, destinatarios) {
+        const alcanceValue = d.dominio
+            ? `<span class="badge badge-info">${escape(d.dominio_nombre || ('#' + d.dominio))}</span>`
+            : `<span class="badge badge-warn">Todos los dominios</span>`;
+
+        const emisorValue = d.emisor_nombre
+            ? `${escape(d.emisor_nombre)}${d.emisor_correo ? ` <code>${escape(d.emisor_correo)}</code>` : ''}`
+            : `<span class="muted">—</span>`;
+
+        const terminadaValue = d.terminada
+            ? escape(formatDate(d.terminada))
+            : `<span class="muted">Sin terminar</span>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar difusión</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de la difusión">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${d.pendientes > 0 && d.estado !== 'cancelada' ? `
+                    <button class="btn btn-sm btn-primary" data-act="reanudar">
+                        <i class="fa-solid fa-paper-plane"></i> ${d.enviados > 0 ? 'Reanudar envío' : 'Enviar ahora'}
+                    </button>` : ''}
+                </div>
+                <div class="modal-body">
+                    <div class="modal-tabs" role="tablist">
+                        <button class="modal-tab active" data-tab="general"       role="tab">General</button>
+                        <button class="modal-tab"        data-tab="destinatarios" role="tab">Destinatarios</button>
+                    </div>
+                    <div class="modal-tabpanel" data-panel="general">
+                        ${viewGrid([
+                            viewCardFull('Asunto',        escape(d.asunto)),
+                            viewCardHalf('Código',        `<code>#${d.id}</code>`),
+                            viewCardHalf('Estado',        difusionEstadoBadge(d.estado)),
+                            viewCardHalf('Alcance',       alcanceValue),
+                            viewCardHalf('Emisor',        emisorValue),
+                            viewCardHalf('Creada',        escape(formatDate(d.creada))),
+                            viewCardHalf('Terminada',     terminadaValue),
+                            viewCardHalf('Destinatarios', `<code>${d.destinatarios}</code>`),
+                            viewCardHalf('Enviados',      `<span class="badge badge-success">${d.enviados}</span>`),
+                            viewCardHalf('Con error',     d.fallidos
+                                ? `<span class="badge badge-danger">${d.fallidos}</span>`
+                                : `<span class="muted">0</span>`),
+                            viewCardHalf('Pendientes',    d.pendientes
+                                ? `<span class="badge badge-warn">${d.pendientes}</span>`
+                                : `<span class="muted">0</span>`),
+                            viewCardFull('Mensaje',       `<div class="dif-cuerpo">${escape(d.cuerpo)}</div>`),
+                        ])}
+                    </div>
+                    <div class="modal-tabpanel" data-panel="destinatarios" hidden>
+                        <div class="dif-dest-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" id="dif-dest-quick" class="search-input"
+                                       placeholder="Buscar correo o nombre…">
+                                <button type="button" class="search-clear" data-act="dest-clear"
+                                        title="Limpiar búsqueda" aria-label="Limpiar búsqueda">×</button>
+                            </div>
+                            <div class="dif-dest-chips">
+                                <button type="button" class="filter-chip active" data-estado="">Todos</button>
+                                <button type="button" class="filter-chip" data-estado="enviado">Enviados</button>
+                                <button type="button" class="filter-chip" data-estado="fallido">Con error</button>
+                                <button type="button" class="filter-chip" data-estado="pendiente">Pendientes</button>
+                            </div>
+                        </div>
+                        <div class="table-card" id="dif-dest-table"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireModalTabs(backdrop);
+
+        backdrop.querySelector('[data-act="reanudar"]')?.addEventListener('click', () => {
+            close();
+            openDifusionEnvioModal(d);
+        });
+
+        /* Destinatarios: filtrado client-side sobre lo que ya vino en el GET. */
+        const destTable = backdrop.querySelector('#dif-dest-table');
+        const destQuick = backdrop.querySelector('#dif-dest-quick');
+        let destEstado  = '';
+
+        function pintarDestinatarios() {
+            const q = destQuick.value.trim().toLowerCase();
+            const filtrados = destinatarios.filter(x => {
+                if (destEstado && x.estado !== destEstado) return false;
+                if (q && !((x.correo ?? '') + ' ' + (x.nombre ?? '')).toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            if (!filtrados.length) {
+                destTable.innerHTML = `<div class="table-empty">No hay destinatarios que coincidan.</div>`;
+                return;
+            }
+
+            const badge = e => e === 'enviado'  ? '<span class="badge badge-success">Enviado</span>'
+                             : e === 'fallido'  ? '<span class="badge badge-danger">Con error</span>'
+                             :                    '<span class="badge badge-warn">Pendiente</span>';
+
+            destTable.innerHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Correo</th>
+                            <th>Nombre</th>
+                            <th>Estado</th>
+                            <th>Enviado</th>
+                            <th>Detalle</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filtrados.map(x => `
+                            <tr>
+                                <td><span class="td-nombre">${escape(x.correo)}</span></td>
+                                <td>${x.nombre ? escape(x.nombre) : '<span class="td-id">—</span>'}</td>
+                                <td>${badge(x.estado)}</td>
+                                <td><span class="td-id">${x.enviado ? escape(formatDate(x.enviado)) : '—'}</span></td>
+                                <td>${x.error ? `<span class="dif-dest-error">${escape(x.error)}</span>` : '<span class="td-id">—</span>'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        destQuick.addEventListener('input', pintarDestinatarios);
+        backdrop.querySelector('[data-act="dest-clear"]').addEventListener('click', () => {
+            destQuick.value = ''; pintarDestinatarios(); destQuick.focus();
+        });
+        backdrop.querySelectorAll('.dif-dest-chips .filter-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                destEstado = chip.dataset.estado;
+                backdrop.querySelectorAll('.dif-dest-chips .filter-chip')
+                    .forEach(c => c.classList.toggle('active', c === chip));
+                pintarDestinatarios();
+            });
+        });
+        pintarDestinatarios();
+    }
+
+    // La única FK que apunta a `difusiones` es la de los destinatarios y es
+    // CASCADE: no hay bloqueos, pero la baja se lleva el historial de a quién le
+    // llegó, así que va con el modal de desglose (ABM.md, "Eliminar").
+    async function pedirImpactoDifusion(d) {
+        try {
+            const impacto = await api('difusion?impacto=1&id=' + encodeURIComponent(d.id));
+            openDifusionDeleteModal(d, impacto);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openDifusionDeleteModal(d, impacto) {
+        const linea = it => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge badge-warn">${it.cantidad}</span>
+            </li>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar difusión</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar difusión
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">Se elimina la difusión <strong>${escape(d.asunto)}</strong> y con ella el registro de a quién se le mandó:</div>
+                    <ul class="del-list">${(impacto.elimina || []).map(linea).join('')}</ul>
+                    <div class="form-nota">
+                        Los ${impacto.detalle.enviados} correos que ya salieron no se dan de baja: eliminar borra
+                        el historial de este lado, no los mensajes que la gente recibió.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.querySelector('[data-act="ok"]').addEventListener('click', async () => {
+            try {
+                await api('difusion?id=' + encodeURIComponent(d.id), { method: 'DELETE' });
+                toast('Difusión eliminada');
+                close();
+                navigate();
+            } catch (e) {
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        });
     }
 
     /* ---------- Views: Controladores ----------
@@ -10608,6 +15106,31 @@
         const d = new Date(String(s).replace(' ', 'T'));
         if (isNaN(d)) return String(s);
         return d.toLocaleDateString('es-AR');
+    }
+
+    /* Importe en pesos: `$ 52.325,00`, el formato del sistema histórico.
+     *
+     * Está acá y no dentro de cada módulo porque Contratos y Comprobantes
+     * muestran plata en la misma pantalla —el abono de un contrato y el total
+     * de sus comprobantes— y dos formateadores distintos se notan enseguida
+     * (uno con separador de miles y el otro sin él). Siempre con dos decimales:
+     * un total redondeado a "$ 52.325" se lee como un importe distinto. */
+    function moneda(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return '—';
+        return new Intl.NumberFormat('es-AR', {
+            style: 'currency', currency: 'ARS',
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+        }).format(n);
+    }
+
+    /* Número sin símbolo de moneda, para cantidades y alícuotas. A diferencia
+     * de `moneda()` NO fuerza decimales: una cantidad de 1 se muestra "1" y no
+     * "1,00", pero un 10,5 % conserva su medio punto. */
+    function numero(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return '—';
+        return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n);
     }
 
     function escape(s) {

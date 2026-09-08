@@ -1165,6 +1165,60 @@ th.action-col, td.action-col {
     .view-card-half { flex: 1 1 100%; }
 }
 
+/* ---------- 25-bis. Bloques de detalle dentro de una ficha ----------
+ * Para las entidades que tienen HIJOS que se miran junto con la cabecera: los
+ * renglones y los pagos de un comprobante. No son tarjetas de consulta (§25)
+ * —una tarjeta muestra UN campo— sino una tabla completa embebida en el modal,
+ * con su encabezado y su acción propia.
+ *
+ * Comparte el fondo de `.view-card` (`--surface` un 10% más oscuro) para que
+ * se lea como parte del mismo bloque read-only y no como una tabla flotando.
+ */
+.ficha-bloque {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-top: 12px;
+}
+.ficha-bloque-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 10px;
+    font-size: .8rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted);
+}
+.ficha-bloque-head i { margin-right: 6px; }
+
+/* La tabla embebida es más compacta que la del listado: acá el ancho lo manda
+ * el modal, no la pantalla. Scroll horizontal propio para que el modal nunca
+ * scrollee de costado (regla §19). */
+.ficha-bloque   { overflow-x: auto; }
+.ficha-tabla    { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.ficha-tabla th,
+.ficha-tabla td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+.ficha-tabla th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+                  color: var(--muted); font-weight: 700; }
+.ficha-tabla tbody tr:last-child td { border-bottom: none; }
+.ficha-tabla tfoot td { border-bottom: none; padding-top: 4px; padding-bottom: 4px; }
+.ficha-tabla tfoot tr:first-child td { border-top: 1px solid var(--border); padding-top: 8px; }
+
+/* Columna numérica: alineada a la derecha y en tabular para que los importes
+ * de una columna tengan todos los dígitos en la misma posición — sin eso, una
+ * lista de totales no se puede comparar de un vistazo. */
+.td-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Pie del listado con el recuento y el total de la CONSULTA (no de la ventana
+ * traída). Se usa en Comprobantes, donde el filtrado lo hace el servidor y el
+ * listado puede venir recortado por el límite. */
+.table-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: .82rem; color: var(--text);
+}
+.table-foot .muted { font-size: .78rem; }
+
 /* ---------- 26. ABM: Modal de Filtros ----------
  * Centraliza todos los filtros del listado (ver ABM.md §3). Estructura:
  *   - Header con título "Filtros" + botón ×.
@@ -1631,3 +1685,59 @@ body.login-page { background: var(--bg); }
 /* El wrap aloja los dos botones + la lista, y se re-renderiza entero al cambiar
  * el dominio: el gap va acá y no en márgenes de los hijos. */
 .paneles-wrap          { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- 36. Comunicación: Notificaciones ----------
+ * El listado reusa la tabla estándar; lo único propio es el glifo que la fila
+ * trae en `notificaciones`.`icono`, que va delante del mensaje. Se pinta en
+ * `--muted` a propósito: identifica el tipo de aviso, no compite con el texto.
+ */
+.noti-icono            { color: var(--muted); margin-right: 6px; width: 14px; text-align: center; }
+
+/* ---------- 37. Comunicación: Difusión ----------
+ * La barra de progreso aparece en dos tamaños y es el MISMO componente: en la
+ * celda `Progreso` del listado (compacta) y en el modal de envío
+ * (`.dif-progreso-lg`), donde se mueve en vivo mientras se drenan los lotes.
+ * Que sean la misma pieza es el punto: lo que se ve durante el envío tiene que
+ * ser lo mismo que después queda en la fila.
+ */
+.dif-progreso          { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+.dif-progreso-barra    { height: 6px; background: var(--bg); border-radius: 999px;
+                         overflow: hidden; border: 1px solid var(--border); }
+/* `width` la escribe el JS. La transición es lo que hace legible el avance por
+ * lotes: sin ella la barra salta de a 20 destinatarios y se lee como un
+ * parpadeo, no como progreso. */
+.dif-progreso-relleno  { height: 100%; background: var(--primary); width: 0;
+                         transition: width .3s ease; }
+.dif-progreso-cifras   { display: flex; justify-content: space-between; gap: 8px;
+                         font-size: .75rem; color: var(--muted); font-family: monospace; }
+.dif-progreso-fallidos { color: var(--danger); }
+/* Variante del modal de envío: más alta y a todo el ancho, porque ahí la barra
+ * es el contenido de la pantalla y no un dato de una celda. */
+.dif-progreso-lg                        { min-width: 0; gap: 8px; margin: 14px 0; }
+.dif-progreso-lg .dif-progreso-barra    { height: 12px; }
+.dif-progreso-lg .dif-progreso-cifras   { font-size: .82rem; }
+.dif-envio-asunto      { font-size: .95rem; font-weight: 600; color: var(--text);
+                         word-break: break-word; }
+.dif-envio-error       { color: var(--danger); font-weight: 600; }
+
+/* Bloque de audiencia del modal de alta: el número que el operador confirma. Se
+ * destaca porque es el dato que decide el envío — no un hint del formulario. */
+.dif-audiencia         { background: var(--bg); border: 1px solid var(--border);
+                         border-radius: var(--radius); padding: 12px 14px;
+                         display: flex; flex-direction: column; gap: 6px; }
+.dif-audiencia-total   { display: flex; align-items: baseline; gap: 8px;
+                         font-size: .85rem; color: var(--muted); }
+.dif-audiencia-numero  { font-size: 1.5rem; font-weight: 700; color: var(--text);
+                         line-height: 1; }
+.dif-audiencia-nota    { font-size: .78rem; color: var(--muted); line-height: 1.45;
+                         word-break: break-word; }
+
+/* Pestaña Destinatarios de Consultar difusión: buscador + chips por estado
+ * arriba de la tabla. Es la misma forma de la toolbar del listado, en chico. */
+.dif-dest-toolbar      { display: flex; align-items: center; justify-content: space-between;
+                         gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.dif-dest-chips        { display: flex; gap: 6px; flex-wrap: wrap; }
+.dif-dest-error        { color: var(--danger); font-size: .78rem; word-break: break-word; }
+/* El cuerpo del correo se muestra tal como se escribió: los saltos de línea son
+ * parte del mensaje que salió, así que `pre-wrap` y no un párrafo reflowado. */
+.dif-cuerpo            { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }

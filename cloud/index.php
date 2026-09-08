@@ -130,6 +130,41 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                 </div>
             </div>
 
+            <div class="nav-group-wrap" data-group="comercial">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <i class="fa-solid fa-briefcase nav-icon"></i>
+                    <span class="nav-group-label">Comercial</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/contratos" data-route="contratos" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-file-contract nav-icon"></i> Contratos
+                    </a>
+                    <a href="#/comprobantes" data-route="comprobantes" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-file-invoice-dollar nav-icon"></i> Comprobantes
+                    </a>
+                    <a href="#/talonarios" data-route="talonarios" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-receipt nav-icon"></i> Talonarios
+                    </a>
+                </div>
+            </div>
+
+            <div class="nav-group-wrap" data-group="comunicacion">
+                <button type="button" class="nav-item nav-group-toggle">
+                    <i class="fa-solid fa-tower-broadcast nav-icon"></i>
+                    <span class="nav-group-label">Comunicación</span>
+                    <span class="nav-group-arrow">+</span>
+                </button>
+                <div class="nav-sub">
+                    <a href="#/notificaciones" data-route="notificaciones" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-comment-dots nav-icon"></i> Notificaciones
+                    </a>
+                    <a href="#/difusion" data-route="difusion" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-paper-plane nav-icon"></i> Difusión
+                    </a>
+                </div>
+            </div>
+
             <div class="nav-group-wrap" data-group="registros">
                 <button type="button" class="nav-item nav-group-toggle">
                     <i class="fa-solid fa-clipboard-list nav-icon"></i>

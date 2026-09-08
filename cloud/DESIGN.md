@@ -201,6 +201,10 @@ El sidebar está pintado de plano en `var(--primary)` (`#C11313`). Por eso sus e
 .nav-sub-item.active                  { background: rgba(0,0,0,.32); }
 ```
 
+**Los agrupadores, en orden:** `Inicio` (`fa-house`) · `Propiedad` (`fa-building`) · `Inventario` (`fa-boxes-stacked`) · `Comercial` (`fa-briefcase`) · `Comunicación` (`fa-tower-broadcast`) · `Registros` (`fa-clipboard-list`) · `Seguridad` (`fa-shield-halved`) · `Administración` (`fa-screwdriver-wrench`). **El orden es el del ciclo de vida de un dominio** —quién es, qué equipos tiene, qué contrató, qué se le dijo, qué generó— y no alfabético ni por frecuencia de uso: por eso `Comercial` va inmediatamente después de `Inventario`, y `Comunicación` entre `Comercial` y `Registros` (08/09/2026). Cada `data-group` del HTML tiene que coincidir con el `group` que la ruta declara en `routes` (`app.js`), que es lo que `openGroup()` usa para dejar abierto el agrupador correcto al navegar.
+
+**`Comunicación` agrupa los dos sentidos del mismo eje** y por eso es un agrupador y no dos ítems sueltos: `Notificaciones` (`fa-comment-dots`) es lo que el **sistema** le dice al dominio —los avisos que la app muestra en su modal, generados por un proceso del legacy que está fuera de este repo— y `Difusión` (`fa-paper-plane`) es lo que **Reactor** le dice a la gente por correo. Los dos íconos se eligieron para no chocar con los del resto del menú: `fa-bell` ya es `Alertas` y `fa-comments` se confundía con el del propio agrupador. Al agregar un ítem acá, verificar el glifo en `assets/fontawesome/icons.json` —tiene que estar en la familia solid (`"c"` contiene `s`)— y que no esté ya en uso.
+
 **Patrón:** la cabecera del sidebar contiene **solo el logo** centrado — `<img src="assets/img/reactor_white.png" class="sidebar-logo-mark">` a 32 px de alto, sin texto "REACTOR / cloud" adjunto. La celda completa (`.sidebar-logo`) mide **60 px de alto** para empatar exactamente con la altura del topbar (§5), de manera que el corte horizontal entre chrome y contenido sea una línea continua entre sidebar y main. Debajo, los items de primer nivel pueden ser navegación directa (`<a class="nav-item">`) o **grupos colapsables** (`.nav-group-wrap` con un `<button class="nav-group-toggle">` que aloja un `.nav-sub` con uno o más `.nav-sub-item`). El glifo `+` del toggle rota 45° al abrir (queda como `×`). Cuando el JS navega a una sub-ruta debe agregar la clase `open` al grupo correspondiente para que el sub-menú permanezca visible. Footer con versión en monospace. **No** introducir tokens grises ni `--text` / `--muted` / `--border` dentro del sidebar (tampoco del topbar — ver §5): textos en `#fff` u opacidades de blanco; bandas internas y estados en negros translúcidos.
 
 ```html
@@ -1267,7 +1271,7 @@ el momento del click con el mismo formato que el menú de fila
 - La barra **envuelve** (`flex-wrap`) en pantallas angostas; no se scrollea horizontalmente ni se colapsa en un solo dropdown.
 - **El fondo es un gris intermedio entre los dos tokens que ya conviven en el modal**: `color-mix(in srgb, var(--surface) 40%, var(--bg))` ≈ `#1e1e1f`. Queda un escalón más claro que `--bg` (`#1a1a1a`) y todavía más oscuro que los dos grises del cuerpo — las tarjetas de consulta (`#202122`) y el fondo del modal / los inputs (`--surface`, `#242526`). Así la franja se despega del header y del body sin sumar otra línea divisoria y sin repetir ningún tono del contenido.
 - **La mezcla es entre dos tokens, nunca contra `#000`.** Un `color-mix(--surface X%, #000)` fija un tono que no existe en el sistema y hay que recalcularlo a mano en cada cambio de tema; mezclando `--surface` con `--bg`, el intermedio sigue solo a la paleta. La escala de grises, de claro a oscuro: `--border` → `--row-hover` → `--surface` → **franja** → `--bg`.
-- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`) y **el modal de Filtros de los nueve módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos.
+- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`), **Contratos** (`openContratoViewModal` + `openContratoModal` + `openContratoDeleteModal`), **Talonarios** (`openTalonarioViewModal` + `openTalonarioModal` + `openTalonarioDeleteModal`), **Comprobantes** (`openComprobanteViewModal` + `openComprobanteNuevoModal` + `openComprobanteEditModal` + `openRenglonModal` + `openPagoModal` + `openComprobanteDeleteModal`) y **el modal de Filtros de todos los módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos. Contratos suma el tercero: **el modal de borrado con desglose (§15.1) lleva la misma cabecera**, y su barra de acciones es la que **omite el botón de confirmar** cuando el impacto trae bloqueos.
 
 ### 21-bis.1 "Listar": saltar a otro módulo ya filtrado
 
@@ -1285,7 +1289,8 @@ dos preguntas distintas sobre el mismo usuario y el menú las ofrece por
 separado.
 
 - **El pedido se consume siempre y sólo aplica si la ruta coincide.** Si el usuario se desvía a otra pantalla, se descarta en vez de filtrar un listado equivocado más tarde.
-- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones; para usuario: Perfiles y Adopciones). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Contratos; para usuario: Perfiles y Adopciones; para contrato: Contratos, desde Comprobantes). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **El destino puede volcar el pedido en el filtro que le corresponda, que no siempre se llama igual.** `Contratos → Ver dominio` usa el mismo `pedirFiltroDominio`, pero en **Dominios** el dominio no es una FK sino la fila misma: `renderDominios()` lo vuelca en `state.codigo`. Lo que no cambia es la regla — el filtro usado **tiene que existir en el Modal de Filtros del destino**, para que se vea por qué la lista viene acotada y se pueda limpiar.
 - **Si el endpoint sabe filtrar, el filtro va en el fetch inicial**, no sólo client-side: en tablas grandes (`registros`, `senales`, `adopciones`) recortar después de traer la ventana muestra "las N últimas de todos" filtradas, que es casi nada. Adopciones manda `?dominio=`; Señales y Registros no tienen el parámetro en la API y filtran sobre la ventana, igual que su propio modal de Filtros. `adoptador` / `liberador` tampoco existen en la API de Adopciones: ésos filtran client-side, como ya lo hace el modal de Filtros de ese módulo.
 
 ## 22. Lista de datos (vista de consulta)
@@ -1554,6 +1559,48 @@ El cableado sale de **`wireModalTabs(scope, onShow)`**, el helper compartido: re
 - **El objeto sale del catálogo ya cargado**, y si no está se pide (`catalogosPerfiles()`). Por eso el handler es async: quien llega desde Consultar usuario → solapa Perfiles no pasó por el módulo Perfiles y todavía no tiene los catálogos.
 
 Las filas de una pestaña de relación son **clickeables** (`<tr class="row-clickable" data-id="…">`, §10): el click izquierdo abre el **modal de Consultar de la entidad relacionada**, apilado encima del modal actual (`.modal-backdrop` comparte `z-index:100`, así que el último montado queda arriba). Al cerrarlo, el modal de origen sigue abierto y con la pestaña activa. Se reutiliza el mismo `openXxxViewModal()` que usa el módulo de la relación — no se duplica el markup de tarjetas. Ejemplo vigente: Consultar usuario → pestaña `Perfiles` → click en una fila → **Consultar perfil**.
+
+## 25-bis. Bloques de detalle dentro de una ficha
+
+Para las entidades que tienen **hijos que se miran junto con la cabecera**: los renglones y los pagos de un comprobante. Una tarjeta de §25 muestra **un campo**; esto es una **tabla completa embebida** en el modal de Consultar, con su encabezado y su acción propia.
+
+```html
+<div class="ficha-bloque">
+  <div class="ficha-bloque-head">
+    <span><i class="fa-solid fa-list-ul"></i> Renglones</span>
+    <button class="btn btn-sm btn-primary" data-ren="new">
+      <i class="fa-solid fa-plus"></i> Agregar renglón
+    </button>
+  </div>
+  <table class="ficha-tabla">
+    <thead><tr><th class="td-num">#</th><th>Detalle</th><th class="td-num">Monto</th></tr></thead>
+    <tbody>…</tbody>
+    <tfoot><tr><td colspan="2" class="td-num"><strong>Total</strong></td>
+               <td class="td-num"><strong>$ 27.500,00</strong></td></tr></tfoot>
+  </table>
+</div>
+```
+
+- **Comparte el fondo de `.view-card`** (`--surface` un 10 % más oscuro): se tiene que leer como parte del mismo bloque read-only, no como una tabla flotando sobre el modal.
+- **Scroll horizontal propio** (`overflow-x` en `.ficha-bloque`). El modal nunca scrollea de costado — regla §19.
+- **`.td-num` para toda columna de números**: alineada a la derecha y `font-variant-numeric: tabular-nums`. Sin eso, una columna de importes no se puede comparar de un vistazo porque los dígitos no caen en la misma posición.
+- **La acción del encabezado aparece sólo cuando corresponde.** En Comprobantes los botones de renglón existen únicamente en `Preparación`; en el resto de los estados el hueco lo ocupa una glosa en `muted` que dice por qué (`Sólo se editan en Preparación`). Un botón deshabilitado sin explicación se lee como un bug.
+- **El `tfoot` lleva los totales derivados**, con una `.form-nota` debajo aclarando que los calcula el servidor. Es la contracara de que no sean editables: si no se dice, un campo que no se puede tocar parece roto.
+
+## 25-ter. Pie de listado con totales de la consulta
+
+`.table-foot` va **debajo de la tabla del listado**, no dentro de ella, y dice **cuántas filas matchean el filtro y cuánto suman** — no cuántas se están viendo.
+
+```html
+<div class="table-foot">
+  <span>2326 comprobante(s) · Total $ 35.611.023,88</span>
+  <span class="muted">Se muestran los 100 más recientes — subí el <strong>Límite</strong> en Filtros para ver más</span>
+</div>
+```
+
+- **Sólo lo usan los módulos que filtran en el servidor** (hoy Comprobantes). En los que se traen la tabla entera, la ventana *es* la consulta y el pie no agregaría nada.
+- **El aviso de recorte es obligatorio cuando `filas > traidos`.** Un total de 35 millones arriba de 100 filas, sin decir que hay 2.226 más, se lee como que la tabla miente.
+- **Con la búsqueda rápida activa el pie se recalcula sobre lo que se ve.** El buscador de la toolbar filtra la ventana en el navegador; dejar ahí los totales del servidor pondría un número que no corresponde a ninguna de las dos cosas.
 
 ## 26. Editor JSON (textarea monoespaciado)
 
@@ -2185,6 +2232,112 @@ rellenaban las dos columnas:
 ---
 
 
+## 36. Comunicación · Notificaciones
+
+Listado **read-only** de la tabla `notificaciones`, la misma que alimenta el modal *Notificaciones* de `app`. Lo que cloud agrega es el alcance: allá se ven las 50 últimas del dominio de la sesión, acá la tabla entera y los 83 dominios que la usan (68.717 filas al 08/09/2026).
+
+El módulo **no aporta componentes nuevos** salvo el glifo de la fila. Todo lo demás sale de las piezas ya documentadas: `moduleHeader()` (§23), `abmToolbar()` sin `+ Nuevo` (§9), tabla estándar (§10), badges (§11), Modal de Filtros compartido (§23-bis) y tarjetas de consulta (§25).
+
+```css
+/* El glifo que la fila trae en `notificaciones`.`icono`, delante del mensaje.
+   Va en --muted a propósito: identifica el tipo de aviso, no compite con el
+   texto. El ancho fijo alinea todos los mensajes en la misma columna. */
+.noti-icono { color: var(--muted); margin-right: 6px; width: 14px; text-align: center; }
+```
+
+**Reglas:**
+
+- **CONSULTAR ACÁ NO MARCA COMO LEÍDO, y es la regla que no se puede romper.** El listado de `app` sella `leida = 2` sobre lo que muestra, y como la fila es **del dominio** (no de la persona), el primero que abre el modal les saca el destaque a todos los demás. Si cloud hiciera lo mismo, auditar una notificación se la marcaría como vista a un cliente que todavía no la vio. Por eso `api/notificaciones.php` responde **GET y sólo GET**: no es una omisión, es el control.
+- **Sin alta, edición ni baja.** La tabla la escribe un proceso del sistema legacy que está **fuera de este repositorio** (el que genera los avisos "Dispositivo X Online/Offline"). El menú de la fila trae sólo `Consultar`, como Señales, Registros y Adopciones.
+- **La columna `icono` guarda el glifo pelado** (`plug` en las 68.717 filas), no una clase: el legacy renderizaba `<i class="plug">`, o sea nada. El prefijo `fa-solid fa-` lo pone **el backend** (`icono_clase`) y no el front, para que la regla viva en un solo lado — es la misma que aplica `app/api/notificaciones.php`.
+- **"Sin destinatario" se muestra como `Todo el dominio`, no como un guion.** El 99,99% de las filas (68.711 de 68.717) no tiene destinatario, y eso **no es un dato faltante**: son las notificaciones del dominio, para todos los que lo operan. Un `—` las leería como incompletas.
+- **El filtro `Destinatario` es *tiene o no*, no un select de cuentas** (a diferencia de Adopciones). Sólo 6 filas tienen destinatario, así que "cuál" no es una pregunta que alguien se haga.
+- **`Destino` y `Visible` se muestran en Consultar aunque vengan vacías o constantes** (destino `''` en todas, visible `1` en todas). Son columnas de la tabla: esconderlas haría que la ficha no coincida con lo que el Explorador DB muestra de la misma fila.
+- **Ocho tarjetas media + `Mensaje` full en la ranura 9** (impar). Agregar o quitar un campo obliga a rehacer esa cuenta (§25).
+- **Sin ventana por `id`** como la de Registros o Señales: son 68.717 filas, no 3 millones. Medido en dev, el listado de 100 con los dos `LEFT JOIN` tarda 2,5 ms. El orden es por `id` —no por `fecha`, que no tiene índice— y con filtro por dominio sale de `fk_notificaciones_dominio`, que en InnoDB es `(dominio, id)`, con `Backward index scan` y sin filesort.
+
+---
+
+## 37. Comunicación · Difusión
+
+Envíos de correo a los usuarios del sistema. Es el **único módulo de cloud que produce un efecto fuera de la plataforma**: lo que sale no se puede dar de baja. Todo el diseño de la pantalla está puesto al servicio de eso — que el operador vea a cuántos le va a llegar antes de confirmar, y que después pueda saber a quién le llegó y a quién no.
+
+Escribe `difusiones` (la campaña) y `difusiones_destinatarios` (una fila por persona), creadas por `cloud/sql/migrations/20260908_1000_crear_difusiones.sql`. El canal es el **mismo que el de las invitaciones**: el microservicio de Databox vía `lib/databox.php`, copia idéntica de la del panel y la de la app.
+
+### 37.1 Barra de progreso
+
+```css
+/* Aparece en dos tamaños y es EL MISMO componente: en la celda `Progreso` del
+   listado (compacta) y en el modal de envío (.dif-progreso-lg), donde se mueve
+   en vivo. Que sean la misma pieza es el punto: lo que se ve durante el envío
+   tiene que ser lo mismo que después queda en la fila. */
+.dif-progreso          { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+.dif-progreso-barra    { height: 6px; background: var(--bg); border-radius: 999px;
+                         overflow: hidden; border: 1px solid var(--border); }
+/* `width` la escribe el JS. La transición es lo que hace legible el avance por
+   lotes: sin ella la barra salta de a 20 destinatarios y se lee como un
+   parpadeo, no como progreso. */
+.dif-progreso-relleno  { height: 100%; background: var(--primary); width: 0;
+                         transition: width .3s ease; }
+.dif-progreso-cifras   { display: flex; justify-content: space-between; gap: 8px;
+                         font-size: .75rem; color: var(--muted); font-family: monospace; }
+.dif-progreso-fallidos { color: var(--danger); }
+.dif-progreso-lg                      { min-width: 0; gap: 8px; margin: 14px 0; }
+.dif-progreso-lg .dif-progreso-barra  { height: 12px; }
+.dif-progreso-lg .dif-progreso-cifras { font-size: .82rem; }
+```
+
+### 37.2 Bloque de audiencia (modal de alta)
+
+```css
+/* El número que el operador confirma. Se destaca porque es el dato que decide
+   el envío — no un hint del formulario. */
+.dif-audiencia        { background: var(--bg); border: 1px solid var(--border);
+                        border-radius: var(--radius); padding: 12px 14px;
+                        display: flex; flex-direction: column; gap: 6px; }
+.dif-audiencia-total  { display: flex; align-items: baseline; gap: 8px;
+                        font-size: .85rem; color: var(--muted); }
+.dif-audiencia-numero { font-size: 1.5rem; font-weight: 700; color: var(--text); line-height: 1; }
+.dif-audiencia-nota   { font-size: .78rem; color: var(--muted); line-height: 1.45;
+                        word-break: break-word; }
+```
+
+### 37.3 Pestaña Destinatarios (modal de consulta)
+
+```css
+/* Buscador + chips por estado arriba de la tabla: la misma forma de la toolbar
+   del listado (§9), en chico. */
+.dif-dest-toolbar { display: flex; align-items: center; justify-content: space-between;
+                    gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.dif-dest-chips   { display: flex; gap: 6px; flex-wrap: wrap; }
+.dif-dest-error   { color: var(--danger); font-size: .78rem; word-break: break-word; }
+/* El cuerpo del correo se muestra tal como se escribió: los saltos de línea son
+   parte del mensaje que salió, así que `pre-wrap` y no un párrafo reflowado. */
+.dif-cuerpo       { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+.dif-envio-asunto { font-size: .95rem; font-weight: 600; color: var(--text); word-break: break-word; }
+.dif-envio-error  { color: var(--danger); font-weight: 600; }
+```
+
+### 37.4 Reglas
+
+- **LA LISTA DE DESTINATARIOS SE CONGELA AL CREAR LA DIFUSIÓN.** El alta inserta una fila por persona —con el correo y el nombre **copiados** de `usuarios`— dentro de la misma transacción. El número que el operador confirmó es el que se guarda: si la consulta se repitiera al enviar, un alta hecha entre medio recibiría un correo que nadie decidió mandarle. Y el correo se copia además de la FK porque **es lo que se le mandó**: si esa cuenta después lo cambia, el historial tiene que seguir diciendo a qué dirección salió.
+- **EL ALCANCE POR DOMINIO SALE DE `perfiles`, NO DE `usuarios.dominio`.** Esa columna es el dominio **activo** —el último que la persona usó en cualquiera de los sistemas que comparten la tabla— y no la lista de dominios a los que puede entrar. Medido en dev: el dominio 135 tiene 148 cuentas con ese dominio activo y 143 con perfil habilitado ahí, y **ninguna de las dos listas contiene a la otra** (el 241 da 140 contra 141). Es el mismo razonamiento con el que el módulo Usuarios del panel lista su gente.
+- **`dominio = NULL` significa "todos los dominios" y es un valor, no un faltante.** Por eso el alcance global se pinta con badge (`Todos los dominios`) y no con un guion, y por eso la FK es `ON DELETE SET NULL`: si el dominio se elimina, la campaña queda como historial sin dominio.
+- **EL ENVÍO SE DRENA POR LOTES Y LO MANEJA EL NAVEGADOR** (`POST ?enviar=1`, 20 por request; el bucle vive en `openDifusionEnvioModal()`). Tres razones, en orden: **(1)** son hasta 2.055 correos —uno por destinatario, porque el microservicio recibe un `destino` por llamada— y una sola request se come cualquier timeout; **(2)** cron no sirve como camino silencioso, porque el Programador de tareas depende de cronie + `/etc/cron.d` instalados al aprovisionar y el deploy no los toca: una difusión colgada de él podría no salir nunca con la pantalla diciendo "enviando"; **(3)** así es **reanudable**, que es lo que de verdad importa.
+- **El estado es la tabla, no la memoria del navegador.** Cada lote devuelve los contadores **contados sobre la tabla hija** (nunca `enviados + N`, que se desincroniza en cuanto dos pestañas drenan la misma campaña), y cada destinatario se marca **apenas vuelve su llamada**, no al cerrar el lote. Por eso cortar a la mitad no repite envíos y `Reanudar envío` sigue por donde iba.
+- **CERRAR EL MODAL DE PROGRESO NO CANCELA NADA**: sólo corta el bucle. Cancelar es una acción explícita del menú de la fila que cambia el estado en la base, y **deja las pendientes pendientes** — cancelar no es descartar la lista, es dejar de mandar. Lo que faltaba queda visible en la ficha, que es la única forma de saber a quién no le llegó.
+- **Un destino que rebota no corta el lote.** `databoxCorreoEncolar()` nunca lanza: devuelve `['ok' => false, ...]`, esa fila queda `fallido` **con el motivo guardado** y el bucle sigue. Cortar en el primer error dejaría el resto sin mandar por una dirección mal escrita.
+- **Se deduplica por correo en minúsculas y se descarta lo que no es una dirección.** La misma persona puede tener varias cuentas (10 correos repetidos en dev) y sin el filtro recibiría el mismo mensaje dos veces; y una fila tiene `robertomaguero.se@gmail`, sin dominio de primer nivel. **Cuántas quedaron afuera se muestra**, no se descarta en silencio: si no, el total de la pantalla no cierra con el de la base y nadie sabe por qué.
+- **NO HAY EDICIÓN: el endpoint no tiene `PUT`.** Una difusión emitida es lo que la gente recibió; reescribirla dejaría el historial diciendo algo distinto de lo que salió. Por eso el modal de alta es sólo de alta y su acción primaria dice **`Enviar`** y no `Guardar` (única excepción al rótulo de §21-bis para formularios): una difusión guardada y sin mandar no le sirve a nadie.
+- **El envío pasa por `confirmDialog` con el número a la vista**, en tono `primary` y no `danger` (§15): no borra nada, pero es irreversible y le llega a miles de personas, y el alcance se elige con un select que es fácil de dejar en `Todos los dominios` sin querer.
+- **EL CUERPO SE ESCAPA: el HTML que se pegue se ve tal cual, no se interpreta.** El operador escribe texto; los párrafos se arman por línea en blanco y los saltos sueltos con `<br>`. Aceptar HTML crudo dejaría que un `<div>` sin cerrar rompa la plantilla de Databox para los 2.000 destinatarios, y no hay pantalla de previsualización que lo muestre antes. El día que haga falta formato va un editor que **produzca** el HTML, no el permiso de pegarlo.
+- **Consultar son dos pestañas** (§25 para las tarjetas, y el conmutador es `wireModalTabs()`): `General` con la campaña —**diez tarjetas media entre dos full** (`Asunto` arriba, `Mensaje` abajo): cinco renglones que cierran de a dos, y agregar un campo deja la cuenta impar— y `Destinatarios`, que es la razón de ser del módulo cuando algo sale mal. Esa segunda trae **buscador y chips por estado** porque la respuesta a *"¿le llegó a Fulano?"* está entre hasta 2.000 filas.
+- **La ficha se pide por id (`GET ?id=N`), no viaja en el listado**: serían hasta 2.000 filas por difusión repetidas en cada render de la tabla.
+- **La baja va con el modal de desglose** (§15.1) aunque no haya bloqueos: la única FK que apunta a `difusiones` es CASCADE, pero la baja se lleva el registro de a quién le llegó. Y **una difusión `enviando` no se borra**: primero se cancela, o el operador se queda sin la lista que justamente hay que mirar después de interrumpir un envío.
+- **`emisor` es un `controladores`.`id`**, no un `usuarios`.`id`: a cloud se entra con una cuenta de esa tabla desde el 07/09/2026. La FK es `ON DELETE SET NULL` con el mismo criterio que `perfiles`.`registrante` — apunta a quien **disparó** el envío, no a quien pertenece.
+
+---
+
 ## Reglas duras (criterios de aceptación)
 
 1. **Ningún color hardcodeado** en el HTML/CSS final. Todo sale de las variables.
@@ -2196,5 +2349,5 @@ rellenaban las dos columnas:
 7. **Densidad**: padding `10–14px` en celdas; gaps `12–20px` entre cards.
 8. **Mobile**: `<768px` colapsa sidebar a overlay; grids `form-row*` a una columna.
 9. **Sin librerías UI pesadas** (Bootstrap / Tailwind / Material). CSS plano + variables.
-10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los doce módulos. Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
+10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los diecisiete módulos. Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
 11. **Si dudás, mirá los componentes de arriba antes de crear uno nuevo.**

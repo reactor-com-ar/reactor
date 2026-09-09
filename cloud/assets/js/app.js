@@ -571,6 +571,399 @@
         return mostrar;
     }
 
+    /* ---------- Combo con buscador (autocompletar) ----------
+       DESIGN.md §34-bis. Un input de texto que filtra un catálogo mientras se
+       escribe y devuelve el id de lo elegido. Reemplaza al `<select>` cuando el
+       catálogo es largo y la opción no se reconoce por su nombre: en Perfiles
+       hay ~2.000 usuarios y varias Marías, así que "elegir de la lista" es
+       imposible sin poder buscar por el correo o el celular.
+
+       FILTRA EN EL NAVEGADOR, no contra el backend: los dos catálogos que hoy
+       lo usan (usuarios y dominios) ya viajan enteros con el listado, así que un
+       endpoint de búsqueda agregaría un request por tecla para datos que ya
+       están en memoria. El índice se arma una sola vez al cablear el control.
+
+       NO reemplaza a `<select>` en general — un catálogo corto y cerrado (Tipo,
+       Estado) se lee mejor desplegado, y ahí un campo de texto es peor. */
+
+    /* Máximo de filas que dibuja el desplegable. Lo que queda afuera se dice en
+       el pie de la lista: un corte silencioso se lee como "no hay más". */
+    const COMBO_MAX = 50;
+
+    /* Normaliza para comparar: minúsculas y sin acentos, así `maria` encuentra
+       a `María`.
+
+       Va CARACTER POR CARACTER y sólo reemplaza cuando el resultado sigue
+       midiendo uno, para que el índice de una coincidencia en la cadena
+       normalizada sea el mismo índice en la original — que es lo que necesita
+       `comboResaltar()` para no correr el subrayado. Un `.normalize('NFD')`
+       sobre la cadena entera separa el acento en un caracter aparte y desalinea
+       todo lo que viene después. */
+    function comboNormalizar(s) {
+        return String(s ?? '').split('').map(c => {
+            const min = c.toLowerCase();
+            // \u0300-\u036f son las marcas diacríticas que NFD separa de su
+            // letra. Van escapadas y no como literales, igual que en
+            // `slugificar()`: pegadas en el archivo son caracteres invisibles
+            // que cualquier editor puede comerse.
+            const n   = min.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            return n.length === 1 ? n : c;
+        }).join('');
+    }
+
+    /* Los dígitos sueltos de un texto. En la base un celular son diez dígitos y
+       nada más (CLAUDE.md), pero quien busca lo escribe como lo tiene anotado:
+       `264-412`, `(264) 412`. Comparando sólo dígitos contra sólo dígitos las
+       dos formas encuentran a `2644123456`. */
+    function comboDigitos(s) {
+        return String(s ?? '').replace(/\D+/g, '');
+    }
+
+    /* Lo tipeado, partido en términos. */
+    function comboTokens(consulta) {
+        return comboNormalizar(consulta).trim().split(/\s+/).filter(Boolean);
+    }
+
+    /* Índice de búsqueda del catálogo: por cada item, sus claves ya normalizadas
+       y los dígitos de cada una. Se calcula UNA vez al cablear el combo — con
+       2.000 usuarios × 3 campos, rehacerlo en cada tecla son 6.000
+       normalizaciones por pulsación.
+
+       Los dígitos van por clave y no concatenados: pegando `...12` con `34...`
+       aparecería un `1234` que no está en ningún campo. */
+    function comboIndexar(items, clavesDe) {
+        return items.map(it => {
+            const claves = (clavesDe(it) || [])
+                .map(v => comboNormalizar(v))
+                .filter(Boolean);
+            return { it, claves, digitos: claves.map(comboDigitos).filter(Boolean) };
+        });
+    }
+
+    /* LOS TÉRMINOS SE CRUZAN CON Y; CADA UNO SE BUSCA EN TODAS LAS CLAVES CON O.
+       Escribir `mari 264` pide las Marías/Marianos que ADEMÁS tengan `264` en
+       alguno de sus campos (típicamente el celular), no la unión de las dos
+       búsquedas. Es lo que hace que el control sirva para lo que se pidió:
+       desambiguar entre homónimos, donde el nombre solo no alcanza.
+
+       Con la O al revés —mostrar todo lo que coincida con cualquier término— el
+       segundo término AGRANDA el resultado en vez de acotarlo, y el buscador
+       empeora justo cuando más se lo necesita. */
+    function comboCoincide(entrada, tokens) {
+        return tokens.every(t => {
+            if (entrada.claves.some(k => k.includes(t))) return true;
+            const d = comboDigitos(t);
+            return d !== '' && entrada.digitos.some(k => k.includes(d));
+        });
+    }
+
+    /* Resultados ordenados: primero lo que EMPIEZA con el primer término en su
+       clave principal, después lo que empieza en cualquier otra, y al final lo
+       que sólo lo contiene; dentro de cada grupo, alfabético. Con diez Marías,
+       `mari` tiene que traer arriba a las que se llaman así y no a la que lo
+       tiene en el apellido o en el correo. */
+    function comboFiltrar(indice, consulta) {
+        const tokens = comboTokens(consulta);
+        const hits   = tokens.length ? indice.filter(x => comboCoincide(x, tokens)) : indice;
+        const primero = tokens[0] || '';
+
+        return hits
+            .map(x => ({
+                it:    x.it,
+                rank:  !primero ? 0
+                     : (x.claves[0] || '').startsWith(primero) ? 0
+                     : x.claves.some(k => k.startsWith(primero)) ? 1
+                     : 2,
+                orden: x.claves[0] || '',
+            }))
+            .sort((a, b) => a.rank - b.rank ||
+                            a.orden.localeCompare(b.orden, 'es', { numeric: true }))
+            .map(x => x.it);
+    }
+
+    /* Marca en el texto los pedazos que hicieron match, para que se vea POR QUÉ
+       entró una fila: buscando en tres campos a la vez, una María que aparece
+       por su celular es indistinguible de una que aparece por su nombre.
+
+       Escapa POR SEGMENTO y nunca la cadena entera antes de buscar: `&` se
+       convierte en `&amp;` y cualquier índice calculado sobre el HTML deja de
+       apuntar al mismo lugar. */
+    function comboResaltar(texto, tokens) {
+        const s = String(texto ?? '');
+        if (!s || !tokens.length) return escape(s);
+
+        const norm    = comboNormalizar(s);
+        const marcado = new Array(s.length).fill(false);
+        tokens.forEach(t => {
+            for (let i = norm.indexOf(t); i !== -1; i = norm.indexOf(t, i + 1)) {
+                for (let j = i; j < i + t.length; j++) marcado[j] = true;
+            }
+        });
+
+        let out = '', i = 0;
+        while (i < s.length) {
+            const on = marcado[i];
+            let j = i;
+            while (j < s.length && marcado[j] === on) j++;
+            const trozo = escape(s.slice(i, j));
+            out += on ? `<mark class="combo-hit">${trozo}</mark>` : trozo;
+            i = j;
+        }
+        return out;
+    }
+
+    /* Markup del control. `id` es el del input OCULTO —el que lleva el id
+       elegido—, así el resto del formulario lo lee igual que leía al `<select>`
+       al que reemplaza, y el `#${id}-err` de la validación no cambia.
+
+       `disabled` dibuja sólo el texto: es el modo del formulario de edición,
+       donde el usuario y el dominio del perfil no se tocan (cambiarlos no edita
+       el acceso, crea otro). */
+    function comboHtml({ id, placeholder = '', texto = '', valor = '', disabled = false }) {
+        const limpiar = disabled ? '' : `
+            <button type="button" class="combo-clear" data-act="combo-clear"
+                    title="Limpiar" aria-label="Limpiar"${texto ? '' : ' hidden'}>×</button>`;
+
+        return `
+            <div class="combo" data-combo="${escape(id)}">
+                <input type="text" class="combo-input" id="${escape(id)}-q"
+                       role="combobox" aria-expanded="false" aria-autocomplete="list"
+                       autocomplete="off" autocapitalize="none" spellcheck="false"
+                       placeholder="${escape(placeholder)}" value="${escape(texto)}"
+                       ${disabled ? 'disabled' : ''}>
+                <input type="hidden" id="${escape(id)}" value="${escape(String(valor || ''))}">
+                ${limpiar}
+            </div>
+        `;
+    }
+
+    /* Cablea un `comboHtml()`. Recibe:
+         - items     el catálogo completo, ya en memoria.
+         - clavesDe  campos por los que se busca. EL PRIMERO ES EL PRINCIPAL:
+                     ordena los resultados y decide qué empieza con qué.
+         - textoDe   qué queda escrito en el campo al elegir.
+         - filaDe    `{ titulo, detalle }` de cada fila del desplegable.
+         - onChange  corre al elegir y al limpiar, con el item o con `null`.
+         - vacio     qué decir cuando no coincide nada.
+       Devuelve el control: `valor()`, `item()`, `elegir()`, `focus()`,
+       `marcarInvalido()` y `destruir()` — este último hay que llamarlo al cerrar
+       el modal, porque el desplegable cuelga del `<body>` y no del modal. */
+    function wireCombo(scope, id, { items, clavesDe, textoDe, filaDe, onChange, vacio }) {
+        const wrap   = scope.querySelector(`[data-combo="${id}"]`);
+        const input  = wrap.querySelector('.combo-input');
+        const hidden = wrap.querySelector('input[type="hidden"]');
+        const limpiar = wrap.querySelector('.combo-clear');
+
+        const indice = comboIndexar(items, clavesDe);
+
+        let seleccion = items.find(it => String(it.id) === String(hidden.value)) || null;
+        let visibles  = [];
+        let activo    = -1;
+        let pop       = null;
+
+        /* El desplegable va colgado del `<body>` y en coordenadas de viewport
+           (`position: fixed`), por lo mismo que el menú contextual de las filas:
+           dentro del modal lo recortaría el `overflow-y` del `.modal-body`.
+           Y se REPOSICIONA al scrollear en vez de cerrarse como hace aquél —
+           acá el foco está en el campo y cerrar la lista mientras se escribe
+           deja al control mudo. */
+        function posicionar() {
+            if (!pop) return;
+            const r = input.getBoundingClientRect();
+            pop.style.width = `${r.width}px`;
+            pop.style.left  = `${Math.max(8, Math.min(r.left, window.innerWidth - r.width - 8))}px`;
+
+            // Abajo del campo salvo que no entre y arriba sí: ahí se da vuelta.
+            const alto  = pop.offsetHeight;
+            const abajo = window.innerHeight - r.bottom - 8;
+            pop.style.top = (alto > abajo && r.top - 8 > abajo)
+                ? `${Math.max(8, r.top - alto - 4)}px`
+                : `${r.bottom + 4}px`;
+        }
+
+        function pintarActivo() {
+            if (!pop) return;
+            pop.querySelectorAll('.combo-item').forEach((el, i) => {
+                const on = i === activo;
+                el.classList.toggle('is-active', on);
+                el.setAttribute('aria-selected', on ? 'true' : 'false');
+                if (on) el.scrollIntoView({ block: 'nearest' });
+            });
+        }
+
+        function render() {
+            if (!pop) return;
+
+            const consulta = input.value;
+            const tokens   = comboTokens(consulta);
+            const todos    = comboFiltrar(indice, consulta);
+
+            visibles = todos.slice(0, COMBO_MAX);
+            activo   = -1;
+
+            if (!visibles.length) {
+                pop.innerHTML = `<div class="combo-vacio">${escape(vacio || 'Sin coincidencias.')}</div>`;
+            } else {
+                const filas = visibles.map((it, i) => {
+                    const f = filaDe(it) || {};
+                    const detalle = f.detalle
+                        ? `<span class="combo-item-detalle">${comboResaltar(f.detalle, tokens)}</span>`
+                        : '';
+                    return `<button type="button" class="combo-item" data-idx="${i}"
+                                    role="option" aria-selected="false">
+                                <span class="combo-item-titulo">${comboResaltar(f.titulo, tokens)}</span>
+                                ${detalle}
+                            </button>`;
+                }).join('');
+
+                // El resto no se recorta en silencio: sin este pie, 50 de 2.000
+                // se leen como "no hay más" y nadie sigue escribiendo.
+                const resto = todos.length - visibles.length;
+                pop.innerHTML = filas + (resto > 0
+                    ? `<div class="combo-pie">y ${resto} más — seguí escribiendo para acotar</div>`
+                    : '');
+            }
+
+            pop.scrollTop = 0;
+            posicionar();
+        }
+
+        function abrir() {
+            if (!pop) {
+                pop = document.createElement('div');
+                pop.className = 'combo-pop';
+                pop.setAttribute('role', 'listbox');
+                document.body.appendChild(pop);
+                /* El foco se queda en el campo aunque se elija con el mouse: si
+                   se fuera a la fila, después de elegir quedaría en un nodo
+                   recién borrado y el Tab siguiente arrancaría desde el
+                   principio del documento. Se exceptúa el click sobre la barra
+                   de scroll de la lista —`offsetX` más allá del ancho útil—,
+                   donde `preventDefault()` rompe el arrastre. */
+                pop.addEventListener('mousedown', e => {
+                    if (e.offsetX <= pop.clientWidth) e.preventDefault();
+                });
+                pop.addEventListener('click', e => {
+                    const fila = e.target.closest('[data-idx]');
+                    if (fila) elegir(visibles[+fila.dataset.idx]);
+                });
+                input.setAttribute('aria-expanded', 'true');
+            }
+            render();
+        }
+
+        function cerrar() {
+            if (pop) { pop.remove(); pop = null; }
+            activo = -1;
+            input.setAttribute('aria-expanded', 'false');
+        }
+
+        /* Salir del control sin haber elegido NO deja lo tipeado escrito: un
+           texto sin id abajo se lee como una selección hecha, y el Guardar
+           cortaría con "Elegí un usuario" sobre un campo que parece lleno. */
+        function salir() {
+            cerrar();
+            input.value = seleccion ? textoDe(seleccion) : '';
+            if (limpiar) limpiar.hidden = !input.value;
+        }
+
+        function elegir(it) {
+            seleccion    = it || null;
+            hidden.value = it ? String(it.id) : '';
+            input.value  = it ? textoDe(it) : '';
+            if (limpiar) limpiar.hidden = !input.value;
+            input.classList.remove('input-invalid');
+            cerrar();
+            if (typeof onChange === 'function') onChange(seleccion);
+        }
+
+        function mover(delta) {
+            if (!pop) { abrir(); return; }
+            if (!visibles.length) return;
+            activo = activo < 0
+                ? (delta > 0 ? 0 : visibles.length - 1)
+                : (activo + delta + visibles.length) % visibles.length;
+            pintarActivo();
+        }
+
+        input.addEventListener('input', () => {
+            /* Escribir INVALIDA lo elegido. El id viejo conviviendo con un texto
+               nuevo es justo el estado que hace guardar algo distinto de lo que
+               se está leyendo en pantalla. */
+            if (seleccion && input.value !== textoDe(seleccion)) {
+                seleccion    = null;
+                hidden.value = '';
+                if (typeof onChange === 'function') onChange(null);
+            }
+            if (limpiar) limpiar.hidden = !input.value;
+            abrir();
+        });
+
+        /* El foco por código NO abre la lista. El formulario enfoca este campo
+           al abrir el modal, y ahí el desplegable saldría mal puesto: el modal
+           entra con una transición de `transform`, así que el rectángulo que
+           mediría `posicionar()` es el del campo todavía corrido y en escala.
+           Además el modal abriría tapado por 50 filas que nadie pidió. */
+        let sinAbrir = false;
+        input.addEventListener('focus', () => {
+            if (sinAbrir) { sinAbrir = false; return; }
+            abrir();
+        });
+        input.addEventListener('mousedown', () => { if (!pop) abrir(); });
+
+        input.addEventListener('keydown', e => {
+            if (e.key === 'ArrowDown')      { e.preventDefault(); mover(1); }
+            else if (e.key === 'ArrowUp')   { e.preventDefault(); mover(-1); }
+            else if (e.key === 'Enter' && pop) {
+                // Sólo intercepta el Enter si hay una fila marcada: si no, deja
+                // pasar la tecla en vez de tragársela.
+                if (activo >= 0) { e.preventDefault(); elegir(visibles[activo]); }
+            } else if (e.key === 'Escape' && pop) {
+                // No propaga: el Escape con la lista abierta la cierra a ella,
+                // no al modal que la contiene.
+                e.stopPropagation();
+                salir();
+            } else if (e.key === 'Tab') {
+                salir();
+            }
+        });
+
+        if (limpiar) {
+            limpiar.addEventListener('click', () => { elegir(null); input.focus(); });
+        }
+
+        /* Cierre por click afuera, igual que el menú contextual de las filas. El
+           `blur` NO sirve de disparador: también cae al arrastrar la barra de
+           scroll de la lista, y ahí cerrarla es lo contrario de lo que se pidió.
+           Por eso el `mousedown` mira si el click cayó dentro del control o del
+           desplegable — el de la barra de scroll tiene al `.combo-pop` de
+           target. */
+        const afuera = e => {
+            if (!pop) return;
+            if (wrap.contains(e.target) || pop.contains(e.target)) return;
+            salir();
+        };
+        document.addEventListener('mousedown', afuera, true);
+        window.addEventListener('scroll', posicionar, true);
+        window.addEventListener('resize', posicionar);
+
+        function destruir() {
+            cerrar();
+            document.removeEventListener('mousedown', afuera, true);
+            window.removeEventListener('scroll', posicionar, true);
+            window.removeEventListener('resize', posicionar);
+        }
+
+        return {
+            valor:  () => hidden.value,
+            item:   () => seleccion,
+            elegir,
+            focus:  () => { sinAbrir = true; input.focus(); },
+            marcarInvalido: (si = true) => input.classList.toggle('input-invalid', si),
+            destruir,
+        };
+    }
+
     /* ---------- Views: Dashboard ---------- */
     async function renderDashboard(root) {
         try {
@@ -7765,27 +8158,78 @@
         return out;
     }
 
+    /* Cómo se nombra un usuario y un dominio en el combo del formulario, y por
+       qué campos se los busca. Van juntos a propósito: el texto que queda
+       escrito al elegir tiene que estar hecho de los mismos campos por los que
+       se buscó, o el resultado de una búsqueda por celular queda escrito sin el
+       celular a la vista y no se puede confirmar que se eligió a la persona
+       correcta.
+
+       LAS CLAVES SON LAS DEL BUSCADOR RÁPIDO DE CADA MÓDULO, no una lista nueva:
+       Usuarios busca por correo + nombre + celular y Dominios por nombre +
+       número + uuid. Si el combo buscara por otros campos, el mismo texto daría
+       resultados distintos según la pantalla. */
+    const COMBO_USUARIO = {
+        clavesDe: u => [u.nombre, u.email, u.celular],
+        textoDe:  u => `${u.nombre} (${u.email})`,
+        filaDe:   u => ({
+            titulo:  u.nombre || `Usuario #${u.id}`,
+            // El celular entra en el detalle porque es una de las tres claves:
+            // sin mostrarlo, una fila que entró por el teléfono se ve idéntica a
+            // las demás y el resaltado no tiene dónde marcar.
+            detalle: [u.email, u.celular].filter(Boolean).join(' · '),
+        }),
+    };
+
+    const COMBO_DOMINIO = {
+        clavesDe: d => [d.nombre, d.numero, d.uuid],
+        textoDe:  d => d.nombre,
+        filaDe:   d => ({
+            titulo:  d.nombre || `Dominio #${d.id}`,
+            detalle: [d.numero ? `N° ${d.numero}` : '', d.cliente_nombre].filter(Boolean).join(' · '),
+        }),
+    };
+
     function openProfileModal(prf, allUsuarios, allDominios) {
         const isEdit = !!prf;
 
-        const usrOpts = ['<option value="">Elegí un usuario…</option>'].concat(
-            allUsuarios.map(u =>
-                `<option value="${u.id}" ${prf?.usuario_id === u.id ? 'selected' : ''}>${escape(u.nombre)} (${escape(u.email)})</option>`
-            )
-        ).join('');
+        /* El usuario y el dominio se eligen con un combo con buscador y no con
+           un `<select>` (DESIGN.md §34-bis): son ~2.000 usuarios y ~700
+           dominios, y sobre todo hay homónimos — desplegada, la lista de Marías
+           no se puede desambiguar, porque el nombre es lo único que un `<option>`
+           deja ver. Con el combo se busca además por correo y por celular.
 
-        const domOpts = ['<option value="">Elegí un dominio…</option>'].concat(
-            allDominios.map(d =>
-                `<option value="${d.id}" ${prf?.dominio_id === d.id ? 'selected' : ''}>${escape(d.nombre)}</option>`
-            )
-        ).join('');
+           En EDICIÓN los dos van deshabilitados, como iban los selects: cambiar
+           el usuario o el dominio no edita este acceso, crea otro. */
+        const usrElegido = isEdit ? allUsuarios.find(u => u.id === prf.usuario_id) : null;
+        const domElegido = isEdit ? allDominios.find(d => d.id === prf.dominio_id) : null;
+
+        const usrCombo = comboHtml({
+            id: 'prf-usuario',
+            placeholder: 'Nombre, correo o celular — ej.: mari 264',
+            texto: isEdit
+                ? (usrElegido ? COMBO_USUARIO.textoDe(usrElegido) : (prf.usuario_nombre || `#${prf.usuario_id}`))
+                : '',
+            valor: isEdit ? prf.usuario_id : '',
+            disabled: isEdit,
+        });
+
+        const domCombo = comboHtml({
+            id: 'prf-dominio',
+            placeholder: 'Nombre o número del dominio',
+            texto: isEdit
+                ? (domElegido ? COMBO_DOMINIO.textoDe(domElegido) : (prf.dominio_nombre || `#${prf.dominio_id}`))
+                : '',
+            valor: isEdit ? prf.dominio_id : '',
+            disabled: isEdit,
+        });
 
         const tipoOpts = TIPOS_PERFIL.map(t =>
             `<option value="${t.value}" ${(prf?.tipo ?? 'O') === t.value ? 'selected' : ''}>${escape(t.label)}</option>`
         ).join('');
         const activoInicial  = prf ? !!prf.activo : true;
-        // En edición el dominio está fijo (el select va disabled); en el alta
-        // arranca vacío y el selector de paneles se rearma al elegirlo.
+        // En edición el dominio está fijo (el combo va deshabilitado); en el
+        // alta arranca vacío y el selector de paneles se rearma al elegirlo.
         const dominioInicial = prf ? prf.dominio_id : 0;
 
         /* Permisos iniciales. EL ALTA PRE-TILDA `operacion` E `invitacion` y deja
@@ -7823,13 +8267,13 @@
                     </div>
                     <div class="modal-tabpanel" data-panel="general">
                         <div class="form-group">
-                            <label for="prf-usuario">Usuario</label>
-                            <select id="prf-usuario" ${isEdit ? 'disabled' : ''}>${usrOpts}</select>
+                            <label for="prf-usuario-q">Usuario</label>
+                            ${usrCombo}
                             <div class="field-error" id="prf-usuario-err" style="display:none"></div>
                         </div>
                         <div class="form-group">
-                            <label for="prf-dominio">Dominio</label>
-                            <select id="prf-dominio" ${isEdit ? 'disabled' : ''}>${domOpts}</select>
+                            <label for="prf-dominio-q">Dominio</label>
+                            ${domCombo}
                             <div class="field-error" id="prf-dominio-err" style="display:none"></div>
                         </div>
                         <div class="form-group">
@@ -7862,7 +8306,12 @@
         document.body.appendChild(backdrop);
         requestAnimationFrame(() => backdrop.classList.add('open'));
 
+        // Los combos se destruyen con el modal: su desplegable cuelga del
+        // `<body>` y sus listeners de scroll/resize son globales, así que
+        // sacar el backdrop no alcanza para llevárselos.
+        const combos = [];
         const close = () => {
+            combos.forEach(c => c.destruir());
             backdrop.classList.remove('open');
             setTimeout(() => backdrop.remove(), 200);
         };
@@ -7870,8 +8319,6 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        const usrSel     = backdrop.querySelector('#prf-usuario');
-        const domSel     = backdrop.querySelector('#prf-dominio');
         // `mostrarPestana` se guarda porque el Guardar la necesita: si la
         // validación falla en un campo de General y el operador está parado en
         // Paneles, hay que traerlo de vuelta o el error queda invisible.
@@ -7899,25 +8346,45 @@
             activoLbl.textContent = activoChk.checked ? 'Sí' : 'No';
         });
 
-        // Al cambiar el dominio la selección previa deja de valer: los paneles
-        // eran de otro dominio y el backend los rechazaría con 422.
+        // En edición los dos combos van deshabilitados y no se cablean: no hay
+        // nada que buscar ni que elegir, y el Guardar de esa rama no los lee.
+        let usrCtrl = null;
+        let domCtrl = null;
         if (!isEdit) {
-            // Todos tildados por defecto, no ninguno: es lo que hace que un perfil
-            // nuevo tenga el mismo acceso que los que sembró la migración.
-            domSel.addEventListener('change', () => {
-                const d = +domSel.value || 0;
-                montarPaneles(d, panelesDelDominio(d));
+            usrCtrl = wireCombo(backdrop, 'prf-usuario', {
+                items: allUsuarios,
+                ...COMBO_USUARIO,
+                vacio: 'Ningún usuario coincide con esa búsqueda.',
             });
+
+            // Al cambiar el dominio la selección de paneles previa deja de
+            // valer: eran de otro dominio y el backend los rechazaría con 422.
+            // Los del dominio nuevo nacen TODOS tildados, no ninguno: es lo que
+            // hace que un perfil nuevo tenga el mismo acceso que los que sembró
+            // la migración. Limpiar el campo deja la lista vacía otra vez, que
+            // es lo que corresponde cuando no hay dominio elegido.
+            domCtrl = wireCombo(backdrop, 'prf-dominio', {
+                items: allDominios,
+                ...COMBO_DOMINIO,
+                vacio: 'Ningún dominio coincide con esa búsqueda.',
+                onChange: dom => {
+                    const d = dom ? dom.id : 0;
+                    montarPaneles(d, panelesDelDominio(d));
+                },
+            });
+
+            combos.push(usrCtrl, domCtrl);
         }
 
-        (isEdit ? tipoSel : usrSel).focus();
+        if (isEdit) tipoSel.focus();
+        else        usrCtrl.focus();
 
         saveBtn.addEventListener('click', async () => {
             const tipo   = tipoSel.value;
             const activo = activoChk.checked;
 
             [usrErr, domErr].forEach(el => el.style.display = 'none');
-            [usrSel, domSel].forEach(el => el.classList.remove('input-invalid'));
+            [usrCtrl, domCtrl].forEach(c => c?.marcarInvalido(false));
 
             const permisos = readPermisosLista(backdrop);
 
@@ -7935,21 +8402,24 @@
                 return;
             }
 
-            const usuario_id = +usrSel.value;
-            const dominio_id = +domSel.value;
+            // Del combo sale el id de lo ELEGIDO, nunca lo tipeado: escribir sin
+            // elegir deja el valor vacío a propósito (ver `wireCombo`), y por
+            // eso el mensaje pide elegir de la lista y no "completar el campo".
+            const usuario_id = +usrCtrl.valor();
+            const dominio_id = +domCtrl.valor();
 
             let firstInvalid = null;
             if (!usuario_id) {
-                usrErr.textContent = 'Elegí un usuario';
+                usrErr.textContent = 'Elegí un usuario de la lista';
                 usrErr.style.display = 'block';
-                usrSel.classList.add('input-invalid');
-                firstInvalid = firstInvalid || usrSel;
+                usrCtrl.marcarInvalido();
+                firstInvalid = firstInvalid || usrCtrl;
             }
             if (!dominio_id) {
-                domErr.textContent = 'Elegí un dominio';
+                domErr.textContent = 'Elegí un dominio de la lista';
                 domErr.style.display = 'block';
-                domSel.classList.add('input-invalid');
-                firstInvalid = firstInvalid || domSel;
+                domCtrl.marcarInvalido();
+                firstInvalid = firstInvalid || domCtrl;
             }
             // Los dos campos que pueden fallar viven en General: si el foco
             // está en Paneles, primero se muestra la pestaña y recién después

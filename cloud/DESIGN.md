@@ -2078,10 +2078,85 @@ Control de modal de Alta/Edición para elegir un subconjunto de un catálogo de 
 - **El buscador esconde ítems y `Todos` / `Ninguno` operan sólo sobre lo visible.** Con un filtro activo, tildar lo que no se ve es una sorpresa.
 - **El contador (`N de M`) es del selector entero**, no del filtro: es lo que se va a guardar.
 - **`extraKey` elige la línea secundaria del ítem**, que se pinta como texto tenue. Hoy la usa sólo el selector de roles, para marcar los que están deshabilitados — se ofrecen igual, porque un rol apagado que alguien ya tiene asignado tiene que poder verse y quitarse; esconderlo lo volvería una asignación invisible.
-- **El selector de Perfiles se acota al dominio y se rearma al cambiarlo.** Los paneles de un dominio no son los de otro, así que en el alta el control se re-renderiza entero cada vez que cambia el select de dominio, descartando la selección previa (que el backend rechazaría con 422). Mientras no haya dominio elegido muestra *"Elegí primero un dominio"* en vez de una caja vacía.
+- **El selector de Perfiles se acota al dominio y se rearma al cambiarlo.** Los paneles de un dominio no son los de otro, así que en el alta el control se re-renderiza entero cada vez que cambia el campo Dominio (que es un combo con buscador, §34-bis), descartando la selección previa (que el backend rechazaría con 422). Mientras no haya dominio elegido muestra *"Elegí primero un dominio"* en vez de una caja vacía — y **limpiar el campo vuelve a ese estado**, porque el combo avisa el cambio también cuando queda vacío.
 - **La siembra de `20260906_1700` dejó a los 2225 perfiles existentes con todos los paneles de su dominio tildados explícitamente** (3598 filas). Por eso el alta pre-tilda todos los del dominio elegido, y por eso `panel/invitacion/aceptar.php` los inserta al crear el perfil: un perfil que naciera sin filas no podría usar la app.
 - **Ahí, no tildar nada significa "ningún panel".** El permiso es explícito y no hay fallback a "todos" — lo hubo mientras la tabla estaba vacía, y la siembra lo volvió innecesario. El selector lleva una línea debajo que lo dice, y tanto la celda del listado como la tarjeta de la ficha marcan ese estado en `badge-warn`, porque casi siempre es un error de carga y no una decisión.
 - **El guardado sincroniza por diferencia, no borra y reinserta.** `asignado` es la fecha en que se dio esa asignación, y reescribir la fila entera en cada guardado la volvería la fecha del último `Guardar`. Vale para los dos módulos (`sincronizarPermisos()` en `api/roles.php`, `sincronizarRoles()` en `api/controladores.php`).
+
+---
+
+
+## 34-bis. Combo con buscador (autocompletar)
+
+Campo de texto que **filtra un catálogo mientras se escribe** y guarda el id de lo elegido. Reemplaza al `<select>` cuando el catálogo es largo y la opción **no se reconoce por su nombre**.
+
+| módulo | campo | catálogo | se busca por |
+|---|---|---|---|
+| Perfiles (Alta) | Usuario | `usuarios` (~2.000) | nombre · correo · celular |
+| Perfiles (Alta) | Dominio | `dominios` (~700) | nombre · número · uuid |
+
+```html
+<div class="form-group">
+  <label for="prf-usuario-q">Usuario</label>
+  <div class="combo" data-combo="prf-usuario">
+    <input type="text" class="combo-input" id="prf-usuario-q"
+           role="combobox" aria-expanded="false" aria-autocomplete="list"
+           autocomplete="off" autocapitalize="none" spellcheck="false"
+           placeholder="Nombre, correo o celular — ej.: mari 264">
+    <input type="hidden" id="prf-usuario" value="">
+    <button type="button" class="combo-clear" data-act="combo-clear" aria-label="Limpiar" hidden>×</button>
+  </div>
+  <div class="field-error" id="prf-usuario-err" style="display:none"></div>
+</div>
+
+<!-- Colgado del <body>, no del modal -->
+<div class="combo-pop" role="listbox" style="position:fixed; left:…; top:…; width:…">
+  <button type="button" class="combo-item is-active" data-idx="0" role="option" aria-selected="true">
+    <span class="combo-item-titulo"><mark class="combo-hit">Mari</mark>ana Gómez</span>
+    <span class="combo-item-detalle">mariana@ejemplo.com · <mark class="combo-hit">264</mark>4123456</span>
+  </button>
+  <div class="combo-pie">y 37 más — seguí escribiendo para acotar</div>
+</div>
+```
+
+```css
+.combo              { position: relative; display: block; }
+.combo .combo-input { width: 100%; padding-right: 34px; }
+.combo-clear        { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+                      background: none; border: none; cursor: pointer; color: var(--muted); }
+.combo-pop          { position: fixed; z-index: 200; background: var(--surface);
+                      border: 1px solid var(--border); border-radius: var(--radius);
+                      box-shadow: var(--shadow-lg); max-height: 260px; overflow-y: auto; padding: 4px 0; }
+.combo-item         { display: flex; flex-direction: column; gap: 2px; width: 100%;
+                      text-align: left; padding: 7px 12px; background: none; border: none;
+                      cursor: pointer; font: inherit; color: var(--text); }
+.combo-item:hover,
+.combo-item.is-active { background: var(--row-hover); }
+.combo-item-titulo    { font-size: .88rem; }
+.combo-item-detalle   { font-size: .76rem; color: var(--muted); }
+.combo-hit            { background: rgba(193,19,19,.45); color: #fff; border-radius: 3px; }
+.combo-vacio,
+.combo-pie            { padding: 10px 12px; font-size: .8rem; color: var(--muted); text-align: center; }
+.combo-pie            { border-top: 1px solid var(--border); margin-top: 4px; }
+```
+
+**Reglas:**
+
+- **No reemplaza al `<select>` en general.** Un catálogo corto y cerrado —`Tipo`, `Estado`, `Sentido`— se lee mejor desplegado: ahí un campo de texto obliga a escribir lo que se podía ver. El combo entra cuando el catálogo es largo **y** el nombre no alcanza para identificar la opción. Los ~2.000 usuarios de Perfiles cumplen las dos: hay homónimos, y un `<option>` sólo deja ver el nombre.
+- **LOS TÉRMINOS SE CRUZAN CON `Y`; CADA UNO SE BUSCA EN TODOS LOS CAMPOS CON `O`.** Escribir `mari 264` pide las Marías/Marianos que **además** tengan `264` en alguno de sus campos (típicamente el celular), no la unión de las dos búsquedas. Es lo que hace que el control sirva para desambiguar entre homónimos, que es para lo que está. Con la `O` al revés el segundo término **agranda** el resultado en vez de acotarlo, y el buscador empeora justo cuando más se lo necesita.
+- **Las claves son las del buscador rápido del módulo dueño del catálogo**, no una lista nueva: Usuarios busca por correo + nombre + celular (§9) y Dominios por nombre + número + uuid. Si el combo buscara por otros campos, el mismo texto daría resultados distintos según la pantalla.
+- **El teléfono se compara también dígito contra dígito.** En la base un celular son diez dígitos y nada más (`CLAUDE.md`), pero quien busca lo escribe como lo tiene anotado: `264-412`, `(264) 412`. Si el término tiene dígitos, se lo compara además contra los dígitos de cada clave — **por clave y no concatenados**, que pegando `…12` con `34…` aparecería un `1234` que no está en ningún campo.
+- **Se resalta lo que coincidió y el detalle muestra las otras claves.** Buscando en tres campos a la vez, una fila que entró por el celular es indistinguible de una que entró por el nombre: sin el segundo renglón y sin las marcas, el resultado no se puede confirmar. El resaltado **escapa por segmento**, nunca la cadena entera antes de buscar — `&` se vuelve `&amp;` y los índices dejan de apuntar al mismo lugar.
+- **La normalización va caracter por caracter** y sólo reemplaza cuando el resultado sigue midiendo uno. Así `maria` encuentra a `María` **y** el índice de la coincidencia sigue siendo el mismo en la cadena original, que es lo que necesita el resaltado. Un `.normalize('NFD')` sobre la cadena entera separa el acento en un caracter aparte y corre todo lo que viene después.
+- **Filtra en el navegador, no contra el backend.** Los dos catálogos ya viajan enteros con el listado del módulo, así que un endpoint de búsqueda agregaría un request por tecla para datos que están en memoria. El índice normalizado se arma **una sola vez** al cablear el control: rehacerlo en cada tecla son 6.000 normalizaciones por pulsación.
+- **El desplegable cuelga del `<body>` y se posiciona en coordenadas de viewport**, igual que el menú contextual de las filas (§24): dentro de un modal lo recortaría el `overflow-y` del `.modal-body`. Pero **se reposiciona al scrollear en vez de cerrarse** como hace aquél — acá el foco está en el campo y cerrar la lista mientras se escribe deja al control mudo. Si no entra abajo y sí arriba, se da vuelta.
+- **Cierra por click afuera, no por `blur`.** El `blur` cae también al arrastrar la barra de scroll de la lista, y ahí cerrarla es lo contrario de lo que se pidió.
+- **Escribir invalida lo elegido.** El id viejo conviviendo con un texto nuevo es exactamente el estado que hace guardar algo distinto de lo que se lee en pantalla. Y **salir sin elegir no deja lo tipeado escrito**: un texto sin id abajo se lee como una selección hecha, y el `Guardar` cortaría con *"Elegí un usuario de la lista"* sobre un campo que parece lleno.
+- **Se listan hasta 50 filas y el resto se dice.** *"y N más — seguí escribiendo para acotar"*: 50 de 2.000 recortadas en silencio se leen como *"no hay más"* y nadie sigue escribiendo.
+- **El input oculto lleva el id del campo** (`prf-usuario`) y el visible el sufijo `-q`. Así el resto del formulario lo lee igual que leía al `<select>` que reemplaza, y el `#…-err` de la validación no cambia. El `<label>` apunta al **visible**, que es donde se escribe.
+- **Teclado obligatorio**: `↓`/`↑` recorren, `Enter` elige la fila marcada —y **sólo si hay una marcada**, para no tragarse la tecla—, `Esc` cierra la lista **sin cerrar el modal** (el evento no se propaga) y `Tab` sale normalizando el texto.
+- **El foco por código no abre la lista.** El formulario enfoca el primer campo al abrir el modal, y ahí el desplegable saldría mal puesto: el modal entra con una transición de `transform`, así que el rectángulo que se mediría es el del campo todavía corrido y en escala. Además el modal abriría tapado por 50 filas que nadie pidió. Abren el click y la primera tecla.
+- **Hay que destruirlo al cerrar el modal.** El desplegable cuelga del `<body>` y los listeners de scroll/resize son globales: sacar el `.modal-backdrop` no alcanza para llevárselos.
 
 ---
 
@@ -2121,7 +2196,7 @@ Control de la pestaña **Paneles** del modal de Alta/Edición de Perfiles: un sw
 - **La fila ES el `.toggle-switch`**: el `label` envuelve nombre + `input` + track, así hereda el `display:flex`, el `cursor:pointer` y el pintado del §17. Esta sección sólo agrega el reparto horizontal — `flex: 1` en el nombre es lo que empuja el switch al borde derecho, y `min-width: 0` deja que un nombre largo corte en vez de desbordar.
 - **El `input` va pegado al `.toggle-track`.** El CSS del switch pinta el estado con `input:checked + .toggle-track`: cualquier nodo entre los dos deja el switch siempre apagado. Es el error fácil de cometer al reordenar el markup.
 - **Sin `Seleccionar todo` / `Deseleccionar todo`** (07/09/2026, pedido explícito). Existieron y operaban sobre toda la lista; se sacaron porque son dos botones sobre a lo sumo 7 filas, donde tildar a mano cuesta lo mismo. Con ellos se fueron el `.paneles-acciones` del control y el `wirePanelesLista()` que los cableaba: **el control ya no necesita cablearse**, los switches son `<label>` + `<input>` y se leen recién al guardar (`readPanelesLista()`).
-- **La lista está acotada al dominio del perfil** y se re-renderiza entera cuando cambia el select de dominio en el alta. Un panel de otro dominio no es una opción válida y el backend lo rechaza con 422.
+- **La lista está acotada al dominio del perfil** y se re-renderiza entera cuando cambia el campo Dominio en el alta (un combo con buscador, §34-bis). Un panel de otro dominio no es una opción válida y el backend lo rechaza con 422.
 - **El `gap` vertical vive en `.paneles-wrap`**, no en márgenes de los hijos: el wrap se re-renderiza entero al cambiar de dominio y así el ritmo no depende de qué se haya dibujado adentro. Hoy le queda un solo hijo, así que no separa nada — pero el wrap sigue siendo el nodo que se re-renderiza y el que consultan `montarPaneles()` y `readPanelesLista()`.
 - **La fila es sólo el nombre del panel.** Llevó un `<code>#218</code>` al lado hasta el 07/09/2026 y se sacó por pedido, junto con el de la ficha (§35.1): el id no es un dato que ayude a elegir, y el `value` del checkbox lo sigue llevando — que es lo único que necesita el guardado. **El panel sin nombre cae a `Panel #id`**, porque el `<code>` era lo único que lo identificaba.
 

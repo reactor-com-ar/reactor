@@ -1649,6 +1649,62 @@ body.login-page { background: var(--bg); }
 .id-picker-empty   { padding: 16px 12px; text-align: center;
                      color: var(--muted); font-size: .85rem; }
 
+/* ---------- 34-bis. Combo con buscador (autocompletar) ----------
+ * Campo de texto que filtra un catálogo mientras se escribe y guarda el id de
+ * lo elegido. Hoy lo usan Usuario y Dominio del formulario de Perfiles.
+ *
+ * NO es el hermano del §34: el selector de ids elige VARIAS opciones de un
+ * catálogo de decenas y las deja todas a la vista; éste elige UNA de un catálogo
+ * de miles y por eso la lista está cerrada hasta que se escribe.
+ *
+ * El desplegable (`.combo-pop`) va colgado del `<body>` y en coordenadas de
+ * viewport, igual que el menú contextual de las filas (§24): dentro de un modal
+ * lo recortaría el `overflow-y` del `.modal-body`. Por eso acá NO hay
+ * `position: relative` sobre el wrapper — sólo lo necesita el botón de limpiar.
+ */
+.combo             { position: relative; display: block; }
+/* El `padding-right` deja libre el lugar del botón de limpiar, igual que
+ * `.input-password` con el ojo (§8). */
+.combo .combo-input { width: 100%; padding-right: 34px; }
+.combo-clear       {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer; color: var(--muted);
+    font-size: 1.1rem; line-height: 1; padding: 4px 6px; border-radius: 6px;
+}
+.combo-clear:hover    { color: var(--text); }
+.combo-clear[hidden]  { display: none; }
+
+.combo-pop {
+    position: fixed; z-index: 200;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    /* Acotado a ~7 filas: más alto tapa el formulario entero y deja de leerse
+     * como un desplegable del campo. El resto se scrollea. */
+    max-height: 260px; overflow-y: auto; padding: 4px 0;
+}
+.combo-item {
+    display: flex; flex-direction: column; gap: 2px;
+    width: 100%; text-align: left; padding: 7px 12px;
+    background: none; border: none; cursor: pointer;
+    font: inherit; color: var(--text);
+}
+.combo-item:hover,
+.combo-item.is-active     { background: var(--row-hover); }
+.combo-item-titulo        { font-size: .88rem; }
+/* Segundo renglón con los otros campos por los que se busca (correo, celular,
+ * número del dominio). No es decoración: es lo que hace visible por qué entró
+ * una fila que coincidió por un campo que no es el nombre. */
+.combo-item-detalle       { font-size: .76rem; color: var(--muted); }
+
+/* Resaltado de lo que coincidió. Fondo translúcido y texto blanco en vez de
+ * texto rojo sobre gris: el rojo institucional sobre `--row-hover` no llega a
+ * contrastar, y acá se marcan pedazos de una línea `muted` de .76rem. */
+.combo-hit  { background: rgba(193,19,19,.45); color: #fff; border-radius: 3px; }
+
+.combo-vacio,
+.combo-pie  { padding: 10px 12px; font-size: .8rem; color: var(--muted); text-align: center; }
+.combo-pie  { border-top: 1px solid var(--border); margin-top: 4px; }
+
 /* ---------- 35. Lista de paneles del perfil ----------
  * Un switch por panel, sin buscador (§34 explica por qué no se reusa el
  * selector de ids: acá el catálogo son los paneles de UN dominio y el más

@@ -236,6 +236,73 @@ emite y quién puede hacerlo:
   siguiente. En el tercer caso (ya tenía perfil) no se anota nada: no se creó
   ningún acceso.
 
+## Las dos recuperaciones de contraseña: mismo circuito, dos logins
+
+`panel/recuperar/` y `app/recuperar/` (esta última, del 10/09/2026) son el
+**mismo circuito**: la tabla `recuperaciones`
+([cloud/sql/migrations/20260905_2100_crear_recuperaciones.sql](cloud/sql/migrations/20260905_2100_crear_recuperaciones.sql)),
+un enlace por correo de un solo uso, 32 bytes de CSPRNG de los que en la base
+queda **sólo el SHA-256**, 60 minutos de vigencia en la columna `expira` y cupo
+de 3 por cuenta / 10 por IP por hora. La lógica vive en el `lib/recuperacion.php`
+de cada app — [panel/lib/recuperacion.php](panel/lib/recuperacion.php),
+[app/lib/recuperacion.php](app/lib/recuperacion.php) —, copias adaptadas y no
+idénticas, como todo lo que comparten las apps sin compartir docroot. **Las dos
+reemplazan al legacy** (`reactor-app/sesion/recuperar.php`), que mandaba **la
+contraseña** en el cuerpo del mail.
+
+Las reglas de la sección "Recuperación de contraseña" de
+[panel/CLAUDE.md](panel/CLAUDE.md) valen para las dos —respuesta neutra siempre,
+`NOW()` de la base y nunca el reloj de PHP, transacción alta+envío, el candado
+`usada IS NULL AND expira > NOW()`, los 36 caracteres del varchar(50)—. Lo que
+cambia es de qué login cuelga cada una:
+
+| | `panel/` | `app/` |
+|---|---|---|
+| de dónde se entra | `¿Olvidaste tu contraseña?` del login | botón **Recuperar contraseña** en `sesion/contrasena.php` |
+| se busca por | `usuario` o `correo` | **`celular` o `correo`** |
+| a dónde enlaza el correo | `panel.reactor.com.ar/recuperar/restablecer` | `app.reactor.com.ar/recuperar/restablecer` |
+| al guardar la contraseña | manda al login | **abre la sesión y entra a la app** |
+
+- **CADA UNA BUSCA LA CUENTA CON EL CRITERIO DE SU PROPIO LOGIN**, y no es un
+  detalle: `panel/api/login.php` entra por `usuarios.usuario` y
+  `app/sesion/iniciar.php` por `celular` O `correo` (el criterio de
+  `cUsuario::usuario2id()`, ver la sección de ese archivo). Copiar el criterio
+  del panel a la app haría que la recuperación cayera en una fila **distinta** de
+  la que después resuelve el login: la persona le cambiaría la contraseña a una
+  cuenta con la que no entra. Ninguna de las dos columnas tiene `UNIQUE`, así que
+  las dos desempatan igual — la primera por id.
+- **La de `app` abre la sesión al guardar, y eso NO contradice la regla de la
+  invitación** ("la sesión SÓLO se abre para la cuenta recién creada"). Lo que
+  esa regla protege es que el `uuid` de la invitación **lo ve el emisor** en el
+  listado del panel, así que abrir sesión sobre una cuenta ajena sería un
+  secuestro servido. Acá la credencial salió por correo **a la casilla de la
+  propia cuenta** y en la base no queda ni siquiera guardada — sólo su hash —,
+  así que nadie del sistema puede verla; y quien la tiene **acaba de elegir la
+  contraseña**, con lo cual entraría igual tipeándola. La sesión no le da nada
+  que no tenga.
+- **Se abre con `appSesionAbrir()`, el mismo punto que el login por contraseña**,
+  y por eso `app/` puede lo que `panel/` no: corre en el mismo host, así que
+  escribe la cookie directo. El panel, para mandar a alguien a la app, tiene que
+  emitir un enlace de un solo uso en `enlaces_acceso` (ver "Las dos
+  invitaciones"). Si la cuenta se deshabilitó entre el enlace y el POST, la
+  pantalla **cae sola al botón que manda al login**: la contraseña ya quedó
+  guardada igual.
+- **El correo es obligatorio y en `app/` eso muerde de verdad.** A la app se
+  entra por celular, así que hay cuentas sin correo cargado y ésas **no pueden
+  recuperar**: caen en la misma pantalla neutra que todo lo demás. No es un caso
+  de borde a resolver acá — sin correo no hay a dónde mandar el enlace.
+- **El campo viene precargado con lo que se tipeó en el paso 1 del login**, que
+  sale de la cookie firmada del login pendiente (`appLoginPendiente()['ing']`) y
+  **no de la querystring**: pasarlo por la URL publicaría el celular o el correo
+  de la persona en la barra del navegador y en el historial.
+- **La pantalla pide la contraseña dos veces y no usa el ojito** que sí tiene el
+  modal de Mi Cuenta, por lo mismo que en el panel: se abre desde un enlace de
+  correo (puede ser una máquina prestada) y un error de tipeo deja a la persona
+  afuera de la cuenta que acaba de recuperar, con el enlace ya consumido.
+- **Cambiar la contraseña NO cierra las otras sesiones abiertas.** El token de
+  `app` es stateless y dura un año; no hay nada en él que se pueda invalidar
+  desde la base. Es la misma limitación que ya documenta el panel.
+
 ## `perfiles.registrante`: quién otorgó el acceso
 
 Columna de `perfiles` entre `panel` y `habilitado`, creada por

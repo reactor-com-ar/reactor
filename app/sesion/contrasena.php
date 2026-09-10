@@ -81,5 +81,16 @@ ob_start();
         </button>
     </div>
 </form>
+
+<!-- A todo el ancho y FUERA del `<form>`, que son la misma decision: es una
+     salida del login, no una tercera opcion de esta pantalla. Sin la
+     `.sesion-fila` el `.sesion-btn` ya ocupa el 100% (CSS §"Pantallas de
+     sesion"), asi que cubre el ancho de Volver + Siguiente sin CSS nuevo; y
+     adentro del form, un navegador viejo podria tratar el `<a>` como parte del
+     envio. Es la unica pantalla del login que lo lleva: es donde la persona
+     descubre que no se acuerda de la contrasena. -->
+<a href="/recuperar/" class="sesion-btn sesion-btn-secundario">
+    <i class="fa-solid fa-key"></i> Recuperar contrase&ntilde;a
+</a>
 <?php
 sesionPantalla('Ingrese su contraseña', (string) ob_get_clean(), $error);

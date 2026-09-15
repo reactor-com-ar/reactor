@@ -1058,9 +1058,59 @@ Lo que el modal muestra es siempre **lo que va a pasar de verdad**.
 .del-blocker     { display: flex; gap: 10px; font-size: .85rem; line-height: 1.5;
                    padding: 12px 14px; border-radius: var(--radius);
                    background: rgba(230,42,42,.12); border: 1px solid rgba(230,42,42,.35); }
+.del-blocker.del-aviso     { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.35); }
+.del-blocker.del-aviso > i { color: var(--warn); }
 .del-warning     { display: flex; align-items: center; gap: 8px;
                    font-size: .82rem; color: var(--muted); }
 ```
+
+**`.del-blocker` es "no se puede / mirá esto", no "borrado".** El nombre viene de
+donde nació, pero la caja —ícono a la izquierda, título en negrita y lista de
+motivos— es la misma en cualquier acción que se confirme con datos del backend, y
+por eso la reusa §15.2. La variante ámbar `.del-aviso` es para lo que **no**
+bloquea: mismo recuadro, otro color. Se agregó como modificador y no como clase
+propia porque con dos definiciones enteras los dos recuadros se despegan al
+primer retoque.
+
+### 15.2 Confirmación con previsualización (acciones que escriben)
+
+`confirmDialog` alcanza cuando lo que la acción va a hacer se puede decir en una
+frase. **Cuando no —cuando la acción emite un documento, consume un número de una
+serie o escribe en varias tablas— la confirmación muestra lo que va a escribir**,
+pedido al backend antes de abrirla. Es §15.1 dado vuelta: allá el backend informa
+lo que se va a *destruir*, acá lo que se va a *crear*.
+
+Hoy lo usa **Contratos → Facturar** (`openContratoFacturarModal` +
+`GET api/contratos_accion.php?accion=facturar&id=N`).
+
+**El verbo separa previsualizar de ejecutar:** `GET` devuelve lo que la acción va
+a hacer, `POST` la hace. Los dos resuelven la cuenta con **la misma función del
+backend**, que es lo único que garantiza que el total que anuncia la pantalla sea
+el que después queda en la base.
+
+Estructura del cuerpo, en este orden:
+
+1. `.del-lead` — qué se va a emitir y qué queda cambiado después (el período, el
+   `<code>#id</code>`, la fecha a la que avanza el contrato).
+2. `.del-blocker` — recuadro rojo con los **bloqueos**. Mientras haya uno, el
+   botón de confirmar **no se renderiza**: queda sólo `Cancelar`.
+3. `.del-blocker.del-aviso` — recuadro ámbar con los **avisos**: lo que conviene
+   mirar y no impide seguir (por ejemplo, que el comprobante salga a nombre de un
+   cliente distinto del que tiene cargado el contrato). Bloqueo y aviso son dos
+   listas distintas del backend, no dos tonos de la misma.
+4. Las tarjetas de §25 con la cabecera del documento (a quién, con qué talonario,
+   qué número y entre qué fechas).
+5. Un `.ficha-bloque` (§25-bis) con la tabla de renglones y sus totales, idéntico
+   al de la ficha del comprobante — así lo que se previsualiza y lo que después se
+   consulta se leen igual.
+6. `.form-nota` al pie con lo que no se puede deshacer (acá: que el número lo toma
+   el talonario recién al emitir, así que el de la pantalla es estimado, y que
+   anular no lo devuelve a la serie).
+
+**El número estimado se rotula como estimado.** Lo definitivo lo toma el `POST`
+con el talonario bloqueado (`SELECT … FOR UPDATE`): si entre la previsualización y
+el click se emite otro comprobante, éste se lleva el siguiente. Mostrarlo sin la
+aclaración sería prometer un número fiscal que la pantalla no puede garantizar.
 
 ## 16. Toasts (notificaciones efímeras)
 
@@ -1271,7 +1321,7 @@ el momento del click con el mismo formato que el menú de fila
 - La barra **envuelve** (`flex-wrap`) en pantallas angostas; no se scrollea horizontalmente ni se colapsa en un solo dropdown.
 - **El fondo es un gris intermedio entre los dos tokens que ya conviven en el modal**: `color-mix(in srgb, var(--surface) 40%, var(--bg))` ≈ `#1e1e1f`. Queda un escalón más claro que `--bg` (`#1a1a1a`) y todavía más oscuro que los dos grises del cuerpo — las tarjetas de consulta (`#202122`) y el fondo del modal / los inputs (`--surface`, `#242526`). Así la franja se despega del header y del body sin sumar otra línea divisoria y sin repetir ningún tono del contenido.
 - **La mezcla es entre dos tokens, nunca contra `#000`.** Un `color-mix(--surface X%, #000)` fija un tono que no existe en el sistema y hay que recalcularlo a mano en cada cambio de tema; mezclando `--surface` con `--bg`, el intermedio sigue solo a la paleta. La escala de grises, de claro a oscuro: `--border` → `--row-hover` → `--surface` → **franja** → `--bg`.
-- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`), **Contratos** (`openContratoViewModal` + `openContratoModal` + `openContratoDeleteModal`), **Talonarios** (`openTalonarioViewModal` + `openTalonarioModal` + `openTalonarioDeleteModal`), **Comprobantes** (`openComprobanteViewModal` + `openComprobanteNuevoModal` + `openComprobanteEditModal` + `openRenglonModal` + `openPagoModal` + `openComprobanteDeleteModal`) y **el modal de Filtros de todos los módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos. Contratos suma el tercero: **el modal de borrado con desglose (§15.1) lleva la misma cabecera**, y su barra de acciones es la que **omite el botón de confirmar** cuando el impacto trae bloqueos.
+- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`), **Contratos** (`openContratoViewModal` + `openContratoModal` + `openContratoDeleteModal` + `openContratoFacturarModal`), **Talonarios** (`openTalonarioViewModal` + `openTalonarioModal` + `openTalonarioDeleteModal`), **Comprobantes** (`openComprobanteViewModal` + `openComprobanteNuevoModal` + `openComprobanteEditModal` + `openRenglonModal` + `openPagoModal` + `openComprobanteDeleteModal`) y **el modal de Filtros de todos los módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos. Contratos suma el tercero: **el modal de borrado con desglose (§15.1) lleva la misma cabecera**, y su barra de acciones es la que **omite el botón de confirmar** cuando el impacto trae bloqueos.
 
 ### 21-bis.1 "Listar": saltar a otro módulo ya filtrado
 
@@ -1289,7 +1339,8 @@ dos preguntas distintas sobre el mismo usuario y el menú las ofrece por
 separado.
 
 - **El pedido se consume siempre y sólo aplica si la ruta coincide.** Si el usuario se desvía a otra pantalla, se descarta en vez de filtrar un listado equivocado más tarde.
-- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Contratos; para usuario: Perfiles y Adopciones; para contrato: Contratos, desde Comprobantes). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Contratos; para usuario: Perfiles y Adopciones; para contrato: Contratos, desde Comprobantes; para comprobante: Comprobantes, desde Contratos). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **El mismo par sirve para llevar al registro que una acción acaba de crear**, no sólo para los ítems de `Listar`: `Contratos → Facturar` termina con `pedirFiltroComprobante('comprobantes', res.comprobante)`, que es a donde llevaba el back office viejo después de facturar. La regla no cambia — el filtro tiene que existir en el Modal de Filtros del destino (ahí, `Código`) — y por eso el pedido se vuelca en `state.id` **antes** del fetch: Comprobantes filtra en el servidor, así que un recorte posterior mostraría "las 100 últimas de todos" y el comprobante recién emitido podría no estar entre ellas.
 - **El destino puede volcar el pedido en el filtro que le corresponda, que no siempre se llama igual.** `Contratos → Ver dominio` usa el mismo `pedirFiltroDominio`, pero en **Dominios** el dominio no es una FK sino la fila misma: `renderDominios()` lo vuelca en `state.codigo`. Lo que no cambia es la regla — el filtro usado **tiene que existir en el Modal de Filtros del destino**, para que se vea por qué la lista viene acotada y se pueda limpiar.
 - **Si el endpoint sabe filtrar, el filtro va en el fetch inicial**, no sólo client-side: en tablas grandes (`registros`, `senales`, `adopciones`) recortar después de traer la ventana muestra "las N últimas de todos" filtradas, que es casi nada. Adopciones manda `?dominio=`; Señales y Registros no tienen el parámetro en la API y filtran sobre la ventana, igual que su propio modal de Filtros. `adoptador` / `liberador` tampoco existen en la API de Adopciones: ésos filtran client-side, como ya lo hace el modal de Filtros de ese módulo.
 

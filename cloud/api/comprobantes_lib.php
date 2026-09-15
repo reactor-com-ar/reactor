@@ -198,17 +198,48 @@ function comprobanteRenglones(int $id): array
 }
 
 /**
- * Recalcula subtotal / iva / total desde los renglones y los persiste.
+ * Subtotal / iva / total de una lista de renglones, SIN tocar la base.
  *
- * Es `cComprobante::totalizar()` portada tal cual, incluida su aritmetica:
- * los montos de los renglones vienen CON IVA INCLUIDO, asi que el impuesto se
- * DESAGREGA (`monto - monto / 1.21`) en vez de sumarse encima, y el subtotal
- * es el total menos ese impuesto. Calcularlo al reves —subtotal * 1.21— daria
- * un total distinto del que ya tienen los 2.326 comprobantes emitidos.
+ * Es la aritmetica de `cComprobante::totalizar()` portada tal cual: los montos
+ * de los renglones vienen CON IVA INCLUIDO, asi que el impuesto se DESAGREGA
+ * (`monto - monto / 1.21`) en vez de sumarse encima, y el subtotal es el total
+ * menos ese impuesto. Calcularlo al reves —subtotal * 1.21— daria un total
+ * distinto del que ya tienen los 2.326 comprobantes emitidos.
  *
  * Solo desagrega las dos alicuotas que el legacy conoce (10,50 % y 21,00 %,
  * las mismas del combo `$xComprobanteRenglon->iva`); cualquier otra queda como
  * monto sin IVA discriminado, igual que en el sistema viejo.
+ *
+ * Esta separada de `comprobanteTotalizar()` porque la cuenta la necesita
+ * tambien quien todavia NO tiene renglones en la base: la previsualizacion de
+ * "Facturar" de Contratos (`contratos_accion.php`) muestra los totales del
+ * comprobante que se va a emitir. Con la cuenta duplicada ahi, el total que
+ * anuncia la pantalla y el que despues persiste el alta se despegan al primer
+ * cambio de alicuota.
+ *
+ * @param array $renglones Filas con al menos `iva` y `monto`.
+ */
+function comprobanteTotalesDe(array $renglones): array
+{
+    $total = 0.0;
+    $iva   = 0.0;
+    foreach ($renglones as $r) {
+        $monto = (float) ($r['monto'] ?? 0);
+        $total += $monto;
+
+        $alicuota = round((float) ($r['iva'] ?? 0), 2);
+        if ($alicuota === 10.5)      $iva += $monto - ($monto / 1.105);
+        elseif ($alicuota === 21.0)  $iva += $monto - ($monto / 1.21);
+    }
+
+    $total = round($total, 2);
+    $iva   = round($iva, 2);
+
+    return ['subtotal' => round($total - $iva, 2), 'iva' => $iva, 'total' => $total];
+}
+
+/**
+ * Recalcula subtotal / iva / total desde los renglones de la base y los persiste.
  *
  * Se llama SIEMPRE que un renglon cambia -- alta, edicion y baja --, que es la
  * unica forma de que el total no se despegue de sus propios renglones.
@@ -218,25 +249,17 @@ function comprobanteTotalizar(int $id): array
     $stmt = db()->prepare('SELECT iva, monto FROM comprobantesrenglones WHERE comprobante = :id');
     $stmt->execute([':id' => $id]);
 
-    $total = 0.0;
-    $iva   = 0.0;
-    foreach ($stmt->fetchAll() as $r) {
-        $monto = (float) ($r['monto'] ?? 0);
-        $total += $monto;
-
-        $alicuota = round((float) ($r['iva'] ?? 0), 2);
-        if ($alicuota === 10.5)      $iva += $monto - ($monto / 1.105);
-        elseif ($alicuota === 21.0)  $iva += $monto - ($monto / 1.21);
-    }
-
-    $total    = round($total, 2);
-    $iva      = round($iva, 2);
-    $subtotal = round($total - $iva, 2);
+    $totales = comprobanteTotalesDe($stmt->fetchAll());
 
     db()->prepare('UPDATE comprobantes SET subtotal = :s, iva = :i, total = :t WHERE id = :id')
-        ->execute([':s' => $subtotal, ':i' => $iva, ':t' => $total, ':id' => $id]);
+        ->execute([
+            ':s'  => $totales['subtotal'],
+            ':i'  => $totales['iva'],
+            ':t'  => $totales['total'],
+            ':id' => $id,
+        ]);
 
-    return ['subtotal' => $subtotal, 'iva' => $iva, 'total' => $total];
+    return $totales;
 }
 
 /** Cabecera minima de un comprobante, o 404. */

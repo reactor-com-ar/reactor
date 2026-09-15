@@ -57,10 +57,21 @@ function appDominioActivo(array $usuario): array
             LEFT JOIN dominios d ON d.id = p.dominio';
 
     // 1) El perfil recordado en `usuarios.perfil`.
+    //
+    // El `p.usuario = :u` NO sobra aunque el id venga de la base y no del
+    // request: `usuarios.perfil` la escriben tambien `cloud/`, `panel/` y el
+    // back office viejo, y nada en el esquema impide que quede apuntando al
+    // perfil de OTRA persona — la FK solo exige que el perfil exista. Sin el
+    // filtro, esa fila cruzada pararia la sesion en el dominio del otro sin
+    // ningun aviso. Es el mismo control que ya hace `appPerfilHabilitado()`
+    // para el claim del token, y las dos funciones tienen que coincidir.
+    //
+    // Hoy no hay ninguna fila asi en produccion (verificado el 15/09/2026):
+    // esto es para que siga siendo cierto.
     $perfil = (int) ($usuario['perfil'] ?? 0);
     if ($perfil > 0) {
-        $stmt = db()->prepare($sel . ' WHERE p.id = :p AND p.habilitado = 1 LIMIT 1');
-        $stmt->execute([':p' => $perfil]);
+        $stmt = db()->prepare($sel . ' WHERE p.id = :p AND p.usuario = :u AND p.habilitado = 1 LIMIT 1');
+        $stmt->execute([':p' => $perfil, ':u' => (int) $usuario['id']]);
         $row = $stmt->fetch();
         if ($row) {
             return appContextoDesdeFila($row);
@@ -78,6 +89,31 @@ function appDominioActivo(array $usuario): array
     }
 
     return appContextoDesdeFila($row);
+}
+
+/**
+ * Cuantos perfiles habilitados tiene el usuario, o sea entre cuantos dominios
+ * puede moverse.
+ *
+ * Existe para decidir si se dibuja el boton "Cambiar de Dominio" de la topbar.
+ * Cuenta EXACTAMENTE lo mismo que lista `api/dominios.php` —perfiles propios y
+ * habilitados— y tiene que seguir haciendolo: si los dos criterios se separan,
+ * el boton aparece cuando la lista trae una sola opcion o, peor, desaparece
+ * teniendo dos.
+ *
+ * Se cuenta y no se lista porque en la topbar solo hace falta el numero: la
+ * lista la trae el endpoint al abrir el modal.
+ */
+function appPerfilesCantidad(int $usuario): int
+{
+    if ($usuario <= 0) {
+        return 0;
+    }
+
+    $stmt = db()->prepare('SELECT COUNT(*) FROM perfiles WHERE usuario = :u AND habilitado = 1');
+    $stmt->execute([':u' => $usuario]);
+
+    return (int) $stmt->fetchColumn();
 }
 
 /** Arma el contexto a partir de una fila del SELECT de `appDominioActivo()`. */

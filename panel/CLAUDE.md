@@ -21,7 +21,7 @@ host en dev).
   El redirect va dentro de `location /` y **no** a nivel `server`: nginx evalúa
   los `return` del contexto server antes de elegir el `location`, así que un
   `return` suelto redirigiría también el desafío ACME y voltearía la renovación
-  del certificado — que es el mismo para los 7 dominios.
+  del certificado — que es el mismo para los 9 dominios.
 - Dev: `http://localhost:8087`.
 
 **No acoplar nada a `control.`**, justamente porque se va: la cookie de sesión
@@ -1079,6 +1079,11 @@ mismas tablas. Reglas que no se deducen del esquema:
 - **Rechazar es `POST`, no un link.** En el legacy es un `<a href>` y
   cualquier prefetch (antivirus de correo, preview del cliente de mail) puede
   rechazar una invitación que la persona nunca vio.
+- **Y `Aceptar` también, desde el 15/09/2026.** Fue un `<a href>` mientras
+  `aceptar.php` siempre abría un formulario —un GET que no cambiaba estado—;
+  desde que esa pantalla resuelve la invitación sin preguntar nada cuando la
+  cuenta ya está completa, el mismo prefetch la aceptaría. El POST además saca
+  la URL `aceptar?uid=…` del HTML, que es lo que un crawler encontraría.
 - **La aceptación cierra la invitación en los dos caminos.** Si la persona ya
   tenía cuenta, el legacy le da el perfil pero deja la fila en pendiente para
   siempre; acá pasa a estado 3 igual. Esas pendientes eternas son las que
@@ -1087,6 +1092,21 @@ mismas tablas. Reglas que no se deducen del esquema:
   activo**: sólo se le agrega el perfil, y el dominio nuevo le aparece en
   *Cambiar dominio*. Pisarle `usuarios.dominio` la sacaría del dominio en el
   que está trabajando.
+- **Y no se le piden datos** (15/09/2026): la cuenta se busca **antes** de
+  dibujar el formulario, así que sólo se pregunta lo que a esa cuenta le falta
+  —y si no le falta nada, la invitación se resuelve en el mismo request y la
+  persona ve la bienvenida sin ningún formulario. De la cuenta que ya existe se
+  completan **sólo las columnas vacías** (`nombre`, `celular`, `correo`), con un
+  `WHERE` que las exige vacías: el `uuid` del enlace lo ve el emisor, así que
+  dejar sobrescribir un dato cargado sería entregarle las puertas del login y de
+  la recuperación de una cuenta ajena. La regla completa, común a las dos
+  invitaciones, está en el [CLAUDE.md raíz](../CLAUDE.md).
+- **El tercer caso tiene pantalla propia**: quien ya tenía perfil habilitado en
+  el dominio ve *"Ya tenías acceso"*, no el *"el dominio nuevo te va a aparecer
+  en Cambiar dominio"* que el panel le contestaba a todo el que ya tuviera
+  cuenta. No se creó ningún acceso, así que no hay ningún dominio nuevo que ir a
+  buscar. `perfilHabilitadoDelDominio()` lo consulta **antes** de
+  `perfilAsegurado()`, que devuelve el mismo id lo haya encontrado o creado.
 - **No hay columna `apellido`** en `usuarios` ni en `invitaciones`: el
   formulario de aceptación pide nombre y apellido por separado porque es lo
   que la persona espera completar, pero se guardan concatenados en `nombre`.

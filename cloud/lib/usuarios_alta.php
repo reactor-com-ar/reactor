@@ -32,9 +32,12 @@ declare(strict_types=1);
  * NOTA SOBRE `usuario`
  *
  *   `usuarios.usuario` es la credencial con la que se entra (api/login.php hace
- *   `WHERE usuario = :u`). El alta de cloud no pide un nombre de usuario aparte,
- *   asi que usa el correo, igual que el alta por invitacion del panel. Sin esto
- *   el usuario creado no podria loguearse nunca.
+ *   `WHERE usuario = :u`). Llega siempre del llamador y NO se deriva aca: desde
+ *   el 15/09/2026 el formulario de cloud la muestra en un campo propio, al lado
+ *   de la contrasena. Igual sigue valiendo el correo en la practica —el campo
+ *   espeja el email mientras nadie lo edite, y `credencialPedida()` cae al correo
+ *   si el request no la trae—, que es la convencion que comparte con el alta por
+ *   invitacion del panel. Vacia, el usuario creado no podria loguearse nunca.
  */
 
 require_once dirname(__DIR__) . '/api/legacy_crypto.php';

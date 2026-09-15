@@ -136,6 +136,26 @@
         return pedido && pedido.route === route ? String(pedido.id) : '';
     }
 
+    // Mismo par, para el comprobante. Lo usa Contratos → "Facturar": el
+    // comprobante recién emitido se abre en Comprobantes acotado a su `Código`,
+    // que es a dónde llevaba el back office viejo después de facturar. Como en
+    // Dominios y en Contratos, el comprobante ahí es la fila y no una FK, así
+    // que el pedido se vuelca en el filtro `id` — que existe en su Modal de
+    // Filtros, así se ve por qué la lista viene acotada y se puede limpiar.
+    let pendingComprobanteFilter = null;   // { route: 'comprobantes', id: 7596 }
+
+    function pedirFiltroComprobante(route, id) {
+        pendingComprobanteFilter = { route, id };
+        if (currentRoute() === route) navigate();
+        else window.location.hash = '#/' + route;
+    }
+
+    function tomarFiltroComprobante(route) {
+        const pedido = pendingComprobanteFilter;
+        pendingComprobanteFilter = null;
+        return pedido && pedido.route === route ? String(pedido.id) : '';
+    }
+
     // Estado del listado que un módulo se deja preparado a sí mismo antes de
     // re-renderizarse: es lo que hace el botón Refrescar de la toolbar (§9 de
     // DESIGN.md). Refrescar es `navigate()` — se vuelve a pedir todo, KPIs
@@ -3104,6 +3124,16 @@
             : `<span class="badge badge-danger">Deshabilitado</span>`;
     }
 
+    // Si el contrato admite las dos acciones del ciclo comercial (Facturar /
+    // Dar de baja). Es la misma condición que el back office viejo usaba para
+    // dibujarlas — `habilitado == 1` — y la primera que revalida el endpoint.
+    // Está en una función y no repetida en los dos menús porque son la MISMA
+    // regla: con una copia, agregar una condición deja un menú ofreciendo lo
+    // que el otro ya esconde.
+    function contratoOperable(c) {
+        return c.habilitado === 1;
+    }
+
     function contratosTableBody(contratos) {
         if (!contratos.length) {
             return `<div class="table-empty">No hay contratos que coincidan. Creá el primero con "Nuevo contrato".</div>`;
@@ -3187,6 +3217,17 @@
 
         function rowMenuFor(c) {
             const extra = [];
+            // Las dos acciones del ciclo comercial van primero: son lo que se
+            // viene a hacer sobre un contrato. Sólo aparecen con el contrato
+            // habilitado — facturar uno dado de baja o volver a darlo de baja
+            // no son cosas que existan —, y el endpoint corta igual: esconder
+            // el botón no es el control (CLAUDE.md).
+            if (contratoOperable(c)) {
+                extra.push({ act: 'facturar', label: 'Facturar', icon: 'fa-cash-register',
+                             onSelect: () => pedirPrevioFacturar(c) });
+                extra.push({ act: 'baja', label: 'Dar de baja', icon: 'fa-thumbs-down',
+                             onSelect: () => confirmarBajaContrato(c) });
+            }
             if (c.dominio) {
                 extra.push({ act: 'go-dominio', label: 'Ver dominio', icon: 'fa-flag',
                              onSelect: () => pedirFiltroDominio('dominios', c.dominio) });
@@ -3194,11 +3235,7 @@
             if (c.uuid) {
                 extra.push({ act: 'estado', label: 'Ver estado de cuenta', icon: 'fa-arrow-up-right-from-square',
                              onSelect: () => abrirEstadoDeCuenta(c) });
-                extra.push({ act: 'copy-uuid', label: 'Copiar identificador', icon: 'fa-regular fa-copy',
-                             onSelect: () => copyToClipboard(c.uuid) });
             }
-            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
-                         onSelect: () => copyToClipboard(String(c.id)) });
 
             return standardRowMenuItems({
                 view:   true, onView:   () => openContratoViewModal(c),
@@ -3484,15 +3521,21 @@
                 { act: 'edit', label: 'Editar contrato', icon: 'fa-pencil',
                   onSelect: () => { close(); openContratoModal(c); } },
             ];
+            // Mismas dos acciones del ciclo comercial que el menú de la fila, y
+            // con la misma condición. El orden también es el del back office
+            // viejo: facturar y dar de baja juntas, separadas de Editar.
+            if (contratoOperable(c)) {
+                items.push({ divider: true });
+                items.push({ act: 'facturar', label: 'Facturar', icon: 'fa-cash-register',
+                             onSelect: () => { close(); pedirPrevioFacturar(c); } });
+                items.push({ act: 'baja', label: 'Dar de baja', icon: 'fa-thumbs-down',
+                             onSelect: () => { close(); confirmarBajaContrato(c); } });
+            }
             if (c.uuid) {
                 items.push({ divider: true });
                 items.push({ act: 'estado', label: 'Ver estado de cuenta', icon: 'fa-arrow-up-right-from-square',
                              onSelect: () => abrirEstadoDeCuenta(c) });
-                items.push({ act: 'copy-uuid', label: 'Copiar identificador', icon: 'fa-regular fa-copy',
-                             onSelect: () => copyToClipboard(c.uuid) });
             }
-            items.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
-                         onSelect: () => copyToClipboard(String(c.id)) });
             items.push({ divider: true });
             items.push({ act: 'delete', label: 'Eliminar contrato', icon: 'fa-trash', danger: true,
                          onSelect: () => { close(); pedirImpactoContrato(c); } });
@@ -3910,6 +3953,196 @@
         });
     }
 
+    /* ---- Acciones del contrato: Facturar y Dar de baja ----
+     * Las dos que tenía el menú "Acciones" del back office viejo
+     * (`reactor-admin/contratos/consultar.php`). Viven en su propio endpoint
+     * (`api/contratos_accion.php`) y no en el PUT del ABM: ninguna es "guardar
+     * los campos que mandaste" — facturar escribe en cuatro tablas — y el
+     * detalle de por qué está en la cabecera de ese archivo.
+     */
+
+    function accionContrato(c, accion, body) {
+        return api('contratos_accion?accion=' + accion + '&id=' + encodeURIComponent(c.id),
+                   { method: 'POST', body: body || {} });
+    }
+
+    // Facturar NO usa confirmDialog: emitir un comprobante fiscal a nombre de
+    // un cliente, con su numeración consumida del talonario, no se confirma con
+    // una frase genérica. El backend previsualiza exactamente lo que va a
+    // escribir (`GET …?accion=facturar`) y el modal lo muestra — mismo reparto
+    // que el borrado con desglose de impacto (§15.1).
+    async function pedirPrevioFacturar(c) {
+        try {
+            const previo = await api('contratos_accion?accion=facturar&id=' + encodeURIComponent(c.id));
+            openContratoFacturarModal(c, previo);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openContratoFacturarModal(c, previo) {
+        const bloqueos  = previo.bloqueos  || [];
+        const avisos    = previo.avisos    || [];
+        const renglones = previo.renglones || [];
+        const totales   = previo.totales   || { subtotal: 0, iva: 0, total: 0 };
+        const bloqueado = bloqueos.length > 0;
+
+        const recuadro = (cls, icono, titulo, items) => !items.length ? '' : `
+            <div class="del-blocker ${cls}">
+                <i class="fa-solid ${icono}"></i>
+                <div>
+                    <strong>${escape(titulo)}</strong>
+                    <ul class="del-list">${items.map(t =>
+                        `<li class="del-item"><span class="del-item-label">${escape(t)}</span></li>`).join('')}</ul>
+                </div>
+            </div>`;
+
+        const filas = !renglones.length
+            ? `<tr><td colspan="5" class="muted" style="text-align:center">Sin renglones.</td></tr>`
+            : renglones.map((r, i) => `
+                <tr>
+                    <td class="td-num">${i}</td>
+                    <td>${escape(r.detalle)}</td>
+                    <td class="td-num">${escape(numero(r.iva))} %</td>
+                    <td class="td-num">${escape(moneda(r.unitario))}</td>
+                    <td class="td-num">${escape(moneda(r.monto))}</td>
+                </tr>`).join('');
+
+        const cli = previo.cliente;
+        const tal = previo.talonario;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Facturar contrato</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de la facturación">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-primary" data-act="ok">
+                        <i class="fa-solid fa-cash-register"></i> Emitir comprobante
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a emitir el comprobante del período
+                        <strong>${previo.periodo ? escape(previo.periodo) : '—'}</strong>
+                        del contrato <code>#${c.id}</code>
+                        ${previo.dominio ? `de <strong>${escape(previo.dominio.nombre)}</strong>` : ''}
+                        y el contrato va a pasar a facturar
+                        <strong>${previo.resultado && previo.resultado.facturar
+                            ? escape(formatDateOnly(previo.resultado.facturar)) : '—'}</strong>.
+                    </div>
+                    ${recuadro('', 'fa-ban', 'No se puede facturar.', bloqueos)}
+                    ${recuadro('del-aviso', 'fa-triangle-exclamation', 'Revisá antes de emitir.', avisos)}
+                    ${viewGrid([
+                        viewCardHalf('Cliente', cli
+                            ? `${escape(cli.razon || cli.nombre || ('#' + cli.id))}
+                               <span class="muted">· ${escape(cli.condicion || '—')}${
+                                   cli.cuit ? ' · ' + escape(cli.cuit) : ''}</span>`
+                            : `<span class="muted">Sin cliente</span>`),
+                        viewCardHalf('Talonario', tal
+                            ? `${escape(tal.nombre || ('#' + tal.id))}`
+                            : `<span class="muted">Sin talonario</span>`),
+                        viewCardHalf('Número', tal && tal.proximo_numero
+                            ? `<code>${escape(tal.proximo_numero)}</code>
+                               <span class="muted">· estimado</span>`
+                            : `<span class="muted">—</span>`),
+                        viewCardHalf('Emisión / Vencimiento',
+                            `${previo.emision ? escape(formatDateOnly(previo.emision)) : '—'}
+                             <span class="muted">a</span>
+                             ${previo.vencimiento ? escape(formatDateOnly(previo.vencimiento)) : '—'}`),
+                    ])}
+                    <div class="ficha-bloque">
+                        <div class="ficha-bloque-head">
+                            <span><i class="fa-solid fa-list-ul"></i> Renglones</span>
+                        </div>
+                        <table class="ficha-tabla">
+                            <thead>
+                                <tr>
+                                    <th class="td-num">#</th>
+                                    <th>Detalle</th>
+                                    <th class="td-num">IVA</th>
+                                    <th class="td-num">Unitario</th>
+                                    <th class="td-num">Monto</th>
+                                </tr>
+                            </thead>
+                            <tbody>${filas}</tbody>
+                            <tfoot>
+                                <tr><td colspan="4" class="td-num">Subtotal</td>
+                                    <td class="td-num">${escape(moneda(totales.subtotal))}</td></tr>
+                                <tr><td colspan="4" class="td-num">IVA</td>
+                                    <td class="td-num">${escape(moneda(totales.iva))}</td></tr>
+                                <tr><td colspan="4" class="td-num"><strong>Total</strong></td>
+                                    <td class="td-num"><strong>${escape(moneda(totales.total))}</strong></td></tr>
+                            </tfoot>
+                        </table>
+                        <div class="form-nota">
+                            El comprobante nace <strong>Pendiente y numerado</strong>: el número lo toma
+                            el talonario recién al emitir, así que el de arriba es estimado — si otra
+                            facturación se adelanta, éste se lleva el siguiente. Anularlo después
+                            <strong>no devuelve el número a la serie</strong>.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                const res = await accionContrato(c, 'facturar');
+                close();
+                toast('Comprobante emitido — ' + (res.numero || '#' + res.comprobante) +
+                      ' · ' + moneda((res.totales && res.totales.total) || 0));
+                // Al comprobante recién emitido, que es a donde llevaba el back
+                // office viejo después de facturar.
+                pedirFiltroComprobante('comprobantes', res.comprobante);
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 8000 });
+            }
+        });
+    }
+
+    // Dar de baja sí usa confirmDialog: no hay nada que previsualizar — escribe
+    // la fecha de baja y apaga la bandera, y las dos se ven en la ficha.
+    function confirmarBajaContrato(c) {
+        confirmDialog(
+            'Dar de baja el contrato',
+            `Se le va a poner fecha de baja de hoy al contrato #${c.id}` +
+            (c.dominio_nombre ? ` de ${c.dominio_nombre}` : '') +
+            ' y va a quedar deshabilitado: deja de facturarse y de remitir estado de cuenta. ' +
+            'Sus comprobantes y pagos no se tocan, y el dominio conserva la referencia. ' +
+            'Para revertirlo hay que volver a habilitarlo desde Editar.',
+            async () => {
+                try {
+                    const res = await accionContrato(c, 'baja');
+                    toast('Contrato dado de baja — ' + formatDateOnly(res.baja));
+                    navigate();
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 8000 });
+                }
+            },
+            { label: 'Dar de baja', tono: 'danger' }
+        );
+    }
+
     /* ---------- Views: Comprobantes ----------
      * Factura, prefactura, recibo, remito… — la cabecera vive en
      * `comprobantes` y sus renglones en `comprobantesrenglones`. El tipo, el
@@ -3962,6 +4195,10 @@
     async function renderComprobantes(root) {
         try {
             const state = tomarEstadoVista('comprobantes', comprobantesDefaults());
+            // "Facturar" desde Contratos deja pedido el comprobante que acaba
+            // de emitir. Va antes del GET: el filtro viaja al backend.
+            const cpbPedido = tomarFiltroComprobante('comprobantes');
+            if (cpbPedido) state.id = cpbPedido;
             const data  = await api('comprobantes?' + comprobantesQuery(state));
             CATALOGOS_COMPROBANTES = data.catalogos;
 
@@ -6826,6 +7063,11 @@
                         ${viewGrid([
                             viewCardHalf('Código',        `<code>#${usr.id}</code>`),
                             viewCardHalf('Nombre',        escape(usr.nombre)),
+                            // Va pegado al email porque casi siempre ES el email
+                            // (2065 de 2083 filas): verlos juntos es lo que hace
+                            // visible el caso raro en que difieren. Vacío es un
+                            // dato real — esa cuenta no puede loguearse.
+                            viewCardHalf('Usuario',       usr.usuario ? escape(usr.usuario) : `<span class="muted">—</span>`),
                             viewCardHalf('Email',         escape(usr.email)),
                             viewCardHalf('Celular',       usr.celular ? escape(usr.celular) : `<span class="muted">—</span>`),
                             viewCardHalf('Estado',        estadoVal),
@@ -6952,6 +7194,10 @@
         `;
     }
 
+    /* Las dos mitades de la credencial van juntas y a mitad de ancho cada una:
+       con qué nombre entra la persona y con qué contraseña lo valida. Hasta el
+       15/09/2026 sólo se veía la contraseña — `usuarios`.`usuario` se escribía
+       sola desde el email, adentro de la API y sin que la pantalla lo dijera. */
     function openUserModal(usr) {
         const isEdit  = !!usr;
         const backdrop = document.createElement('div');
@@ -6998,20 +7244,34 @@
                             <span class="toggle-label" id="usr-activo-label">${(!usr || usr.activo) ? 'Activo' : 'Inactivo'}</span>
                         </label>
                     </div>
-                    <div class="form-group">
-                        <label for="usr-pass">
-                            Contraseña
-                            ${isEdit ? '<span class="muted" style="font-weight:400">(vaciar para no cambiarla)</span>' : ''}
-                        </label>
-                        <div class="input-password">
-                            <input type="password" id="usr-pass" minlength="6" maxlength="32" autocomplete="new-password"
-                                   placeholder="${isEdit ? 'Sin cambios' : 'Mínimo 6 caracteres'}">
-                            <button type="button" class="pass-toggle" data-act="toggle-pass"
-                                    aria-label="Mostrar contraseña" title="Mostrar contraseña">
-                                <i class="fa-solid fa-eye"></i>
-                            </button>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="usr-usuario">
+                                Usuario
+                                <span class="muted" style="font-weight:400">(con el que ingresa)</span>
+                            </label>
+                            <!-- Si la cuenta no tiene credencial (hoy 1 de 2083)
+                                 el campo abre con el correo: es lo que el backend
+                                 le escribia solo al guardar, ahora a la vista. -->
+                            <input type="text" id="usr-usuario" maxlength="100" autocomplete="off"
+                                   value="${escape(usr?.usuario || usr?.email || '')}" required>
+                            <div class="field-error" id="usr-usuario-err" style="display:none"></div>
                         </div>
-                        <div class="field-error" id="usr-pass-err" style="display:none"></div>
+                        <div class="form-group">
+                            <label for="usr-pass">
+                                Contraseña
+                                ${isEdit ? '<span class="muted" style="font-weight:400">(vaciar para no cambiarla)</span>' : ''}
+                            </label>
+                            <div class="input-password">
+                                <input type="password" id="usr-pass" minlength="6" maxlength="32" autocomplete="new-password"
+                                       placeholder="${isEdit ? 'Sin cambios' : 'Mínimo 6 caracteres'}">
+                                <button type="button" class="pass-toggle" data-act="toggle-pass"
+                                        aria-label="Mostrar contraseña" title="Mostrar contraseña">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                            </div>
+                            <div class="field-error" id="usr-pass-err" style="display:none"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -7032,15 +7292,38 @@
         const celularInput = backdrop.querySelector('#usr-celular');
         const activoChk    = backdrop.querySelector('#usr-activo');
         const activoLbl    = backdrop.querySelector('#usr-activo-label');
+        const usuarioInput = backdrop.querySelector('#usr-usuario');
         const passInput    = backdrop.querySelector('#usr-pass');
         const nombreErr    = backdrop.querySelector('#usr-nombre-err');
         const emailErr     = backdrop.querySelector('#usr-email-err');
         const celularErr   = backdrop.querySelector('#usr-celular-err');
+        const usuarioErr   = backdrop.querySelector('#usr-usuario-err');
         const passErr      = backdrop.querySelector('#usr-pass-err');
         const saveBtn      = backdrop.querySelector('[data-act="save"]');
 
         activoChk.addEventListener('change', () => {
             activoLbl.textContent = activoChk.checked ? 'Activo' : 'Inactivo';
+        });
+
+        /* `usuario` ES LA CREDENCIAL DE INGRESO, NO UN ROTULO: api/login.php
+           hace `WHERE usuario = :u`. Por convención del alta vale lo mismo que
+           el correo —2065 de las 2083 filas—, así que el campo SIGUE al email
+           mientras nadie lo toque a mano y deja de seguirlo en cuanto alguien
+           escribe en él (17 filas tienen credencial propia, distinta del correo).
+
+           El espejo está acá y no en el backend a propósito: hasta ahora la API
+           arrastraba el correo a `usuario` en silencio cuando los dos coincidían,
+           y quien editaba el email no tenía cómo saber que le estaba cambiando la
+           credencial. Ahora el cambio se ve en el campo de al lado mientras se
+           tipea, y el servidor escribe lo que le mandan. */
+        const mismoTexto = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+        let usuarioEspejo = !isEdit
+            || usuarioInput.value.trim() === ''
+            || mismoTexto(usuarioInput.value, emailInput.value);
+
+        usuarioInput.addEventListener('input', () => { usuarioEspejo = false; });
+        emailInput.addEventListener('input', () => {
+            if (usuarioEspejo) usuarioInput.value = emailInput.value.trim();
         });
 
         // Ojo del campo contraseña: alterna entre puntos y texto plano. El ícono
@@ -7076,10 +7359,15 @@
             const email   = emailInput.value.trim().toLowerCase();
             const celular = celularInput.value.trim();
             const activo  = activoChk.checked;
+            // Se manda en minúsculas igual que el email: la columna es
+            // utf8mb4_unicode_ci, así que el login ya compara sin distinguir
+            // mayúsculas y guardar la variante tipeada sólo rompería el espejo
+            // con `correo` para las 2065 filas donde los dos coinciden.
+            const usuario = usuarioInput.value.trim().toLowerCase();
             const pass    = passInput.value;
 
-            [nombreErr, emailErr, celularErr, passErr].forEach(el => el.style.display = 'none');
-            [nombreInput, emailInput, celularInput, passInput].forEach(el => el.classList.remove('input-invalid'));
+            [nombreErr, emailErr, celularErr, usuarioErr, passErr].forEach(el => el.style.display = 'none');
+            [nombreInput, emailInput, celularInput, usuarioInput, passInput].forEach(el => el.classList.remove('input-invalid'));
 
             let firstInvalid = null;
             if (!nombre) {
@@ -7100,6 +7388,20 @@
                 celularInput.classList.add('input-invalid');
                 firstInvalid = firstInvalid || celularInput;
             }
+            // Sin `usuario` la cuenta queda sin credencial y no entra nunca
+            // más; con un espacio adentro tampoco, porque el login compara la
+            // columna tal cual se tipeó en el formulario de ingreso.
+            if (!usuario) {
+                usuarioErr.textContent = 'El usuario es obligatorio';
+                usuarioErr.style.display = 'block';
+                usuarioInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || usuarioInput;
+            } else if (/\s/.test(usuario)) {
+                usuarioErr.textContent = 'El usuario no puede tener espacios';
+                usuarioErr.style.display = 'block';
+                usuarioInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || usuarioInput;
+            }
             if (!isEdit && pass.length < 6) {
                 passErr.textContent = 'Mínimo 6 caracteres';
                 passErr.style.display = 'block';
@@ -7113,7 +7415,7 @@
             }
             if (firstInvalid) { firstInvalid.focus(); return; }
 
-            const payload = { email, nombre, celular, activo };
+            const payload = { email, nombre, celular, activo, usuario };
             if (pass !== '') payload.password = pass;
 
             saveBtn.disabled = true;

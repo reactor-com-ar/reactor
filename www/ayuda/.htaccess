@@ -1,0 +1,27 @@
+# Rutas de la seccion Ayuda. Mismo esquema que `blog/.htaccess`: las rutas
+# fijas primero, el comodin de slugs al final.
+RewriteEngine On
+RewriteBase /ayuda/
+
+RewriteRule ^$ listar.php [L]
+
+# Los ids salen de `entradascategorias`:
+#   111 = Ayuda \ Preguntas Frecuentes    106 = Ayuda \ Tutoriales
+# El slug es la PRIMERA PALABRA del alias en minusculas, no el alias entero
+# como en el blog: por eso `/ayuda/preguntas` y no `/ayuda/preguntas-frecuentes`.
+# Son las URLs ya publicadas; unificarlas con las del blog las romperia.
+RewriteRule ^preguntas/?$ listar.php?cat=111 [L]
+RewriteRule ^tutoriales/?$ listar.php?cat=106 [L]
+
+RewriteRule ^buscar/([^/]+)/?$ listar.php?bus=$1 [L]
+
+# Los .php reales de la carpeta, sin extension (`/ayuda/listar?bus=factura`).
+# ANTES del comodin de slugs -- ver la explicacion en `blog/.htaccess`.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{DOCUMENT_ROOT}/ayuda/$1.php -f
+RewriteRule ^([a-zA-Z0-9\-\_]+)$ $1.php [L,QSA]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([a-zA-Z0-9\-\_]+)$ articulo.php?uid=$1 [L,QSA]

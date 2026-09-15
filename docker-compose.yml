@@ -10,14 +10,17 @@ services:
     #   8086 -> cloud
     #   8087 -> panel
     #   8115 -> app
+    #   8134 -> www (sitio publico)
     ports:
       - "8086:8086"
       - "8087:8087"
       - "8115:8115"
+      - "8134:8134"
     volumes:
       - ./cloud:/var/www/html
       - ./panel:/var/www/panel
       - ./app:/var/www/app
+      - ./www:/var/www/www
       # env.php y los .env quedan en /var/www (un nivel arriba de los docroots)
       # para que `dirname(__DIR__, 2) . '/env.php'` desde cualquier .php de
       # cloud/api/ resuelva correctamente y sean compartibles entre apps.

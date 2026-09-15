@@ -1,0 +1,37 @@
+# Rutas del blog. El orden importa: las rutas fijas van ANTES del comodin de
+# slugs, o `/blog/noticias` se buscaria como si fuera el slug de una entrada.
+RewriteEngine On
+RewriteBase /blog/
+
+# `/blog/` es el listado. Se sirve directo, sin redirigir a `/blog/listar`:
+# asi la URL publica del listado es `/blog` y no hay dos direcciones para la
+# misma pagina.
+RewriteRule ^$ listar.php [L]
+
+# Las categorias por nombre. Los ids salen de `entradascategorias`:
+#   118 = Blog \ Noticias      110 = Blog \ Notas
+# Estan fijos aca porque son URLs ya publicadas e indexadas; el PHP igual
+# verifica que la categoria pertenezca a la rama del blog antes de listarla.
+RewriteRule ^noticias/?$ listar.php?cat=118 [L]
+RewriteRule ^notas/?$ listar.php?cat=110 [L]
+
+# `/blog/buscar/<termino>` -> el listado filtrado.
+RewriteRule ^buscar/([^/]+)/?$ listar.php?bus=$1 [L]
+
+# Los .php reales de la carpeta, sin extension (`/blog/listar?bus=iot`).
+#
+# ESTA REGLA TIENE QUE IR ANTES DEL COMODIN DE SLUGS. El legacy la tenia
+# DESPUES, y como el comodin lleva [L] nunca se llegaba a ella: `/blog/listar`
+# entraba como si `listar` fuera el slug de una entrada y devolvia 404. La regla
+# de la raiz tampoco lo salvaba, porque mod_rewrite aplica el .htaccess mas
+# profundo. Comprueba que el destino exista, igual que la de la raiz, para no
+# entrar en el bucle de redirecciones internas que ahi esta documentado.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{DOCUMENT_ROOT}/blog/$1.php -f
+RewriteRule ^([a-zA-Z0-9\-\_]+)$ $1.php [L,QSA]
+
+# Cualquier otra cosa es el slug (`entradas`.`uuid`) de una entrada.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([a-zA-Z0-9\-\_]+)$ consultar.php?uid=$1 [L,QSA]

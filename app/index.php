@@ -72,6 +72,28 @@ $sinPerfil = $contexto['perfil'] <= 0;
 $puedeOperar   = appPuede($contexto, 'operacion');
 $puedeInvitar  = appPuede($contexto, 'invitacion');
 
+// LOS DOS BOTONES DE LA TOPBAR SE DIBUJAN SOLO SI HAY ENTRE QUE ELEGIR.
+//
+// Los dos abren un modal con una lista y un tilde en la opcion en curso. Con
+// una sola opcion ese modal no ofrece nada: muestra lo que ya dice la franja
+// del encabezado, con un tilde al lado. Y no es el caso raro sino el normal —
+// en produccion, 1988 de 2029 cuentas (98%) tienen un solo perfil, y 137 de
+// los 147 dominios (93%) tienen un solo panel.
+//
+// SE CUENTA LO QUE VA A LISTAR EL MODAL, no lo que hay en la base:
+//
+//   - Paneles: `$panelActivo['paneles']` ya es la lista que devuelve
+//     `api/paneles.php` — los del dominio, habilitados y ADEMAS permitidos por
+//     `perfiles_paneles`. Contar `paneles` a secas dibujaria el boton para un
+//     perfil que tiene permiso sobre uno solo de los cinco del dominio.
+//   - Dominios: perfiles propios habilitados, el mismo criterio que
+//     `api/dominios.php`.
+//
+// Es una decision de presentacion y nada mas: los dos endpoints siguen ahi y
+// siguen revalidando: esconder un boton no es un control de acceso.
+$puedeCambiarPanel   = $puedeOperar && count($panelActivo['paneles']) > 1;
+$puedeCambiarDominio = appPerfilesCantidad((int) ($usuario['id'] ?? 0)) > 1;
+
 // Detalles del dominio activo para el modal del mismo nombre. `Mi Perfil` es el
 // rol del usuario EN ESTE dominio (Administrador / Operador / ...), que sale
 // del perfil activo; los tres contadores son columnas denormalizadas de
@@ -254,18 +276,19 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
         <div class="topbar-spacer"></div>
 
         <nav class="topbar-actions">
-            <?php // "Cambiar de Panel" no tiene sentido sin permiso de
-                  // operacion: no hay panel que abrir. ?>
-            <?php if ($puedeOperar): ?>
+            <?php // Los dos solo si hay entre que elegir -- ver arriba. ?>
+            <?php if ($puedeCambiarPanel): ?>
             <button type="button" class="topbar-action" title="Cambiar de Panel"
                     data-nav="panel" data-modal="modal-panel">
                 <i class="fa-solid fa-pager"></i>
             </button>
             <?php endif; ?>
+            <?php if ($puedeCambiarDominio): ?>
             <button type="button" class="topbar-action" title="Cambiar de Dominio"
                     data-nav="dominio" data-modal="modal-dominio">
                 <i class="fa-solid fa-location-dot"></i>
             </button>
+            <?php endif; ?>
             <a href="<?= htmlspecialchars($soporteUrl, ENT_QUOTES) ?>"
                target="_blank" rel="noopener noreferrer"
                class="topbar-action" title="Mesa de Ayuda" data-nav="soporte">
@@ -385,13 +408,43 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
                     </div>
                 <?php endif; ?>
 
-                <?php // SIN PERMISO DE OPERACION no se dibuja ningun control, y
-                      // se dice por que: una pantalla vacia no distingue "tu
-                      // perfil no puede operar" de "el panel esta vacio" ni de
-                      // "se rompio algo", y las tres se arreglan distinto. El
-                      // aviso manda a quien administra el dominio, que es quien
-                      // puede darle el permiso desde panel.reactor.com.ar. ?>
-                <?php if (!$puedeOperar): ?>
+                <?php // SIN CONTROLES SE DICE POR QUE: una pantalla vacia no
+                      // distingue "tu perfil no puede operar" de "el panel esta
+                      // vacio" ni de "se rompio algo", y las tres se arreglan
+                      // distinto.
+                      //
+                      // SON DOS CAUSAS DISTINTAS Y HAY QUE SEPARARLAS. Hasta el
+                      // 15/09/2026 las dos caian en el mismo mensaje, el de
+                      // abajo, y para la primera decia cualquier cosa:
+                      //
+                      //   a) La cuenta NO ESTA EN NINGUN DOMINIO (`$sinPerfil`):
+                      //      no tiene ni un `perfiles` habilitado, asi que
+                      //      `appContextoSesion()` devuelve el contexto vacio y
+                      //      `$dominioNombre` queda en "—". El mensaje viejo le
+                      //      decia "pediselo a quien administra —", que no
+                      //      nombra a nadie, y le echaba la culpa a un permiso
+                      //      que no es el que falta. No es un caso de borde: son
+                      //      142 cuentas habilitadas en produccion, casi todas
+                      //      gente con DOS cuentas que entro con la que tiene el
+                      //      perfil deshabilitado. Por eso el aviso menciona esa
+                      //      posibilidad: es la salida que la persona puede
+                      //      intentar sola.
+                      //
+                      //   b) La cuenta SI esta en un dominio pero el perfil no
+                      //      tiene `operacion`. Ahi si corresponde mandarla a
+                      //      quien administra ese dominio, que es quien se lo
+                      //      puede dar desde panel.reactor.com.ar. ?>
+                <?php if ($sinPerfil): ?>
+                    <p class="lista-aviso">
+                        Tu cuenta no est&aacute; asociada a ning&uacute;n dominio, as&iacute; que
+                        todav&iacute;a no hay nada para operar.
+                        Si ten&eacute;s m&aacute;s de una cuenta, prob&aacute; ingresando con
+                        el otro correo o celular; si no, escribinos por
+                        <a href="<?= htmlspecialchars($soporteUrl, ENT_QUOTES) ?>"
+                           target="_blank" rel="noopener noreferrer">la Mesa de Ayuda</a>.
+                    </p>
+
+                <?php elseif (!$puedeOperar): ?>
                     <p class="lista-aviso">
                         Tu perfil no tiene permiso para operar los paneles de este dominio.
                         Ped&iacute;selo a quien administra <?= htmlspecialchars($dominioNombre) ?>.

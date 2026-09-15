@@ -13,14 +13,19 @@ RUN mkdir -p /var/log/reactor/cloud/ejecuciones \
 # Permitir que los .htaccess tomen efecto
 RUN sed -i 's|AllowOverride None|AllowOverride All|g' /etc/apache2/apache2.conf
 
-# Apache escucha en 8086 (cloud), 8087 (panel) y 8115 (app). Puertos fijos,
-# mismo interno=externo, mismo dev=prod. El default ports.conf (Listen 80) se
-# reemplaza, y el 000-default.conf se deshabilita porque cada app tiene su
-# propio vhost explicito en vhosts.conf.
+# Apache escucha en 8086 (cloud), 8087 (panel), 8115 (app) y 8134 (www).
+# Puertos fijos, mismo interno=externo, mismo dev=prod. El default ports.conf
+# (Listen 80) se reemplaza, y el 000-default.conf se deshabilita porque cada app
+# tiene su propio vhost explicito en vhosts.conf.
+#
+# Los dos .conf van COPY, no montados como volumen: editarlos en el repo no
+# alcanza, hay que rebuildear la imagen (`docker compose -p reactor up -d
+# --build`) o el contenedor sigue con los puertos viejos y el vhost nuevo no
+# aparece en `apachectl -S`.
 COPY ports.conf /etc/apache2/ports.conf
 COPY vhosts.conf /etc/apache2/sites-available/010-reactor-vhosts.conf
 RUN a2dissite 000-default && a2ensite 010-reactor-vhosts
 
 WORKDIR /var/www/html
 
-EXPOSE 8086 8087 8115
+EXPOSE 8086 8087 8115 8134

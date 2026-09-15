@@ -16,6 +16,9 @@
 #   PWA_DOMAIN      - default app.reactor.com.ar
 #   PWA_DOMAIN_ALIASES - alias del vhost de app, separados por espacio.
 #                     Default: pwa. newapp. webapp.
+#   WWW_DOMAIN      - default www.reactor.com.ar
+#   WWW_DOMAIN_ALIASES - alias del vhost del sitio publico, separados por
+#                     espacio. Default: reactor.com.ar (el apex).
 #   CERTBOT_EMAIL   - default javieralvarez@databox.net.ar
 # ============================================================
 
@@ -25,6 +28,7 @@ APP_DIR="/opt/app/reactor"
 APP_PORT_HOST=8086        # cloud
 PANEL_PORT_HOST=8087      # panel
 PWA_PORT_HOST=8115        # app end-user
+WWW_PORT_HOST=8134        # www (sitio publico)
 DOMAIN="${DOMAIN:-cloud.reactor.com.ar}"
 # El BackOffice se sirve en panel.reactor.com.ar y responde ademas por
 # control.reactor.com.ar (DNS apuntado a este server el 2026-09-05), que va al
@@ -64,6 +68,29 @@ PANEL_DOMAIN_ALIASES="${PANEL_DOMAIN_ALIASES:-control.reactor.com.ar}"
 # Cuando alguno deje de usarse, se saca de PWA_DOMAIN_ALIASES y de vhosts.conf.
 PWA_DOMAIN="${PWA_DOMAIN:-app.reactor.com.ar}"
 PWA_DOMAIN_ALIASES="${PWA_DOMAIN_ALIASES:-pwa.reactor.com.ar newapp.reactor.com.ar webapp.reactor.com.ar}"
+# El sitio publico de la marca se sirve en www.reactor.com.ar y responde ademas
+# por el apex reactor.com.ar, que va al MISMO vhost del contenedor (8134).
+#
+# EL APEX NO REDIRIGE A www.: es un alias del mismo vhost, igual que pwa. lo es
+# de app. Es la diferencia con control., que si redirige a panel. con un 301 --
+# ahi hay un punto de entrada canonico que queremos que el navegador adopte;
+# aca los dos nombres son el sitio. Si algun dia se quiere canonizar uno de los
+# dos, el patron a copiar es el bloque de control. mas abajo (return 301 DENTRO
+# de `location /`, nunca a nivel server, o se voltea la renovacion del cert).
+#
+# OJO CON EL DNS DEL APEX: tiene que ser un registro A apuntando a la IP del
+# server. Un CNAME en el apex lo prohibe el RFC 1034 y la mayoria de los
+# proveedores lo rechaza; algunos ofrecen ALIAS/ANAME, que sirve igual. Si el
+# apex no resuelve a la IP, el chequeo de DNS de mas abajo lo saltea y el cert
+# sale sin el -- el sitio anda por www. y el apex tira error de certificado.
+#
+# Como todos los alias, tiene que estar en los tres lugares o no funciona:
+#   1) el server_name de nginx (abajo), o el request cae en el primer server
+#      block y se sirve el vhost equivocado;
+#   2) el certificado (bloque de certbot, mas abajo);
+#   3) el ServerAlias de docker/vhosts.conf.
+WWW_DOMAIN="${WWW_DOMAIN:-www.reactor.com.ar}"
+WWW_DOMAIN_ALIASES="${WWW_DOMAIN_ALIASES:-reactor.com.ar}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-javieralvarez@databox.net.ar}"
 COMPOSE_FILE="docker-compose.prod.yml"
 
@@ -132,7 +159,8 @@ echo "        OK"
 #   - No incluye el servicio reactor-db (en prod la BD es AWS RDS).
 #   - Apache bindea solo a 127.0.0.1:8086 (Nginx hace el frente publico).
 # Puertos en prod (interno = externo, mismos que dev cuando aplica):
-#   - Apache  8086:8086 (cloud), 8087:8087 (panel), 8115:8115 (app) -- igual a dev
+#   - Apache  8086:8086 (cloud), 8087:8087 (panel), 8115:8115 (app),
+#             8134:8134 (www) -- igual a dev
 #   - EMQX MQTT 16273:16273 (dev usa 1884 por choque con vigicom-emqx)
 #   - EMQX Dashboard 18083:18083 (dev usa 18084 por choque con vigicom-emqx)
 # Tambien hay que bindear env.php y los .env.* al container para que las
@@ -151,10 +179,12 @@ services:
       - "127.0.0.1:${APP_PORT_HOST}:${APP_PORT_HOST}"      # cloud
       - "127.0.0.1:${PANEL_PORT_HOST}:${PANEL_PORT_HOST}"  # panel
       - "127.0.0.1:${PWA_PORT_HOST}:${PWA_PORT_HOST}"      # app end-user
+      - "127.0.0.1:${WWW_PORT_HOST}:${WWW_PORT_HOST}"      # www (sitio publico)
     volumes:
       - ./cloud:/var/www/html
       - ./panel:/var/www/panel
       - ./app:/var/www/app
+      - ./www:/var/www/www
       - ./env.php:/var/www/env.php:ro
       - ./.env.production:/var/www/.env.production:ro
     env_file:
@@ -287,10 +317,12 @@ server {
 # \`return\` del contexto server en la fase rewrite, ANTES de elegir el location:
 # con un \`return\` suelto, el pedido de Let's Encrypt a
 # /.well-known/acme-challenge/<token> tambien se redirigiria y la validacion
-# fallaria -- y control. comparte certificado con los otros 6 dominios, asi que
+# fallaria -- y control. comparte certificado con los otros 8 dominios, asi que
 # voltearia la renovacion de todos. Adentro de \`location /\`, el location que
 # certbot inserta al renovar es mas especifico y gana.
-# Verificado con \`certbot renew --dry-run\`: los 7 dominios validan.
+# Verificado con \`certbot renew --dry-run\` cuando el cert cubria 7 dominios:
+# validaban los 7. www. y el apex se sumaron despues (2026-09-15) sin repetir
+# el dry-run -- conviene volver a correrlo la primera vez que entren al cert.
 #
 # certbot le agrega el bloque 443 (necesita el cert igual que si sirviera
 # contenido: sin el, el navegador corta con error de certificado antes de leer
@@ -330,6 +362,40 @@ server {
         #
         # Acotado a \$host: solo toca los redirect al MISMO dominio, no los que
         # apunten a un sitio externo.
+        proxy_redirect     http://\$host/ https://\$host/;
+        client_max_body_size 50M;
+        proxy_read_timeout 120s;
+    }
+}
+
+# www.reactor.com.ar -> Apache 8134 (sitio publico)
+# El apex reactor.com.ar entra por aca tambien -- NO redirige a www., es el
+# mismo vhost servido por dos nombres (ver WWW_DOMAIN_ALIASES arriba).
+server {
+    listen 80;
+    server_name ${WWW_DOMAIN} ${WWW_DOMAIN_ALIASES};
+    location / {
+        proxy_pass         http://127.0.0.1:${WWW_PORT_HOST};
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        # Reescribe el esquema de los Location que emite Apache.
+        #
+        # Apache esta detras de este proxy y solo ve HTTP, asi que todo redirect
+        # absoluto que genera sale como \`http://\`, aunque el usuario haya
+        # entrado por HTTPS: degrada la conexion, cambia de origen y rebota por
+        # el puerto 80.
+        #
+        # Aplica a los DOS generadores de Apache: mod_dir (el 301 que agrega la
+        # barra a un directorio) y mod_rewrite con [R]. Del lado de Apache se
+        # puede arreglar el segundo leyendo X-Forwarded-Proto, pero no el
+        # primero: mod_dir no mira esa cabecera. Por eso el arreglo va aca.
+        #
+        # Acotado a \$host: solo toca los redirect al MISMO dominio, no los que
+        # apunten a un sitio externo. Con el apex y www. compartiendo vhost eso
+        # importa el doble -- un redirect emitido sobre reactor.com.ar tiene que
+        # quedar en reactor.com.ar, no saltar a www.
         proxy_redirect     http://\$host/ https://\$host/;
         client_max_body_size 50M;
         proxy_read_timeout 120s;
@@ -383,6 +449,7 @@ else
     RESOLVED_CLOUD=$(dig +short A "$DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PANEL=$(dig +short A "$PANEL_DOMAIN" @8.8.8.8 | tail -n1)
     RESOLVED_PWA=$(dig +short A "$PWA_DOMAIN" @8.8.8.8 | tail -n1)
+    RESOLVED_WWW=$(dig +short A "$WWW_DOMAIN" @8.8.8.8 | tail -n1)
 
     # Armar lista de dominios cuyo DNS YA apunta al server (-d por cada uno).
     CERT_DOMAINS=()
@@ -419,6 +486,24 @@ else
             CERT_DOMAINS+=("-d" "$PWA_ALIAS")
         else
             echo "        DNS de $PWA_ALIAS -> ${RESOLVED_PWA_ALIAS:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+        fi
+    done
+    if [ "$RESOLVED_WWW" = "$PUBLIC_IP" ]; then
+        CERT_DOMAINS+=("-d" "$WWW_DOMAIN")
+    else
+        echo "        DNS de $WWW_DOMAIN -> ${RESOLVED_WWW:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
+    fi
+    # El apex entra por aca. Si todavia esta apuntado al hosting viejo, se
+    # saltea como cualquier otro alias y el cert sale igual con www.: mover el
+    # DNS del apex baja el sitio actual, asi que es un paso deliberado y no algo
+    # que este script deba dar por hecho. Recordar que en el apex tiene que ser
+    # un registro A (o ALIAS/ANAME), nunca un CNAME.
+    for WWW_ALIAS in $WWW_DOMAIN_ALIASES; do
+        RESOLVED_WWW_ALIAS=$(dig +short A "$WWW_ALIAS" @8.8.8.8 | tail -n1)
+        if [ "$RESOLVED_WWW_ALIAS" = "$PUBLIC_IP" ]; then
+            CERT_DOMAINS+=("-d" "$WWW_ALIAS")
+        else
+            echo "        DNS de $WWW_ALIAS -> ${RESOLVED_WWW_ALIAS:-(no resuelve)} (esperado $PUBLIC_IP) -- se salta este dominio."
         fi
     done
 
@@ -509,6 +594,7 @@ echo ""
 echo "  Cloud:      https://${DOMAIN}/         (proxy a 127.0.0.1:${APP_PORT_HOST})"
 echo "  Panel:      https://${PANEL_DOMAIN}/   (proxy a 127.0.0.1:${PANEL_PORT_HOST})"
 echo "  App (PWA):  https://${PWA_DOMAIN}/     (proxy a 127.0.0.1:${PWA_PORT_HOST})"
+echo "  Sitio web:  https://${WWW_DOMAIN}/     (proxy a 127.0.0.1:${WWW_PORT_HOST})"
 echo "  Repo:       $APP_DIR"
 echo "  Compose:    docker compose -f $APP_DIR/$COMPOSE_FILE <cmd>"
 echo "  Logs:       sudo docker logs -f reactor-apache"

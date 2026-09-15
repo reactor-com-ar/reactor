@@ -15,6 +15,15 @@ declare(strict_types=1);
  *  - No se muestra el celular del destinatario: en este circuito todavia no
  *    lo tenemos (se pide al aceptar). En su lugar se muestra el correo, que
  *    es a donde llego la invitacion.
+ *
+ * ACEPTAR ES UN POST, igual que Rechazar (15/09/2026). Fue un `<a href>`
+ * mientras `aceptar.php` siempre abria un formulario: un GET que no cambiaba
+ * estado. Desde que esa pantalla resuelve la invitacion sin preguntar nada
+ * cuando la cuenta ya esta completa, seguir enlazandola dejaria que un prefetch
+ * —el antivirus del correo, el preview del cliente de mail, un crawler que siga
+ * los enlaces de esta pagina— aceptara una invitacion que la persona todavia no
+ * abrio. Ademas de cambiar el metodo, el POST saca la URL `aceptar?uid=...` del
+ * HTML, que es lo que un prefetch podria encontrar.
  */
 
 require __DIR__ . '/_layout.php';
@@ -64,9 +73,12 @@ $cuerpo = '
                 <i class="fa-solid fa-xmark"></i> Rechazar
             </button>
         </form>
-        <a class="btn btn-primary" href="aceptar?uid=' . $uid . '">
-            <i class="fa-solid fa-check"></i> Aceptar
-        </a>
+        <form method="post" action="aceptar">
+            <input type="hidden" name="uid" value="' . $uid . '">
+            <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-check"></i> Aceptar
+            </button>
+        </form>
     </div>
 ';
 

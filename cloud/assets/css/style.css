@@ -880,6 +880,13 @@ tbody tr.row-clickable { cursor: pointer; }
 .del-blocker > i             { color: var(--danger); margin-top: 2px; }
 .del-blocker .del-list       { margin: 8px 0; }
 .del-blocker .del-item       { background: rgba(0,0,0,.25); }
+/* Variante ámbar del mismo recuadro: "mirá esto antes de seguir" en vez de "no
+ * se puede". La usa la previsualización de Facturar (Contratos) para los avisos
+ * que no bloquean la emisión. Es un modificador y no una clase nueva porque la
+ * caja es la misma —ícono a la izquierda, título y lista—; lo único que cambia
+ * es el color, y con dos definiciones enteras se despegan al primer retoque. */
+.del-blocker.del-aviso       { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.35); }
+.del-blocker.del-aviso > i   { color: var(--warn); }
 .del-warning {
     display: flex; align-items: center; gap: 8px;
     font-size: .82rem; color: var(--muted);

@@ -155,7 +155,49 @@ emite y quién puede hacerlo:
 - **Las dos resuelven los mismos tres casos** al aceptar: sin cuenta → se crea
   `usuarios` + `perfiles`; con cuenta y sin perfil → sólo el perfil, sin tocarle
   contraseña ni dominio activo; con perfil habilitado en ese dominio → **no se
-  hace nada** y la invitación se cierra igual.
+  hace nada** y la invitación se cierra igual. Las dos lo dicen además con la
+  misma pantalla: el tercer caso es *"Ya tenías acceso"* y no *"el dominio nuevo
+  te va a aparecer en Cambiar dominio"*, que es lo que el panel contestaba a
+  todo el que ya tuviera cuenta — mandarlo a buscar un acceso que ya estaba ahí.
+- **A QUIEN YA ESTÁ REGISTRADO NO SE LE PIDEN DATOS (15/09/2026): la cuenta se
+  busca ANTES de dibujar el formulario, no adentro del POST.**
+  Las dos pantallas de aceptación resuelven primero si el correo de la
+  invitación ya tiene cuenta y recién después deciden qué mostrar: **sin cuenta**
+  los tres campos de siempre; **con cuenta incompleta**, sólo lo que le falta
+  (el resto va de solo lectura); **con cuenta completa**, *nada* — la invitación
+  se resuelve en el mismo request y se muestra la bienvenida. Hasta esa fecha el
+  formulario era incondicional y el `SELECT` de la cuenta vivía dentro del POST,
+  así que a una persona ya registrada se le pedían los tres datos **y después se
+  descartaban**: el camino "ya tiene cuenta" no toca `usuarios` a propósito, así
+  que lo tipeado sólo quedaba escrito en `invitaciones`.
+- **De la cuenta que ya existe se completan SÓLO las columnas vacías**
+  (`nombre`, `celular`, `correo`) y con un `WHERE` que las exige vacías
+  (`usuarioCompletarVacios()`). **Nunca se pisa un dato cargado, y el `WHERE` es
+  el control**: el `uuid` del enlace **lo ve el emisor**, así que dejar
+  sobrescribir el celular o el correo de una cuenta ajena sería entregarle las
+  dos puertas del login de `app` (que busca por `celular` O `correo`) y las dos
+  vías de recuperación. El servidor además **sólo lee del POST los campos que
+  dibujó** — son dos candados sobre el mismo agujero, y el de la base es el que
+  también resuelve la carrera contra la consulta de la pantalla.
+- **`correo` se completa aunque no se pregunte**: es el correo al que llegó esta
+  invitación y una cuenta sin correo no puede recuperar la contraseña. Si ya
+  tenía uno, el mismo `WHERE` lo protege.
+- **La invitación se cierra con lo que quedó en la cuenta, no con lo que se
+  tipeó.** `invitaciones`.`nombre` / `.celular` son las dos columnas que muestra
+  el listado del panel: tienen que decir a quién se le dio el acceso.
+- **Y por eso `Aceptar` pasó a ser un POST** en las dos fichas
+  (`invitacion/index.php`), igual que Rechazar. Era un `<a href>` mientras
+  `aceptar` siempre abría un formulario —un GET que no cambiaba estado—; ahora
+  ese request puede resolver la invitación sin preguntar nada, y un prefetch (el
+  antivirus del correo, el preview del cliente de mail, un crawler que siga los
+  enlaces de la página) la aceptaría sin que la persona la haya abierto. El POST
+  además saca la URL `aceptar?uid=…` del HTML, que es lo que un prefetch
+  encontraría.
+- **Lo que la pantalla muestra de solo lectura se lo está mostrando a quien
+  tenga el enlace**, o sea también al emisor: el nombre de la cuenta (y el
+  celular, en el caso raro de una cuenta con celular y sin nombre). Es la
+  contrapartida elegida a cambio de no pedir datos que ya existen — quien invita
+  ya conocía el correo, que es lo que tipeó para invitar.
 - **El celular que completa el invitado son EXACTAMENTE 10 DÍGITOS Y NADA MÁS**
   (07/09/2026): sin espacios, guiones, paréntesis, puntos ni el signo `+`. Es el
   formato argentino sin el `0` de la característica y sin el `15` (`2644123456`),

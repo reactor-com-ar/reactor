@@ -85,10 +85,15 @@ function handleList(): void
     // resto del alcance historico (`20260906_1900_usuarios_sin_legacy.sql`):
     // los roles pasaron a ser un concepto de cloud (`controladores_roles`) y un
     // usuario final no tiene uno. Lo que define su alcance son sus `perfiles`.
+    // `usuario` viaja en el listado —no como la contrasena, que sale de a un id
+    // por handleCredencial()— porque no es un secreto: es el nombre con el que
+    // la persona entra, y lo consumen los dos modales (Consultar y Edicion) sin
+    // pedir nada extra.
     $stmt = db()->query(
         "SELECT id,
                 correo     AS email,
                 nombre,
+                usuario,
                 celular,
                 habilitado,
                 ingresado  AS last_login_at,
@@ -148,24 +153,20 @@ function handleCreate(): void
     $email    = strtolower(trim((string) ($in['email']    ?? '')));
     $nombre   = trim((string) ($in['nombre']   ?? ''));
     $celular  = trim((string) ($in['celular']  ?? ''));
+    $usuario  = credencialPedida($in, $email);
     $password = (string) ($in['password'] ?? '');
     // `activo` llega del toggle del formulario pero no se usa en el alta:
     // `habilitado` es una constante (1). Se respeta al editar.
 
     validarComunes($email, $nombre, $celular);
+    validarUsuario($usuario);
     if ($password === '')          json_error('La contrasena es obligatoria', 422);
     if (mb_strlen($password) < 6)  json_error('La contrasena debe tener al menos 6 caracteres', 422);
     // `usuarios.contrasena` es varchar(50) y el cifrado legacy es base64:
     // 36 chars de texto plano ya ocupan 48. Se corta antes para no truncar.
     if (mb_strlen($password) > 32) json_error('La contrasena no puede superar 32 caracteres', 422);
 
-    // La tabla no tiene UNIQUE sobre `usuario` ni sobre `correo`, asi que el
-    // duplicado se valida aca en vez de esperar el 1062 del motor.
-    $dup = db()->prepare('SELECT id FROM usuarios WHERE usuario = :u OR LOWER(correo) = :c LIMIT 1');
-    $dup->execute([':u' => $email, ':c' => $email]);
-    if ($dup->fetchColumn()) {
-        json_error('Ya existe un usuario con ese email', 409);
-    }
+    validarDuplicados($email, $usuario);
 
     // El INSERT no se hace aca: `usuarioAlta()` es el canal unico de alta de
     // cloud. Es quien cifra la contrasena y quien fija las constantes de alta
@@ -180,8 +181,11 @@ function handleCreate(): void
     // — la registro Reactor —, y eso es exactamente lo que dice el NULL.
     $id = usuarioAlta(db(), [
         'nombre'      => $nombre,
-        // Cloud no pide un nombre de usuario aparte: la credencial es el correo.
-        'usuario'     => $email,
+        // El formulario lo trae explicito, y llega igual al correo salvo que
+        // alguien lo haya editado: el campo `Usuario` del modal espeja el email
+        // mientras no se lo toque. Si el request no lo manda —cliente viejo—,
+        // `credencialPedida()` cae al correo, que es la convencion de siempre.
+        'usuario'     => $usuario,
         'contrasena'  => $password,
         'correo'      => $email,
         'celular'     => $celular === '' ? null : $celular,
@@ -199,10 +203,12 @@ function handleUpdate(): void
     $nombre   = trim((string) ($in['nombre']   ?? ''));
     $celular  = trim((string) ($in['celular']  ?? ''));
     $activo   = isset($in['activo']) ? (bool) $in['activo'] : true;
+    $usuario  = credencialPedida($in, $email);
     $password = (string) ($in['password'] ?? '');
 
     if ($id <= 0) json_error('Id invalido', 422);
     validarComunes($email, $nombre, $celular);
+    validarUsuario($usuario);
 
     if ($password !== '') {
         if (mb_strlen($password) < 6)  json_error('La contrasena debe tener al menos 6 caracteres', 422);
@@ -211,26 +217,26 @@ function handleUpdate(): void
         if (mb_strlen($password) > 32) json_error('La contrasena no puede superar 32 caracteres', 422);
     }
 
-    $prev = db()->prepare('SELECT usuario, correo FROM usuarios WHERE id = :id');
+    $prev = db()->prepare('SELECT id FROM usuarios WHERE id = :id');
     $prev->execute([':id' => $id]);
-    $actual = $prev->fetch();
-    if (!$actual) json_error('Usuario no encontrado', 404);
+    if ($prev->fetchColumn() === false) json_error('Usuario no encontrado', 404);
 
-    // La tabla no tiene UNIQUE sobre `usuario` ni sobre `correo` (igual que en el
-    // alta), asi que el duplicado se valida aca: el motor nunca tira 1062.
-    $dup = db()->prepare(
-        'SELECT id FROM usuarios
-         WHERE id <> :id AND (LOWER(correo) = :c OR LOWER(usuario) = :u)
-         LIMIT 1'
-    );
-    $dup->execute([':id' => $id, ':c' => $email, ':u' => $email]);
-    if ($dup->fetchColumn()) {
-        json_error('Ya existe un usuario con ese email', 409);
-    }
+    validarDuplicados($email, $usuario, $id);
 
     // Nombres reales de db/schema.sql: correo, habilitado, contrasena.
     // El front manda email/activo/password (ver el alias de handleList()).
-    $sql    = 'UPDATE usuarios SET correo = :e, nombre = :n, celular = :c, habilitado = :a';
+    //
+    // `usuario` SE ESCRIBE SIEMPRE CON LO QUE MANDA EL FORMULARIO. Hasta el
+    // 15/09/2026 la columna no se editaba: el modal no la mostraba y este
+    // endpoint le arrastraba el correo nuevo cuando la credencial vieja
+    // coincidia con el correo viejo o estaba vacia (2066 de las 2083 filas),
+    // dejando en paz las 17 con credencial propia. El arrastre resolvia el caso
+    // correcto pero a ciegas — quien cambiaba el email no tenia como saber que
+    // estaba cambiando tambien la credencial de ingreso, ni como NO cambiarla.
+    // Ahora el campo esta a la vista al lado de la contrasena y sigue al email
+    // solo mientras nadie lo edite (ver openUserModal() en assets/js/app.js), asi
+    // que la decision se toma en la pantalla y aca se obedece.
+    $sql    = 'UPDATE usuarios SET correo = :e, nombre = :n, celular = :c, habilitado = :a, usuario = :us';
     $params = [
         ':e'  => $email,
         ':n'  => $nombre,
@@ -239,25 +245,9 @@ function handleUpdate(): void
         // escribe el entero, nunca el booleano de PHP (PDO lo bindearia como
         // cadena vacia). Ver lib/habilitado.php.
         ':a'  => valorHabilitado($activo),
+        ':us' => $usuario,
         ':id' => $id,
     ];
-
-    // `usuario` es la credencial de login (api/login.php hace WHERE usuario = :u)
-    // y el alta de cloud la crea igual al correo. Se la arrastra en dos casos,
-    // medidos sobre los 2083 usuarios de la tabla:
-    //
-    //   - Coincide con el correo anterior (1926 filas): es la convencion del
-    //     alta. Sin arrastrarla, cambiar el email dejaria al usuario sin acceso.
-    //   - Esta vacia (140 filas): hoy esos usuarios no pueden loguearse con
-    //     ninguna credencial, asi que completarla los recupera.
-    //
-    // Las 17 restantes tienen un nombre de usuario propio, distinto del correo:
-    // esas NO se tocan, o se les romperia el login que ya usan.
-    $usuarioPrevio = strtolower(trim((string) $actual['usuario']));
-    if ($usuarioPrevio === '' || $usuarioPrevio === strtolower(trim((string) $actual['correo']))) {
-        $sql          .= ', usuario = :us';
-        $params[':us'] = $email;
-    }
 
     if ($password !== '') {
         // Cifrado legacy de Reactor, el mismo que valida el login. NO bcrypt:
@@ -421,6 +411,76 @@ function validarComunes(string $email, string $nombre, string $celular): void
     if ($celular !== '' && !preg_match('/^[+0-9\s().-]+$/', $celular)) {
         json_error('El celular solo puede contener numeros, espacios y los signos + ( ) - .', 422);
     }
+}
+
+/**
+ * Lee la credencial de ingreso del request, con el correo como respaldo.
+ *
+ * SE NORMALIZA A MINUSCULAS igual que el correo. `usuarios`.`usuario` es
+ * utf8mb4_unicode_ci, asi que el login ya compara sin distinguir mayusculas y
+ * guardar la variante tipeada no cambiaria quien entra: lo unico que haria es
+ * romper la igualdad byte a byte con `correo` que tienen 2065 de las 2083 filas.
+ *
+ * EL RESPALDO NO ES DECORATIVO. Si el request no trae `usuario` —un navegador
+ * con el JS viejo en cache, o cualquier cliente que siga mandando el payload
+ * anterior— se usa el correo, que es exactamente lo que escribian el alta y el
+ * arrastre de handleUpdate() antes de que la columna fuera editable. Sin esto un
+ * PUT viejo dejaria la cuenta sin credencial y sin acceso.
+ */
+function credencialPedida(array $in, string $email): string
+{
+    $usuario = strtolower(trim((string) ($in['usuario'] ?? '')));
+
+    return $usuario !== '' ? $usuario : $email;
+}
+
+function validarUsuario(string $usuario): void
+{
+    if ($usuario === '')               json_error('El usuario es obligatorio', 422);
+    // `usuarios`.`usuario` es varchar(100). El email se valida a 120 por
+    // historia, pero la credencial no puede pasar del ancho de su columna o
+    // MySQL la truncaria y la persona quedaria afuera.
+    if (mb_strlen($usuario) > 100)     json_error('El usuario no puede superar 100 caracteres', 422);
+    // Ninguna de las 2083 filas tiene un espacio, y con razon: el login compara
+    // la columna contra lo tipeado tal cual (`WHERE usuario = :u`), asi que un
+    // espacio invisible al final es una cuenta que no entra y nadie sabe por que.
+    if (preg_match('/\s/u', $usuario)) json_error('El usuario no puede tener espacios', 422);
+}
+
+/**
+ * Corta si otra fila ya tiene ese correo o esa credencial de ingreso.
+ *
+ * `usuarios` no tiene UNIQUE sobre ninguna de las dos columnas, asi que el motor
+ * nunca tira 1062 y el duplicado se busca a mano. Se compara en minusculas y sin
+ * espacios de borde porque asi es como entran los dos datos por el formulario.
+ *
+ * SON DOS PREGUNTAS DISTINTAS Y POR ESO SON DOS MENSAJES: desde que `usuario` se
+ * edita aparte, el correo puede chocar con el de otro sin que la credencial
+ * choque con nada, y al reves. Antes se comparaba el correo contra las dos
+ * columnas —tenia sentido cuando la credencial era siempre el correo— y el unico
+ * mensaje posible hablaba del email.
+ *
+ * $excluirId es el id que se esta editando; en el alta va 0, que no existe.
+ */
+function validarDuplicados(string $email, string $usuario, int $excluirId = 0): void
+{
+    $stmt = db()->prepare(
+        'SELECT LOWER(TRIM(correo)) AS correo, LOWER(TRIM(usuario)) AS usuario
+           FROM usuarios
+          WHERE id <> :id
+            AND (LOWER(TRIM(correo)) = :c OR LOWER(TRIM(usuario)) = :u)
+          LIMIT 2'
+    );
+    $stmt->execute([':id' => $excluirId, ':c' => $email, ':u' => $usuario]);
+
+    $choques = $stmt->fetchAll();
+    if (!$choques) return;
+
+    foreach ($choques as $fila) {
+        if ($fila['correo'] === $email) json_error('Ya existe un usuario con ese email', 409);
+    }
+
+    json_error('Ya existe un usuario con esa credencial de ingreso', 409);
 }
 
 function readJson(): array

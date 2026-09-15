@@ -1,0 +1,29 @@
+{
+    "dispositivos": [
+        {
+            "tipo": "Controlador",
+            "nombre": "Control de Encendido Box 1 Canal",
+            "modelo": "CE-B1COC",
+            "miniatura": "001.jpg"
+        },
+        {
+            "tipo": "Controlador",
+            "nombre": "Control de Encendido Din 4 Canales",
+            "modelo": "CE-D4CO",
+            "miniatura": "002.jpg"
+        },
+        {
+            "tipo": "Controlador",
+            "nombre": "Control de Encendido Minibox 1 Canal",
+            "modelo": "CE-M1OC",
+            "miniatura": "001.jpg"
+        },
+        {
+            "tipo": "Controlador",
+            "nombre": "Control de Encendido / Monitor de Apertura MiniBox",
+            "modelo": "CEMA-M3NO",
+            "miniatura": "001.jpg"
+        }
+       
+    ]
+}

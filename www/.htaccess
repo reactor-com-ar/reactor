@@ -1,5 +1,10 @@
+# Sitio publico (www.reactor.com.ar). Vhost en el puerto 8134.
+
+# ---------------------------------------------------------------------------
 # URLs sin extension: /foo sirve foo.php cuando existe.
+# ---------------------------------------------------------------------------
 RewriteEngine On
+
 # La condicion mira el DESTINO ($1.php), no `REQUEST_FILENAME.php`.
 #
 # Con REQUEST_FILENAME la regla entra en bucle: Apache trunca esa variable al
@@ -16,3 +21,70 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{DOCUMENT_ROOT}/$1.php -f
 RewriteRule ^(.+?)/?$ $1.php [L]
+
+# `/blog/<slug>` y `/ayuda/<slug>` NO se resuelven aca: cada seccion tiene su
+# propio .htaccess porque sus URLs limpias son slugs de la base, no archivos.
+# Esta regla no las toca justamente porque comprueba que el .php exista.
+
+# El mapa del sitio se genera, pero tiene que responder en la ruta de siempre:
+# es la que declara robots.txt y la que los buscadores ya tienen registrada.
+RewriteRule ^sitemap\.xml$ sitemap.php [L]
+
+# ---------------------------------------------------------------------------
+# Listados de directorio apagados.
+# ---------------------------------------------------------------------------
+# Sin esto, entrar a una carpeta sin index (`/img/bg/`, `/descargas/`) devuelve
+# el listado completo de archivos. No es un agujero, pero publica el inventario
+# del servidor sin que nadie lo haya decidido.
+Options -Indexes
+
+# ---------------------------------------------------------------------------
+# Cabeceras.
+# ---------------------------------------------------------------------------
+<IfModule mod_headers.c>
+    # El sitio no se embebe en ningun lado, asi que nadie tiene por que meterlo
+    # en un <iframe> propio para hacerle clickjacking encima.
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ---------------------------------------------------------------------------
+# Cache de assets.
+# ---------------------------------------------------------------------------
+# El CSS, el JS y las fuentes llevan `?v=` con el contenido de version.txt, asi
+# que un cambio cambia la URL y se puede cachear largo sin miedo a servir una
+# copia vieja. Las imagenes no llevan version: se cachean un mes, que es el
+# compromiso entre no re-descargar 4 MB de fotos en cada visita y que un
+# reemplazo se vea en un plazo razonable.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType font/woff2 "access plus 1 year"
+    ExpiresByType font/ttf "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/gif "access plus 1 month"
+    ExpiresByType image/svg+xml "access plus 1 month"
+    ExpiresByType image/x-icon "access plus 1 month"
+    ExpiresByType application/pdf "access plus 1 month"
+</IfModule>
+
+# ---------------------------------------------------------------------------
+# Lo que no se sirve nunca.
+# ---------------------------------------------------------------------------
+# `lib/` ya tiene su propio `Require all denied`; esto cubre los archivos
+# sueltos que no son parte del sitio.
+<FilesMatch "^(version\.txt|\.env.*|composer\.(json|lock))$">
+    Require all denied
+</FilesMatch>
+
+# Los parciales arrancan con guion bajo (`blog/_sidebar.php`). Son fragmentos
+# que se incluyen desde una pagina, no paginas: servidos solos devuelven medio
+# HTML sin cabeza ni pie, y encima con la barra lateral repetida si alguien los
+# enlaza. La convencion del guion bajo la comparten con `app/invitacion/
+# _layout.php` y `app/recuperar/_layout.php`.
+<FilesMatch "^_">
+    Require all denied
+</FilesMatch>

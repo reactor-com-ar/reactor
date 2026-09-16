@@ -29,7 +29,15 @@ $cacheBust  = is_file($versionFile) ? trim((string) file_get_contents($versionFi
 // el dominio sale del perfil activo y el panel de `perfiles.panel`, resueltos
 // los dos en lib/contexto.php.
 $contexto     = appContextoSesion($usuario);
-$panelActivo  = appPanelesDelDominio($contexto['dominio'], $contexto['panel']);
+// EL PERFIL ES OBLIGATORIO EN ESTA LLAMADA, no un extra. `perfiles_paneles` no
+// tiene fallback a "todos" (ver `appPanelesPermitidos()`), así que sin perfil la
+// función corta en el `$vacio` y devuelve la lista VACÍA — para cualquier
+// usuario y cualquier dominio. Omitirlo no dejaba "algunos" paneles afuera:
+// apagaba el botón "Cambiar de Panel" de la topbar para todo el mundo y borraba
+// el nombre del panel de la franja del encabezado, porque las dos cosas salen
+// de acá. Los otros cuatro call sites (api/paneles.php, api/dominios.php y los
+// dos de lib/contexto.php) siempre lo pasaron: éste era el único que no.
+$panelActivo  = appPanelesDelDominio($contexto['dominio'], $contexto['panel'], (int) $contexto['perfil']);
 
 $dominioNombre = $contexto['nombre'] !== '' ? $contexto['nombre'] : '—';
 $panelNombre   = $panelActivo['nombre'];

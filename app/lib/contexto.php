@@ -304,7 +304,17 @@ function appPanelesPermitidos(int $perfil): array
     return array_map('intval', array_column($stmt->fetchAll(), 'panel'));
 }
 
-function appPanelesDelDominio(int $dominio, int $panelRecordado, int $perfil = 0): array
+/**
+ * `$perfil` NO TIENE DEFAULT, y es a propósito. Lo tuvo (`= 0`) y eso convirtió
+ * un olvido en una pantalla sin síntoma: `index.php` llamaba sin él, el perfil
+ * en 0 caía en el `$vacio` de abajo y la app se dibujaba SIEMPRE sin el botón
+ * "Cambiar de Panel" y sin el nombre del panel en el encabezado, incluso para
+ * un perfil con siete paneles permitidos. Sin default, ese mismo olvido es un
+ * error de PHP en la primera carga en vez de una función silenciosamente
+ * apagada — que es lo único que distingue "este perfil no tiene paneles" de
+ * "nadie preguntó por el perfil".
+ */
+function appPanelesDelDominio(int $dominio, int $panelRecordado, int $perfil): array
 {
     $vacio = ['activo' => 0, 'nombre' => '', 'paneles' => []];
     if ($dominio <= 0) {

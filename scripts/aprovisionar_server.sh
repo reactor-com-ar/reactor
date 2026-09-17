@@ -103,7 +103,7 @@ echo "============================================================"
 echo ""
 
 # ---- 1. Actualizar sistema ----
-echo "[ 1/9 ] Actualizando sistema..."
+echo "[ 1/10 ] Actualizando sistema..."
 sudo dnf update -y -q
 echo "        OK"
 
@@ -116,7 +116,7 @@ echo "        OK"
 # se ejecuto. Por eso la renovacion del certificado (paso 9) pasó a un timer de
 # systemd. El cron del Programador de tareas vive DENTRO del contenedor, que si
 # lo tiene corriendo, y por eso ese si funciona.
-echo "[ 2/9 ] Instalando Docker, Nginx, bind-utils, python3, cronie..."
+echo "[ 2/10 ] Instalando Docker, Nginx, bind-utils, python3, cronie..."
 sudo dnf install -y -q docker git nginx bind-utils python3 python3-pip augeas-libs cronie
 sudo systemctl enable docker nginx crond
 sudo systemctl start docker crond
@@ -124,7 +124,7 @@ sudo usermod -aG docker ec2-user
 echo "        OK -- $(sudo docker --version)"
 
 # ---- 3. Instalar Docker Compose v2 + buildx ----
-echo "[ 3/9 ] Instalando Docker Compose y buildx..."
+echo "[ 3/10 ] Instalando Docker Compose y buildx..."
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
 
 COMPOSE_VERSION="v2.32.4"
@@ -142,8 +142,12 @@ sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 echo "        OK -- Compose $(sudo docker compose version --short) / buildx $(sudo docker buildx version | awk '{print $2}')"
 
 # ---- 4. Verificar artefactos transferidos ----
-echo "[ 4/9 ] Verificando archivos del proyecto..."
-for f in cloud panel app motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
+# Los cuatro docroots van en la lista, www/ incluido: el compose los
+# bind-montea y `docker compose up` corre con sudo, asi que una carpeta que no
+# llego NO da error -- Docker la crea vacia y con dueño root, y a partir de ahi
+# el vhost sirve un docroot vacio y el rsync de deploy.sh no puede arreglarlo.
+echo "[ 4/10 ] Verificando archivos del proyecto..."
+for f in cloud panel app www motor docker/Dockerfile docker/emqx/init.sh scripts/lib/emqx_seed.sh env.php .env.production; do
     if [ ! -e "$APP_DIR/$f" ]; then
         echo "        ERROR: falta $APP_DIR/$f"
         echo "        Re-correr scripts/aprovisionar.sh desde la maquina local."
@@ -165,7 +169,7 @@ echo "        OK"
 #   - EMQX Dashboard 18083:18083 (dev usa 18084 por choque con vigicom-emqx)
 # Tambien hay que bindear env.php y los .env.* al container para que las
 # constantes (APP_KEY_*, DB_*) queden disponibles via env.php.
-echo "[ 5/9 ] Generando $COMPOSE_FILE..."
+echo "[ 5/10 ] Generando $COMPOSE_FILE..."
 cat > "$APP_DIR/$COMPOSE_FILE" << EOF
 # Generado por scripts/aprovisionar_server.sh - no editar a mano.
 # Produccion: sin servicio reactor-db (BD en AWS RDS, ver .env.production).
@@ -233,7 +237,7 @@ EOF
 echo "        OK"
 
 # ---- 6. Configurar Nginx ----
-echo "[ 6/9 ] Configurando Nginx como reverse proxy..."
+echo "[ 6/10 ] Configurando Nginx como reverse proxy..."
 sudo tee /etc/nginx/conf.d/reactor.conf > /dev/null << NGX
 # Reverse proxy reactor -- generado por aprovisionar_server.sh
 
@@ -321,8 +325,10 @@ server {
 # voltearia la renovacion de todos. Adentro de \`location /\`, el location que
 # certbot inserta al renovar es mas especifico y gana.
 # Verificado con \`certbot renew --dry-run\` cuando el cert cubria 7 dominios:
-# validaban los 7. www. y el apex se sumaron despues (2026-09-15) sin repetir
-# el dry-run -- conviene volver a correrlo la primera vez que entren al cert.
+# validaban los 7. Desde que www. y el apex se sumaron (2026-09-15) el ensayo
+# dejo de ser manual: lo corre el paso 9 en cada aprovisionamiento, asi que un
+# server block nuevo que rompa la validacion se detecta en el acto y no tres
+# meses despues, con el certificado vencido.
 #
 # certbot le agrega el bloque 443 (necesita el cert igual que si sirviera
 # contenido: sin el, el navegador corta con error de certificado antes de leer
@@ -414,7 +420,7 @@ echo "        OK"
 # rebuildear pese a que el Dockerfile mando editado -- vimos ese bug con
 # la fix de pcntl + /var/log/reactor/cloud/ejecuciones (imagen 2 semanas
 # vieja seguia rodando aunque el Dockerfile local ya tenia el cambio).
-echo "[ 7/9 ] Construyendo imagen Docker y levantando contenedor..."
+echo "[ 7/10 ] Construyendo imagen Docker y levantando contenedor..."
 cd "$APP_DIR"
 sudo docker compose -f "$COMPOSE_FILE" build --pull
 sudo docker compose -f "$COMPOSE_FILE" up -d --force-recreate
@@ -426,7 +432,7 @@ echo "        OK"
 # El seeder espera a que el dashboard responda, hace login y upsertea el
 # usuario MQTT_USER:MQTT_PASS leidos de .env.production.
 # Reaplicable cuantas veces quieras: POST -> si 409, PUT.
-echo "[ 8/9 ] Sembrando usuario MQTT en EMQX..."
+echo "[ 8/10 ] Sembrando usuario MQTT en EMQX..."
 if bash "$APP_DIR/scripts/lib/emqx_seed.sh" "$APP_DIR/.env.production"; then
     echo "        OK"
 else
@@ -434,7 +440,7 @@ else
 fi
 
 # ---- 9. Emitir certificado SSL ----
-echo "[ 9/9 ] Verificando DNS para SSL..."
+echo "[ 9/10 ] Verificando DNS para SSL..."
 
 IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 60" --max-time 3 || echo "")
@@ -584,8 +590,68 @@ UNIT
         # Limpieza del mecanismo viejo, para no dejar dos cosas compitiendo si
         # alguien llegara a levantar crond mas adelante.
         sudo rm -f /etc/cron.d/certbot
+
+        # Ensayo de renovacion. Va ACA y no como un paso a mano porque lo que
+        # verifica es justamente lo que un aprovisionamiento puede romper: los
+        # dominios comparten UN certificado, asi que un solo server block que
+        # intercepte /.well-known/acme-challenge/ (el `return 301` de control.
+        # es el candidato) voltea la renovacion de TODOS. Y no se nota hasta
+        # que el cert vence, tres meses despues.
+        #
+        # Usa el entorno de staging de Let's Encrypt, que no consume la cuota
+        # de emision. No escribe nada: es el mismo `renew` que corre el timer,
+        # pero sin instalar el resultado.
+        echo "        Ensayando la renovacion (certbot renew --dry-run)..."
+        if sudo certbot renew --dry-run -q; then
+            # CERT_DOMAINS alterna "-d" y el nombre, por eso la mitad.
+            echo "        OK -- la renovacion automatica valida los $(( ${#CERT_DOMAINS[@]} / 2 )) dominios del cert."
+        else
+            echo "        AVISO: el ensayo de renovacion fallo. El certificado actual sigue"
+            echo "               valido, pero NO se va a renovar solo. Revisar"
+            echo "               /var/log/letsencrypt/letsencrypt.log."
+        fi
     fi
 fi
+
+# ---- 10. Verificar que los vhosts responden ----
+# Pega contra Apache por 127.0.0.1 mandando la cabecera Host de cada dominio,
+# que es exactamente lo que hace nginx al proxyear. Pasa por alto nginx, el DNS
+# y el certificado a proposito:
+#
+#   SIRVE PARA PROBAR UN SITIO CUYO DNS TODAVIA APUNTA A OTRO LADO. Es el caso
+#   de www. y el apex mientras dure la transicion desde el hosting viejo: el
+#   sitio queda servido y verificado ACA, y recien despues se mueve el registro
+#   DNS. Sin esto, la unica forma de saber si el docroot nuevo anda seria mover
+#   el DNS y mirar -- o sea, enterarse del 500 con el sitio ya publicado.
+#
+# NO corta el script. Es un diagnostico al final de un aprovisionamiento que ya
+# termino: un 500 de PHP no se arregla volviendo a correr el setup, y hacer
+# fallar el script dejaria el server aprovisionado igual pero con `set -e`
+# saltando el resumen de abajo.
+echo "[10/10 ] Verificando los vhosts..."
+verificar_vhost() {
+    local nombre="$1" puerto="$2" host="$3" codigo
+    # curl ya imprime 000 con -w cuando no hay respuesta; el || es para que el
+    # exit code no voltee el script por `set -e`.
+    codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+        -H "Host: $host" "http://127.0.0.1:$puerto/") || codigo="000"
+    case "$codigo" in
+        200|30[1237]) echo "        OK     $nombre ($host) -> HTTP $codigo" ;;
+        000)          echo "        FALLA  $nombre ($host) -> sin respuesta en 127.0.0.1:$puerto" ;;
+        *)            echo "        AVISO  $nombre ($host) -> HTTP $codigo -- revisar: sudo docker logs reactor-apache" ;;
+    esac
+}
+verificar_vhost "cloud" "$APP_PORT_HOST"   "$DOMAIN"
+verificar_vhost "panel" "$PANEL_PORT_HOST" "$PANEL_DOMAIN"
+verificar_vhost "app"   "$PWA_PORT_HOST"   "$PWA_DOMAIN"
+verificar_vhost "www"   "$WWW_PORT_HOST"   "$WWW_DOMAIN"
+# Los alias del sitio publico se verifican uno por uno y no de taquito: el apex
+# entra por el mismo vhost que www., pero por ServerAlias -- si ese alias falta
+# en docker/vhosts.conf, Apache cae en el PRIMER VirtualHost del puerto y sirve
+# otra cosa con HTTP 200. Un chequeo solo sobre www. no lo veria.
+for WWW_ALIAS in $WWW_DOMAIN_ALIASES; do
+    verificar_vhost "www" "$WWW_PORT_HOST" "$WWW_ALIAS"
+done
 
 echo ""
 echo "============================================================"

@@ -59,14 +59,21 @@ esac
 echo "================================================"
 echo ""
 
-# ---- 1. version.txt en cloud/, panel/ y app/ ----
-# www/ NO lleva version.txt: ese archivo existe para cache-bustear los assets
-# (?v= sobre assets/css y assets/js) y el sitio publico todavia no tiene
-# ninguno. Cuando los tenga, sumarlo aca junto con el ?v= en su HTML.
+# ---- 1. version.txt en cloud/, panel/, app/ y www/ ----
+# El archivo es el cache-bust de los assets: cada docroot lo estampa como `?v=`
+# en el <link> del CSS y el <script> del JS. www/ tambien -- wwwVersion() en
+# www/lib/pagina.php, estampado por sistema/cabeza.php, sistema/pie.php y
+# lib/mensaje.php --, asi que si no se sube aca, un cambio de CSS del sitio
+# publico queda invisible detras de la copia que el navegador ya tiene.
+#
+# En www/ ademas arrastra el tema del legacy: esos archivos se servian con
+# `?rnd=478` FIJO, o sea que cualquier navegador que haya pasado por el sitio
+# viejo los tiene cacheados con esa URL exacta.
 echo "$VERSION" > "$BASE_LOCAL/cloud/version.txt"
 echo "$VERSION" > "$BASE_LOCAL/panel/version.txt"
 echo "$VERSION" > "$BASE_LOCAL/app/version.txt"
-echo "  version.txt actualizado en cloud/, panel/ y app/"
+echo "$VERSION" > "$BASE_LOCAL/www/version.txt"
+echo "  version.txt actualizado en cloud/, panel/, app/ y www/"
 echo ""
 
 # ---- 2. Verificar artefactos requeridos ----

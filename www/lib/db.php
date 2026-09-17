@@ -10,7 +10,7 @@ declare(strict_types=1);
  * Es una copia y no un include porque las cuatro apps no comparten docroot,
  * igual que pasa con `habilitado.php` o `permisos.php`.
  *
- * EL SITIO PÚBLICO ESCRIBE EN UNA SOLA TABLA: `instaladores`, cuando alguien
+ * EL SITIO PÚBLICO ESCRIBE EN UNA SOLA TABLA: `tecnicos`, cuando alguien
  * completa el formulario de registro. Todo lo demás —entradas, categorías,
  * parámetros— lo carga el back office y acá sólo se lee. Vale tenerlo presente
  * al agregar una página: este docroot es el único al que le pega cualquiera de

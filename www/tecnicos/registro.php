@@ -3,27 +3,27 @@
 declare(strict_types=1);
 
 /**
- * Formulario de registro de instaladores: `/instaladores/registro`.
+ * Formulario de registro de técnicos: `/tecnicos/registro`.
  *
  * Port de `reactor-www/instaladores/registro.php`. El alta y el registro en el
- * CRM viven en `lib/instaladores.php`; acá está sólo la pantalla.
+ * CRM viven en `lib/tecnicos.php`; acá está sólo la pantalla.
  *
  * QUÉ SE ARREGLÓ DEL ORIGINAL:
  *
  *   - NO VALIDABA NADA. El legacy pasaba lo que llegara del POST directo al
  *     INSERT, así que un submit con todo vacío creaba una fila en blanco y un
- *     correo inventado quedaba guardado igual. Ahora `instaladorValidar()`
+ *     correo inventado quedaba guardado igual. Ahora `tecnicoValidar()`
  *     corta antes y el formulario vuelve con los datos puestos y el error al
  *     lado del campo, en vez de perder lo tipeado.
  *   - NO TENÍA ANTISPAM. El captcha estaba comentado (`//echo $wAntibot...`),
  *     o sea que era un formulario abierto en internet que escribe en la base
  *     sin ninguna traba. Ahora hay trampa de miel y tiempo mínimo — ver abajo.
  *   - El POST exitoso ahora redirige (patrón POST/Redirect/GET): así recargar
- *     la pantalla de confirmación no vuelve a dar de alta al instalador.
+ *     la pantalla de confirmación no vuelve a dar de alta al técnico.
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/instaladores.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/tecnicos.php';
 
 $errores = [];
 $datos   = ['nombre' => '', 'correo' => '', 'celular' => '', 'actividad' => ''];
@@ -48,17 +48,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $esRobot   = wwwEntrada('sitio') !== '' || ($desde > 0 && (time() - $desde) < 3);
 
     if ($esRobot) {
-        wwwIr('/instaladores/registro?ok=1');
+        wwwIr('/tecnicos/registro?ok=1');
     }
 
-    $errores = instaladorValidar($datos);
+    $errores = tecnicoValidar($datos);
 
     if ($errores === []) {
-        $alta = instaladorAlta($datos);
+        $alta = tecnicoAlta($datos);
         if ($alta['ok']) {
             // POST/Redirect/GET: sin esto, un F5 sobre la confirmación repite
-            // el alta y el instalador queda cargado dos veces.
-            wwwIr('/instaladores/registro?ok=1');
+            // el alta y el técnico queda cargado dos veces.
+            wwwIr('/tecnicos/registro?ok=1');
         }
         $errores['general'] = (string) $alta['error'];
     }
@@ -67,13 +67,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 if (wwwEntrada('ok') === '1') {
     wwwAviso(
         'Hemos recibido tu registro correctamente. Pronto te estaremos contactando.',
-        '/instaladores',
+        '/tecnicos',
         '¡Gracias!'
     );
 }
 
-wwwTitulo('Registro de Instaladores');
-wwwDescripcion('Registrate como instalador certificado Reactor y aparecé en el listado que ven nuestros clientes.');
+wwwTitulo('Registro de Técnicos');
+wwwDescripcion('Registrate como técnico certificado Reactor y aparecé en el listado que ven nuestros clientes.');
 
 require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
 
@@ -93,7 +93,7 @@ function registroError(array $errores, string $campo): void
         <div class="container">
             <div class="row">
                 <div class="col-lg-12">
-                    <h1>Registro de Instaladores</h1>
+                    <h1>Registro de Técnicos</h1>
                 </div>
             </div>
         </div>
@@ -104,7 +104,7 @@ function registroError(array $errores, string $campo): void
                 <div class="breadcrumb">
                     <ul>
                         <li><a href="/">Inicio</a></li>
-                        <li><a href="/instaladores">Instaladores</a></li>
+                        <li><a href="/tecnicos">Técnicos</a></li>
                         <li><a href="#!">Registro</a></li>
                     </ul>
                 </div>
@@ -131,7 +131,7 @@ function registroError(array $errores, string $campo): void
 
                     <!-- `novalidate`: la validación del navegador es una ayuda, no
                          el control. Lo que corre siempre es la del servidor. -->
-                    <form action="/instaladores/registro" method="post" novalidate>
+                    <form action="/tecnicos/registro" method="post" novalidate>
                         <div class="quform-elements">
                             <div class="row">
 

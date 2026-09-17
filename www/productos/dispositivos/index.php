@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * `/productos/dispositivos` es el catálogo. Se incluye en vez de redirigir a
- * `/productos/dispositivos/listar`, igual que en `/blog` y `/instaladores`: la
+ * `/productos/dispositivos/listar`, igual que en `/blog` y `/tecnicos`: la
  * sección tiene una sola URL pública.
  */
 

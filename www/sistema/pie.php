@@ -49,7 +49,7 @@ $wwwVersion = wwwVersion();
                     <h3 class="h5 mb-1-6 mb-lg-1-9 text-primary">Soporte</h3>
                     <ul class="footer-list-style1">
                         <li><a href="/ayuda">Ayuda</a></li>
-                        <li><a href="/instaladores">Instaladores</a></li>
+                        <li><a href="/tecnicos">Técnicos</a></li>
                         <li><a href="https://dev.reactor.com.ar" target="_blank" rel="noopener">Desarrolladores</a></li>
                     </ul>
                 </div>

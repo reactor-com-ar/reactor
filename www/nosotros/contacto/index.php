@@ -10,15 +10,15 @@ declare(strict_types=1);
  * mismo asunto ("Consulta Web") que usaba el legacy, así que los leads siguen
  * cayendo donde el equipo comercial ya los mira.
  *
- * QUÉ SE ARREGLÓ DEL ORIGINAL — lo mismo que en el registro de instaladores:
+ * QUÉ SE ARREGLÓ DEL ORIGINAL — lo mismo que en el registro de técnicos:
  * no validaba nada, no tenía antispam (el captcha estaba comentado) y volvía a
  * enviar la consulta si alguien recargaba después del POST. Ver
- * `instaladores/registro.php`, donde está explicado en detalle.
+ * `tecnicos/registro.php`, donde está explicado en detalle.
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/prospectos.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/instaladores.php'; // CELULAR_DIGITOS
+require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/tecnicos.php'; // CELULAR_DIGITOS
 
 $errores = [];
 $datos   = ['nombre' => '', 'correo' => '', 'celular' => '', 'mensaje' => ''];
@@ -64,7 +64,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
 
         // Acá el CRM SÍ es el destino final —no hay alta local que respalde la
-        // consulta como en el registro de instaladores—, así que si falla hay
+        // consulta como en el registro de técnicos—, así que si falla hay
         // que decirlo: si no, la persona se va creyendo que escribió y nadie
         // recibió nada. Se le ofrece WhatsApp, que no depende de esto.
         error_log('[contacto] no se pudo registrar la consulta: ' . (string) $registro['error']);

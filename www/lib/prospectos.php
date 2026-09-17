@@ -12,7 +12,7 @@ declare(strict_types=1);
  * Es el mismo endpoint y el mismo contrato que usaba el sitio legacy desde
  * `dcProspecto` — se reescribió acá, no se copió, para no arrastrar el
  * framework viejo. Los formularios públicos (contacto, registro de
- * instaladores) dejan el lead donde el equipo comercial ya mira.
+ * técnicos) dejan el lead donde el equipo comercial ya mira.
  *
  * AUTENTICACIÓN: Bearer con `DATABOX_APIKEY`, la misma constante que usa
  * `databox.php` para el correo. El legacy la leía de la tabla `parametros`

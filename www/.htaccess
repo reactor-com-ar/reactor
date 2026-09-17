@@ -5,6 +5,38 @@
 # ---------------------------------------------------------------------------
 RewriteEngine On
 
+# ---------------------------------------------------------------------------
+# /instaladores -> /tecnicos (17/09/2026)
+# ---------------------------------------------------------------------------
+# La seccion se llamaba `instaladores` y paso a llamarse `tecnicos`: carpeta,
+# tabla, funciones y URL. ESTA REGLA VA PRIMERO Y NO SE BORRA.
+#
+# `/instaladores` estaba publicada, indexada por los buscadores y enlazada desde
+# afuera —el sitemap la declaraba con prioridad 0.7 y la ficha de cada tecnico
+# (`/instaladores/consultar?uid=<uuid>`) es la URL que los propios tecnicos le
+# pasan a sus clientes—. Sin el 301 todo eso pasa a 404 y el posicionamiento de
+# la seccion arranca de cero.
+#
+# Es el mismo criterio con el que `/sitemap.xml` sigue respondiendo aunque el
+# archivo se genere, y con el que `/ayuda/preguntas` conserva su slug corto: una
+# URL ya publicada no se cambia, se redirige.
+#
+# El grupo opcional cubre las cuatro rutas de una: `/instaladores`,
+# `/instaladores/`, `/instaladores/registro` y `/instaladores/consultar`. La
+# querystring viaja sola —mod_rewrite la reinyecta cuando la sustitucion no trae
+# `?`—, asi que el `uid` de las fichas ya compartidas llega entero.
+#
+# DOS DETALLES DE LA EXPRESION, los dos a proposito:
+#
+#   * el destino lleva la BARRA FINAL (`/tecnicos/$1`). Sin ella `/instaladores`
+#     caia en `/tecnicos` y Apache soltaba un SEGUNDO 301 al directorio con barra
+#     —el DirectorySlash que ya documenta el CLAUDE.md—, o sea una cadena de dos
+#     saltos justo en la URL mas enlazada de la seccion. Asi es uno solo.
+#   * el grupo es `(?:/(.*))?` y no `/?(.*)`: con el segundo, `/instaladoresfoo`
+#     tambien entraria —"instaladores" + "foo"— y terminaria redirigido a
+#     `/tecnicos/foo`. La barra tiene que ser obligatoria cuando hay resto.
+RewriteRule ^instaladores(?:/(.*))?$ /tecnicos/$1 [R=301,L]
+
 # La condicion mira el DESTINO ($1.php), no `REQUEST_FILENAME.php`.
 #
 # Con REQUEST_FILENAME la regla entra en bucle: Apache trunca esa variable al

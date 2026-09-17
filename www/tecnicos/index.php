@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 /**
- * `/instaladores` es el listado. Se incluye en vez de redirigir a
- * `/instaladores/listar` para que la sección tenga una sola URL pública, igual
+ * `/tecnicos` es el listado. Se incluye en vez de redirigir a
+ * `/tecnicos/listar` para que la sección tenga una sola URL pública, igual
  * que `/blog` y `/ayuda`.
  */
 

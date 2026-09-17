@@ -1918,35 +1918,6 @@ CREATE TABLE `inscriptos` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `instaladores`
---
-
-DROP TABLE IF EXISTS `instaladores`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `instaladores` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `uuid` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `actividad` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `celular` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `correo` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `domicilio` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `postal` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `localidad` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `localidad_` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `provincia` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `provincia_` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `pais` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `pais_` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `registrado` datetime DEFAULT NULL,
-  `aprobacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `visibilidad` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `invitaciones`
 --
 
@@ -2940,6 +2911,35 @@ CREATE TABLE `tareas_ejecuciones` (
   KEY `idx_tareas_ej_estado` (`estado`),
   KEY `idx_tareas_ej_inicio` (`inicio`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `tecnicos`
+--
+
+DROP TABLE IF EXISTS `tecnicos`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `tecnicos` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `uuid` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `nombre` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `actividad` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `celular` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `correo` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `domicilio` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `postal` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `localidad` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `localidad_` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `provincia` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `provincia_` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `pais` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `pais_` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `registrado` datetime DEFAULT NULL,
+  `aprobacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `visibilidad` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

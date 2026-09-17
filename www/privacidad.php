@@ -114,7 +114,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
                 </p>
                 <ul class="list-style1 mb-1-9">
                     <li><strong>Proveedores de servicios:</strong> infraestructura en la nube (AWS), servicios de correo electrónico (AWS SES, Mailjet), pasarelas de pago (MercadoPago), notificaciones push (Firebase), mensajería (WhatsApp) y otros proveedores tecnológicos contratados bajo acuerdos de confidencialidad.</li>
-                    <li><strong>Agentes e instaladores autorizados:</strong> empresas externas responsables del mantenimiento de los dispositivos en tu zona, quienes acceden únicamente a la información necesaria para prestar el servicio técnico.</li>
+                    <li><strong>Agentes y técnicos autorizados:</strong> empresas externas responsables del mantenimiento de los dispositivos en tu zona, quienes acceden únicamente a la información necesaria para prestar el servicio técnico.</li>
                     <li><strong>Autoridades competentes:</strong> cuando exista una orden judicial, requerimiento legal o necesidad de proteger los derechos, la propiedad o la seguridad de Reactor, de nuestros usuarios o de terceros.</li>
                     <li><strong>Transferencias empresariales:</strong> en caso de fusión, adquisición, venta de activos o reestructuración corporativa, podremos transferir información, notificándolo cuando corresponda.</li>
                 </ul>

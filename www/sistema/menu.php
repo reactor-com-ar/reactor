@@ -65,11 +65,11 @@ function menuClase(string ...$prefijos): string
         </ul>
     </li>
 
-    <li<?= menuClase('/ayuda', '/instaladores') ?>>
+    <li<?= menuClase('/ayuda', '/tecnicos') ?>>
         <a href="#!">Soporte</a>
         <ul>
             <li><a href="/ayuda">Ayuda</a></li>
-            <li><a href="/instaladores">Instaladores</a></li>
+            <li><a href="/tecnicos">Técnicos</a></li>
             <li><a href="https://dev.reactor.com.ar" target="_blank" rel="noopener">Desarrolladores</a></li>
             <li><a href="https://wa.me/5491163099315" target="_blank" rel="noopener">Atención al Cliente</a></li>
         </ul>

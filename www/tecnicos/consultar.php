@@ -3,11 +3,11 @@
 declare(strict_types=1);
 
 /**
- * Ficha de un instalador: `/instaladores/consultar?uid=<uuid>`.
+ * Ficha de un técnico: `/tecnicos/consultar?uid=<uuid>`.
  *
  * Port de `reactor-www/instaladores/consultar.php`. Como el listado, sólo
  * muestra a los que están aprobados Y publicados: la consulta de
- * `instaladorPorUuid()` filtra por las dos columnas, así que con el uuid de
+ * `tecnicoPorUuid()` filtra por las dos columnas, así que con el uuid de
  * alguien que pidió no aparecer no se puede sacar su teléfono de acá.
  *
  * La ubicación sale de `provincia_` / `pais_`, las columnas de TEXTO. El legacy
@@ -16,20 +16,20 @@ declare(strict_types=1);
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/instaladores.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/tecnicos.php';
 
-$instalador = instaladorPorUuid(wwwEntrada('uid'));
-if ($instalador === null) {
-    wwwNoEncontrado('Ese instalador no existe o ya no figura en el listado.', '/instaladores');
+$tecnico = tecnicoPorUuid(wwwEntrada('uid'));
+if ($tecnico === null) {
+    wwwNoEncontrado('Ese técnico no existe o ya no figura en el listado.', '/tecnicos');
 }
 
-wwwTitulo('Instalador ' . $instalador['nombre']);
-wwwDescripcion('Instalador certificado Reactor: ' . $instalador['nombre'] . '. ' . (string) $instalador['actividad']);
+wwwTitulo('Técnico ' . $tecnico['nombre']);
+wwwDescripcion('Técnico certificado Reactor: ' . $tecnico['nombre'] . '. ' . (string) $tecnico['actividad']);
 
-$whatsapp  = instaladorWhatsapp($instalador['celular']);
-$correo    = trim((string) $instalador['correo']);
-$ubicacion = instaladorUbicacion($instalador);
-$saludo    = rawurlencode('Hola, me interesa contactar con un instalador Reactor');
+$whatsapp  = tecnicoWhatsapp($tecnico['celular']);
+$correo    = trim((string) $tecnico['correo']);
+$ubicacion = tecnicoUbicacion($tecnico);
+$saludo    = rawurlencode('Hola, me interesa contactar con un técnico Reactor');
 
 require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
 ?>
@@ -70,7 +70,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
         <div class="container">
             <div class="row">
                 <div class="col-lg-12">
-                    <h1>Instalador</h1>
+                    <h1>Técnico</h1>
                 </div>
             </div>
         </div>
@@ -81,8 +81,8 @@ require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
                 <div class="breadcrumb">
                     <ul>
                         <li><a href="/">Inicio</a></li>
-                        <li><a href="/instaladores">Instaladores</a></li>
-                        <li><a href="#!"><?= e((string) $instalador['nombre']) ?></a></li>
+                        <li><a href="/tecnicos">Técnicos</a></li>
+                        <li><a href="#!"><?= e((string) $tecnico['nombre']) ?></a></li>
                     </ul>
                 </div>
             </div>
@@ -95,20 +95,20 @@ require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
 <section class="bg-very-light-gray" style="padding-top: 0px !important;">
     <div class="container">
         <div class="section-heading2 wow fadeInDown" data-wow-delay="100ms">
-            <span>Instalador Certificado</span>
-            <h2>Instalador <strong class="text-primary"><?= e(wwwNombre()) ?></strong></h2>
+            <span>Técnico Certificado</span>
+            <h2>Técnico <strong class="text-primary"><?= e(wwwNombre()) ?></strong></h2>
         </div>
 
         <div class="row">
             <div class="col-lg-12">
                 <div class="testimonial-box text-center bg-white" style="height: auto;">
                     <div class="client-img">
-                        <img src="<?= e(INSTALADORES_AVATAR) ?>" class="rounded-circle" style="width: 100px; height: 100px;" alt="<?= e((string) $instalador['nombre']) ?>">
+                        <img src="<?= e(TECNICOS_AVATAR) ?>" class="rounded-circle" style="width: 100px; height: 100px;" alt="<?= e((string) $tecnico['nombre']) ?>">
                     </div>
                     <div class="p-4">
 
-                        <h4 class="h5 mb-1"><?= e((string) $instalador['nombre']) ?></h4>
-                        <span class="d-block text-muted"><?= e((string) $instalador['actividad']) ?></span>
+                        <h4 class="h5 mb-1"><?= e((string) $tecnico['nombre']) ?></h4>
+                        <span class="d-block text-muted"><?= e((string) $tecnico['actividad']) ?></span>
                         <?php if ($ubicacion !== ''): ?>
                             <span class="d-block text-muted mb-3"><?= e($ubicacion) ?></span>
                         <?php else: ?>

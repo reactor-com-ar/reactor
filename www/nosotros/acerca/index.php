@@ -158,7 +158,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
                         </p>
 
                         <p class="w-95 mb-3">
-                            Además, ofrecemos asesoramiento ilimitado para distribuidores, instaladores y usuarios, asegurando una implementación sencilla y eficiente. Nuestros dispositivos pueden ser controlados desde celulares, computadoras, pantallas táctiles e incluso mediante comandos de voz con Google Assistant o Google Home.
+                            Además, ofrecemos asesoramiento ilimitado para distribuidores, técnicos y usuarios, asegurando una implementación sencilla y eficiente. Nuestros dispositivos pueden ser controlados desde celulares, computadoras, pantallas táctiles e incluso mediante comandos de voz con Google Assistant o Google Home.
                         </p>
 
                         <p class="w-95 mb-3">

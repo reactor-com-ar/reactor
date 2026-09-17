@@ -23,7 +23,7 @@ intentos. Eso cambia tres cosas al agregar una página:
   office y se emite crudo a propósito (blog, ayuda e info) — está comentado en
   los tres lugares.
 - **Los formularios validan en el servidor y llevan antispam.** Los dos que hay
-  —registro de instaladores y contacto— usan trampa de miel (campo oculto
+  —registro de técnicos y contacto— usan trampa de miel (campo oculto
   `sitio`) más un tiempo mínimo de 3 segundos (`desde`). El bot detectado ve la
   MISMA pantalla de éxito que una persona: avisarle que lo agarraron sólo sirve
   para que la próxima vuelta sea más difícil de detectar.
@@ -61,19 +61,54 @@ tratarlas como tal hace que MySQL castee la columna en cada fila:
 | columna | tipo | valores | dónde |
 |---|---|---|---|
 | `entradas`.`visibilidad` | `varchar(1)` | `'1'` / `'0'` | blog, ayuda, info |
-| `instaladores`.`aprobacion` | `varchar(1)` | `'1'` / `'2'` / `'0'` | instaladores |
-| `instaladores`.`visibilidad` | `varchar(1)` | `'1'` / `'0'` | instaladores |
+| `tecnicos`.`aprobacion` | `varchar(1)` | `'1'` / `'2'` / `'0'` | técnicos |
+| `tecnicos`.`visibilidad` | `varchar(1)` | `'1'` / `'0'` | técnicos |
 
 Las tres van comparadas contra la **cadena**. `aprobacion` ni siquiera es
 booleana: `'1'` es "registrado, sin revisar" y `'2'` es "aprobado".
 
-**Un instalador se publica sólo si tiene `aprobacion = '2'` Y
+**Un técnico se publica sólo si tiene `aprobacion = '2'` Y
 `visibilidad = '1'`.** Hay 7 aprobados que no se publican: la aprobación lo
-habilita como instalador (cédula, dominios) y la visibilidad decide si además
+habilita como técnico (cédula, dominios) y la visibilidad decide si además
 sale en la vidriera. Filtrar por una sola publicaría gente que pidió no aparecer.
 
 `planes`.`habilitado` **sí** es la bandera del repo y va con `esHabilitado()` y
 el entero — `lib/habilitado.php` es copia idéntica de la de las otras tres apps.
+
+## `instaladores` se llama `tecnicos` (17/09/2026)
+
+La sección entera cambió de nombre: la tabla, la carpeta, el lib, las funciones
+y la URL pública. El rename de la base lo hizo
+[cloud/sql/migrations/20260917_1000_instaladores_a_tecnicos.sql](../cloud/sql/migrations/20260917_1000_instaladores_a_tecnicos.sql),
+que es un `RENAME TABLE` y nada más: ni una columna, ni un tipo, ni un valor
+cambiaron.
+
+| antes | ahora |
+|---|---|
+| tabla `instaladores` | tabla `tecnicos` |
+| `www/instaladores/` | [www/tecnicos/](tecnicos/) |
+| `lib/instaladores.php` | [lib/tecnicos.php](lib/tecnicos.php) |
+| `instaladoresListar()`, `instaladorPorUuid()`, … | `tecnicosListar()`, `tecnicoPorUuid()`, … |
+| `INSTALADORES_AVATAR` | `TECNICOS_AVATAR` |
+| `/instaladores` | `/tecnicos` |
+
+- **Las URLs viejas siguen respondiendo, con un 301** puesto arriba de todo en el
+  `.htaccess` de la raíz — ver la sección de rutas. `/instaladores` estaba
+  indexada y la ficha `/instaladores/consultar?uid=…` es la URL que los propios
+  técnicos le pasan a sus clientes: sin el 301 todo eso es un 404.
+- **`TECNICOS_AVATAR` sigue apuntando a `media.reactor.com.ar/instaladores/`** y
+  no es un olvido: el archivo vive en el media server, que no es parte de este
+  repo. Renombrar la constante no mueve la imagen; el día que se mueva allá se
+  cambia acá.
+- **El back office legacy —fuera de este repo— lee esta tabla**, que es donde el
+  equipo sube `aprobacion` y `visibilidad`. El sitio público sólo inserta
+  solicitudes; aprobarlas y publicarlas pasa por ahí. **Aplicar la migración sin
+  renombrar del otro lado deja ese módulo apuntando a una tabla que ya no
+  existe**: las altas se siguen guardando y nadie puede publicarlas. Está anotado
+  también en la cabecera de la migración.
+- Lo que **no** se tocó son las menciones a "Técnico Instalador" de
+  [panel/api/dominios.php](../panel/api/dominios.php) y de la migración
+  `20260905_2300`: ése es un nombre de rol de la tabla `roles`, otra cosa.
 
 ## El contenido sale de `entradas`, y se pide POR RAMA
 
@@ -115,7 +150,7 @@ Ninguna vive en este repo y las tres fallan sin voltear la página:
 
 | salida | qué hace | dónde |
 |---|---|---|
-| CRM de Databox | contacto, registro de instaladores y suscripción al boletín | `lib/prospectos.php` |
+| CRM de Databox | contacto, registro de técnicos y suscripción al boletín | `lib/prospectos.php` |
 | media server | las imágenes de las entradas | `ENTRADAS_MEDIA` |
 | Google (GA4 + Ads) | medición | `lib/analytics.php` |
 
@@ -124,7 +159,7 @@ Ninguna vive en este repo y las tres fallan sin voltear la página:
   `parametros`. Un POST da de alta prospecto + oportunidad + interacción de una,
   por eso `embudo`, `asunto` y `mensaje` son obligatorios los tres.
 - **Si el CRM falla, lo que se hace depende de si hay respaldo local.** En el
-  registro de instaladores la fila YA quedó guardada, así que el fallo va al log
+  registro de técnicos la fila YA quedó guardada, así que el fallo va al log
   y la persona ve el éxito. En contacto el CRM es el destino final: ahí hay que
   decirlo, o la persona se va creyendo que escribió y nadie recibió nada.
 - **La suscripción al boletín cambió de canal.** El legacy la mandaba a una lista
@@ -144,6 +179,14 @@ Ninguna vive en este repo y las tres fallan sin voltear la página:
   DESTINO (`$1.php`) y no `REQUEST_FILENAME`: con esa variable la regla entra en
   un bucle de redirecciones internas que termina en 500 — está explicado en el
   archivo.
+- **Arriba de todo, antes que cualquier otra regla, va el 301 de
+  `/instaladores` → `/tecnicos`**, con un grupo opcional que cubre las cuatro
+  rutas de la sección de una sola vez. La querystring viaja sola: mod_rewrite la
+  reinyecta cuando la sustitución no trae `?`, así que el `uid` de las fichas ya
+  compartidas llega entero. **No se borra**: es el mismo criterio con el que
+  `/sitemap.xml` responde aunque el archivo se genere y con el que
+  `/ayuda/preguntas` conserva su slug corto — una URL publicada no se cambia, se
+  redirige.
 - **Los de `blog/` y `ayuda/`** resuelven las rutas fijas, después los `.php` de
   la carpeta y **al final** el comodín de slugs. El comodín lleva `[L]`, así que
   **todo lo que vaya después de él es código muerto**: en el legacy la regla de

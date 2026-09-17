@@ -25,7 +25,7 @@ declare(strict_types=1);
  *
  * `planes`.`habilitado` SÍ es la bandera del repo (tinyint 0/1), así que va con
  * `esHabilitado()` y con el entero en el SQL — ver `lib/habilitado.php`. Ojo con
- * confundirla con `entradas`.`visibilidad` o `instaladores`.`aprobacion`, que
+ * confundirla con `entradas`.`visibilidad` o `tecnicos`.`aprobacion`, que
  * son varchar y se comparan contra la cadena.
  */
 

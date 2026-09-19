@@ -100,12 +100,17 @@ cambiaron.
   no es un olvido: el archivo vive en el media server, que no es parte de este
   repo. Renombrar la constante no mueve la imagen; el día que se mueva allá se
   cambia acá.
-- **El back office legacy —fuera de este repo— lee esta tabla**, que es donde el
-  equipo sube `aprobacion` y `visibilidad`. El sitio público sólo inserta
-  solicitudes; aprobarlas y publicarlas pasa por ahí. **Aplicar la migración sin
-  renombrar del otro lado deja ese módulo apuntando a una tabla que ya no
-  existe**: las altas se siguen guardando y nadie puede publicarlas. Está anotado
-  también en la cabecera de la migración.
+- **`aprobacion` y `visibilidad` se suben desde el módulo Técnicos de `cloud`**
+  (18/09/2026): *Propiedad → Técnicos*, con el ABM completo de la tabla
+  ([cloud/api/tecnicos.php](../cloud/api/tecnicos.php), §38 de
+  [cloud/DESIGN.md](../cloud/DESIGN.md)). El sitio público sólo inserta
+  solicitudes —nacen `aprobacion = '1'` y `visibilidad = '0'`— y no las aprueba
+  nunca. **El back office legacy —fuera de este repo— sigue leyendo la misma
+  tabla**, así que puede hacer lo mismo y las dos pantallas escriben lo mismo;
+  el módulo de cloud es el que se mantiene. **Aplicar la migración sin renombrar
+  del otro lado deja ese módulo viejo apuntando a una tabla que ya no existe**,
+  y está anotado también en la cabecera de la migración — desde que existe el de
+  cloud eso ya no deja a nadie sin poder publicar, pero lo rompe igual.
 - Lo que **no** se tocó son las menciones a "Técnico Instalador" de
   [panel/api/dominios.php](../panel/api/dominios.php) y de la migración
   `20260905_2300`: ése es un nombre de rol de la tabla `roles`, otra cosa.

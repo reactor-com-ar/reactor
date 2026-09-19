@@ -51,6 +51,7 @@
         adopciones: { title: 'Adopciones',          render: renderAdopciones, group: 'registros' },
         users:     { title: 'Usuarios',      render: renderUsers,     group: 'propiedad'  },
         profiles:  { title: 'Perfiles',      render: renderProfiles,  group: 'propiedad'  },
+        tecnicos:  { title: 'Técnicos',      render: renderTecnicos,  group: 'propiedad'  },
         controladores: { title: 'Controladores', render: renderControladores, group: 'seguridad' },
         roles:         { title: 'Roles',         render: renderRoles,         group: 'seguridad' },
         permisos:      { title: 'Permisos',      render: renderPermisos,      group: 'seguridad' },
@@ -8753,6 +8754,811 @@
                 try {
                     await api('profiles?id=' + prf.id, { method: 'DELETE' });
                     toast('Perfil eliminado');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
+    }
+
+    /* ---------- Views: Técnicos ----------
+     * ABM de `tecnicos`: la red de técnicos instaladores que publica el sitio
+     * público (`www/tecnicos/`). Es el lado de ESCRITURA de una tabla que hasta
+     * ahora sólo escribía el formulario abierto de `www` —que inserta
+     * solicitudes y nunca las aprueba— y que se aprobaba desde el back office
+     * viejo, fuera de este repo. Este módulo lo reemplaza.
+     *
+     * DOS COLUMNAS GOBIERNAN LA PUBLICACIÓN Y HACEN FALTA LAS DOS:
+     * `aprobacion = '2'` (aprobado por el equipo) Y `visibilidad = '1'` (sale en
+     * la vidriera). Hay 7 aprobados que no se publican, así que la columna
+     * `Publicado` del listado es la conjunción y no una de las dos.
+     *
+     * NINGUNA DE LAS DOS ES LA BANDERA `habilitado`: son `varchar(1)` y van
+     * comparadas contra la CADENA. `aprobacion` ni siquiera es booleana.
+     */
+    const TECNICO_APROBACIONES = [
+        { value: '1', label: 'Sin revisar' },
+        { value: '2', label: 'Aprobado'    },
+    ];
+
+    /* La ficha pública del técnico. Va con el host escrito: `www` es otro
+       docroot y otro dominio que el de cloud, igual que el visor de contratos
+       (`openContratoEstadoPublico()`). Sólo se ofrece cuando el técnico está
+       publicado — si no, la URL responde 404. */
+    const TECNICO_FICHA_BASE = 'https://www.reactor.com.ar/tecnicos/consultar';
+
+    const ORDEN_TECNICOS = [
+        { value: 'id',         label: 'Código'     },
+        { value: 'nombre',     label: 'Nombre'     },
+        { value: 'actividad',  label: 'Actividad'  },
+        { value: 'registrado', label: 'Registrado' },
+    ];
+
+    function tecnicosDefaults() {
+        return {
+            codigo: '', texto: '', aprobacion: '', publicacion: '',
+            orden:  'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    // Catálogos de ubicación (`paises`, `provincias`, `localidades`). Los deja
+    // el render del listado, que ya los trae en el mismo GET, y los consumen el
+    // modal de Alta/Edición y el de Consultar.
+    let tecnicosCtx = { catalogos: { paises: [], provincias: [], localidades: [] } };
+
+    async function renderTecnicos(root) {
+        try {
+            const data = await api('tecnicos');
+            const r    = data.resumen;
+            const tecnicos = data.tecnicos;
+            tecnicosCtx = { catalogos: data.catalogos };
+            const state = tomarEstadoVista('tecnicos', tecnicosDefaults());
+
+            root.innerHTML = `
+                ${moduleHeader('Técnicos', 'La red de técnicos instaladores. Se registran solos desde el sitio público; acá se los revisa, se los aprueba y se decide cuáles salen publicados.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Sin revisar</span>
+                        <span class="stat-value orange">${r.sin_revisar}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Aprobados</span>
+                        <span class="stat-value">${r.aprobados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Publicados</span>
+                        <span class="stat-value green">${r.publicados}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'tec',
+                    quickPlaceholder: 'Buscar nombre, actividad, correo, celular o ubicación…',
+                    newLabel:         'Nuevo técnico',
+                })}
+                <div class="table-card" id="tec-table"></div>
+            `;
+
+            wireTecnicosView(state, tecnicos);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    /* Un valor fuera de las dos listas no se dibuja como si fuera uno de ellos:
+       la columna es un `varchar(1)` sin ENUM ni CHECK, así que si el legacy
+       escribiera un tercer código tiene que verse que está ahí. */
+    function tecnicoAprobacionBadge(t) {
+        const item = TECNICO_APROBACIONES.find(a => a.value === String(t.aprobacion ?? ''));
+        if (item) {
+            return `<span class="badge ${item.value === '2' ? 'badge-success' : 'badge-warn'}">${escape(item.label)}</span>`;
+        }
+        return t.aprobacion
+            ? `<span class="badge badge-danger" title="Valor fuera de catálogo">${escape(t.aprobacion)}</span>`
+            : `<span class="muted">—</span>`;
+    }
+
+    /* `publicado` lo calcula el backend con las DOS columnas. El estado del
+       medio —visible pero sin aprobar— se dice con todas las letras: es lo que
+       explica que alguien marcado como visible no aparezca en el sitio. */
+    function tecnicoPublicadoBadge(t) {
+        if (t.publicado) return '<span class="badge badge-success">Publicado</span>';
+        if (String(t.visibilidad ?? '') === '1') {
+            return '<span class="badge badge-warn">Visible, sin aprobar</span>';
+        }
+        return '<span class="badge badge-info">No publicado</span>';
+    }
+
+    /* Ubicación legible con las partes que estén cargadas — las mismas tres
+       columnas de texto que usa `tecnicoUbicacion()` del sitio público. Las de
+       nombre limpio (`localidad`, `provincia`, `pais`) guardan el id del
+       catálogo y hoy están casi todas vacías. */
+    function tecnicoUbicacion(t) {
+        return ['localidad_', 'provincia_', 'pais_']
+            .map(c => String(t[c] ?? '').trim())
+            .filter(v => v !== '')
+            .join(', ');
+    }
+
+    function tecnicoFichaUrl(t) {
+        return `${TECNICO_FICHA_BASE}?uid=${encodeURIComponent(t.uuid || '')}`;
+    }
+
+    function tecnicosTableBody(tecnicos) {
+        if (!tecnicos.length) {
+            return `<div class="table-empty">No hay técnicos que coincidan. Creá uno con "Nuevo técnico".</div>`;
+        }
+
+        const rows = tecnicos.map(t => {
+            const ubicacion = tecnicoUbicacion(t);
+            return `
+            <tr class="row-clickable" data-id="${t.id}">
+                <td><span class="td-id">#${t.id}</span></td>
+                <td class="td-nombre">${escape(t.nombre ?? '—')}</td>
+                <td>${t.actividad ? escape(t.actividad) : '<span class="muted">—</span>'}</td>
+                <td>${t.celular ? escape(t.celular) : '<span class="muted">—</span>'}</td>
+                <td>${t.correo ? escape(t.correo) : '<span class="muted">—</span>'}</td>
+                <td>${ubicacion ? escape(ubicacion) : '<span class="muted">—</span>'}</td>
+                <td>${tecnicoAprobacionBadge(t)}</td>
+                <td>${tecnicoPublicadoBadge(t)}</td>
+                <td>${formatDate(t.registrado)}</td>
+                ${actionCells()}
+            </tr>
+        `;
+        }).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Actividad</th>
+                        <th>Celular</th>
+                        <th>Correo</th>
+                        <th>Ubicación</th>
+                        <th>Aprobación</th>
+                        <th>Publicado</th>
+                        <th>Registrado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireTecnicosView(state, allTecnicos) {
+        const tableWrap = document.getElementById('tec-table');
+        const quick     = document.getElementById('tec-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('tec-filters');
+        const btnNew    = document.getElementById('tec-new');
+
+        function applyAndRender() {
+            const q = state.texto.toLowerCase();
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = allTecnicos.filter(t => {
+                if (Number.isFinite(codigo) && t.id !== codigo) return false;
+                if (state.aprobacion && String(t.aprobacion ?? '') !== state.aprobacion) return false;
+                if (state.publicacion === 'si' && !t.publicado) return false;
+                if (state.publicacion === 'no' &&  t.publicado) return false;
+                if (q && !((t.nombre || '') + ' ' + (t.actividad || '') + ' ' +
+                           (t.correo || '') + ' ' + (t.celular || '') + ' ' +
+                           (t.domicilio || '') + ' ' + tecnicoUbicacion(t))
+                    .toLowerCase().includes(q)) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = tecnicosTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(t) {
+            // "Ver ficha pública" es otra forma de VER el registro, así que va
+            // pegada a Consultar y sin divisor (ABM.md). Sólo se dibuja cuando
+            // el técnico está publicado: si no, esa URL devuelve 404.
+            const verFicha = t.publicado
+                ? [{ act: 'ficha', label: 'Ver ficha pública', icon: 'fa-arrow-up-right-from-square',
+                     onSelect: () => window.open(tecnicoFichaUrl(t), '_blank', 'noopener') }]
+                : [];
+            const extra = [];
+            if (t.correo) {
+                extra.push({ act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-copy',
+                             onSelect: () => copyToClipboard(t.correo) });
+            }
+            extra.push({ act: 'copy-uuid', label: 'Copiar identificador', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(t.uuid || '')) });
+
+            return standardRowMenuItems({
+                view:   true, onView:   () => openTecnicoViewModal(t),
+                edit:   true, onEdit:   () => openTecnicoModal(t),
+                delete: true, onDelete: () => confirmDeleteTecnico(t),
+                extraAfterView: verFicha,
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const t  = allTecnicos.find(x => x.id === id);
+                if (!t) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(t), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openTecnicoViewModal(t));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(t), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        });
+
+        btnFilt.addEventListener('click', () => openTecnicosFiltersModal(state, applyAndRender));
+        btnNew.addEventListener('click',  () => openTecnicoModal(null));
+        wireRefresh('tec', 'tecnicos', state);
+
+        applyAndRender();
+    }
+
+    function openTecnicosFiltersModal(state, onApply) {
+        const aprOpts = [`<option value=""${state.aprobacion === '' ? ' selected' : ''}>Todas</option>`]
+            .concat(TECNICO_APROBACIONES.map(a =>
+                `<option value="${a.value}"${a.value === state.aprobacion ? ' selected' : ''}>${escape(a.label)}</option>`
+            )).join('');
+        const pubOpts = [
+            `<option value=""${state.publicacion === ''   ? ' selected' : ''}>Todos</option>`,
+            `<option value="si"${state.publicacion === 'si' ? ' selected' : ''}>Publicados</option>`,
+            `<option value="no"${state.publicacion === 'no' ? ' selected' : ''}>No publicados</option>`,
+        ].join('');
+        const ordOpts = ORDEN_TECNICOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="tec-fm-codigo">Código</label>
+                    <input type="number" id="tec-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="tec-fm-texto">Buscar (nombre / actividad / contacto / ubicación)</label>
+                    <input type="search" id="tec-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="tec-fm-aprobacion">Aprobación</label>
+                    <select id="tec-fm-aprobacion">${aprOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tec-fm-publicacion">Publicación</label>
+                    <select id="tec-fm-publicacion">${pubOpts}</select>
+                    <div class="form-nota">Publicado = aprobado <em>y</em> visible. Un técnico visible sin aprobar no sale en el sitio.</div>
+                </div>
+                <div class="form-group">
+                    <label for="tec-fm-limit">Límite</label>
+                    <input type="number" id="tec-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="tec-fm-orden">Ordenar por</label>
+                    <select id="tec-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="tec-fm-dir">Dirección</label>
+                    <select id="tec-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo      = modal.querySelector('#tec-fm-codigo').value.trim();
+                state.texto       = modal.querySelector('#tec-fm-texto').value.trim();
+                state.aprobacion  = modal.querySelector('#tec-fm-aprobacion').value;
+                state.publicacion = modal.querySelector('#tec-fm-publicacion').value;
+                state.orden       = modal.querySelector('#tec-fm-orden').value;
+                state.dir         = modal.querySelector('#tec-fm-dir').value;
+                state.limit       = readLimit(modal.querySelector('#tec-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = tecnicosDefaults();
+                modal.querySelector('#tec-fm-codigo').value      = d.codigo;
+                modal.querySelector('#tec-fm-texto').value       = d.texto;
+                modal.querySelector('#tec-fm-aprobacion').value  = d.aprobacion;
+                modal.querySelector('#tec-fm-publicacion').value = d.publicacion;
+                modal.querySelector('#tec-fm-orden').value       = d.orden;
+                modal.querySelector('#tec-fm-dir').value         = d.dir;
+                modal.querySelector('#tec-fm-limit').value       = String(d.limit);
+            },
+        });
+    }
+
+    /* Valor de una de las tres columnas de catálogo para la ficha: el nombre
+       más el id. Un id que no está en su catálogo se muestra igual y avisado —
+       esconderlo haría que la ficha no coincida con lo que el Explorador DB
+       muestra de la misma fila. */
+    function tecnicoCatalogoValor(items, valor) {
+        const v = String(valor ?? '').trim();
+        if (v === '') return `<span class="muted">Sin asignar</span>`;
+        const item = (items || []).find(x => String(x.id) === v);
+        return item
+            ? `${escape(item.nombre)} <code>#${escape(v)}</code>`
+            : `<code>#${escape(v)}</code> <span class="muted">· fuera de catálogo</span>`;
+    }
+
+    function openTecnicoViewModal(t) {
+        const cat = tecnicosCtx.catalogos;
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar técnico</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del técnico">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${/* 17 tarjetas: 16 `half` + `Domicilio` full en la ranura 9
+                        (impar), así los ocho campos de arriba y los ocho de
+                        abajo cierran de a dos (§25 de DESIGN.md). Agregar o
+                        quitar un campo obliga a rehacer esta cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código',              `<code>#${t.id}</code>`),
+                        viewCardHalf('Identificador',       t.uuid
+                            ? `<code>${escape(t.uuid)}</code>`
+                            : `<span class="muted">Sin identificador</span>`),
+                        viewCardHalf('Nombre',              escape(t.nombre ?? '—')),
+                        viewCardHalf('Actividad',           t.actividad ? escape(t.actividad) : `<span class="muted">Sin actividad</span>`),
+                        viewCardHalf('Celular',             t.celular ? escape(t.celular) : `<span class="muted">Sin celular</span>`),
+                        viewCardHalf('Correo',              t.correo  ? escape(t.correo)  : `<span class="muted">Sin correo</span>`),
+                        viewCardHalf('Aprobación',          tecnicoAprobacionBadge(t)),
+                        viewCardHalf('En el sitio público', tecnicoPublicadoBadge(t)),
+                        viewCardFull('Domicilio',           t.domicilio ? escape(t.domicilio) : `<span class="muted">Sin domicilio</span>`),
+                        viewCardHalf('Localidad',           t.localidad_ ? escape(t.localidad_) : `<span class="muted">—</span>`),
+                        viewCardHalf('Localidad (catálogo)', tecnicoCatalogoValor(cat.localidades, t.localidad)),
+                        viewCardHalf('Provincia',           t.provincia_ ? escape(t.provincia_) : `<span class="muted">—</span>`),
+                        viewCardHalf('Provincia (catálogo)', tecnicoCatalogoValor(cat.provincias, t.provincia)),
+                        viewCardHalf('País',                t.pais_ ? escape(t.pais_) : `<span class="muted">—</span>`),
+                        viewCardHalf('País (catálogo)',     tecnicoCatalogoValor(cat.paises, t.pais)),
+                        viewCardHalf('Código postal',       t.postal ? escape(t.postal) : `<span class="muted">—</span>`),
+                        viewCardHalf('Registrado',          formatDate(t.registrado)),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
+            const items = [
+                { act: 'edit', label: 'Editar técnico', icon: 'fa-pencil',
+                  onSelect: () => { close(); openTecnicoModal(t); } },
+                { divider: true },
+            ];
+            if (t.publicado) {
+                items.push({ act: 'ficha', label: 'Ver ficha pública', icon: 'fa-arrow-up-right-from-square',
+                             onSelect: () => window.open(tecnicoFichaUrl(t), '_blank', 'noopener') });
+            }
+            if (t.correo) {
+                items.push({ act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-copy',
+                             onSelect: () => copyToClipboard(t.correo) });
+            }
+            items.push({ act: 'copy-uuid', label: 'Copiar identificador', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(t.uuid || '')) });
+            items.push({ divider: true });
+            items.push({ act: 'delete', label: 'Eliminar técnico', icon: 'fa-trash', danger: true,
+                         onSelect: () => { close(); confirmDeleteTecnico(t); } });
+            return items;
+        });
+    }
+
+    /* Opciones de un select de catálogo. Si el valor guardado no está en la
+       lista se agrega igual, marcado: sin esa opción el navegador cae en la
+       primera y guardar le cambiaría el dato a la fila en silencio (ABM.md). */
+    function tecnicoCatalogoOpciones(items, valor, placeholder) {
+        const v = String(valor ?? '').trim();
+        let encontrado = false;
+        const opts = (items || []).map(it => {
+            const sel = String(it.id) === v;
+            if (sel) encontrado = true;
+            return `<option value="${escape(it.id)}"${sel ? ' selected' : ''}>${escape(it.nombre)}</option>`;
+        }).join('');
+        const huerfano = (v !== '' && !encontrado)
+            ? `<option value="${escape(v)}" selected>${escape(v)} (fuera de catálogo)</option>`
+            : '';
+        return `<option value="">${escape(placeholder)}</option>${huerfano}${opts}`;
+    }
+
+    function openTecnicoModal(t) {
+        const isEdit = !!t;
+        const cat    = tecnicosCtx.catalogos;
+
+        const paisIni      = String(t?.pais      ?? '').trim();
+        const provinciaIni = String(t?.provincia ?? '').trim();
+        // El catálogo de cada nivel arranca acotado al padre que la fila trae,
+        // igual que después de un cambio manual: así la provincia que se ve es
+        // una del país guardado y no las 30 del país que sea.
+        const provinciasIni  = (cat.provincias  || []).filter(p => !paisIni || String(p.pais) === paisIni);
+        const localidadesIni = (cat.localidades || []).filter(l =>
+            (!paisIni      || String(l.pais)      === paisIni) &&
+            (!provinciaIni || String(l.provincia) === provinciaIni));
+
+        const aprobacionIni  = String(t?.aprobacion  ?? '1');
+        const visibleIni     = String(t?.visibilidad ?? '0') === '1';
+        const aprOpts = TECNICO_APROBACIONES.map(a =>
+            `<option value="${a.value}"${a.value === aprobacionIni ? ' selected' : ''}>${escape(a.label)}</option>`
+        ).join('');
+        // Un código que no está en la lista se ofrece marcado, para no pisarlo al
+        // guardar. La cadena vacía no: no es un estado, así que el select cae en
+        // `Sin revisar` — que es lo que la columna significa cuando nadie la tocó.
+        const aprHuerfano = (aprobacionIni === '' || TECNICO_APROBACIONES.some(a => a.value === aprobacionIni))
+            ? ''
+            : `<option value="${escape(aprobacionIni)}" selected>${escape(aprobacionIni)} (fuera de catálogo)</option>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar técnico' : 'Nuevo técnico'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title"><i class="fa-solid fa-user-helmet-safety"></i>Identidad</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-nombre">Nombre</label>
+                                <input type="text" id="tec-nombre" maxlength="255"
+                                       value="${escape(t?.nombre ?? '')}" required>
+                                <div class="field-error" id="tec-nombre-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-actividad">Actividad</label>
+                                <input type="text" id="tec-actividad" maxlength="255"
+                                       value="${escape(t?.actividad ?? '')}"
+                                       placeholder="Automatización y seguridad electrónica">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-celular">Celular</label>
+                                <input type="tel" id="tec-celular" inputmode="numeric" maxlength="20"
+                                       value="${escape(t?.celular ?? '')}" placeholder="2644123456">
+                                <div class="field-error" id="tec-celular-err" style="display:none"></div>
+                                <div class="form-nota">10 dígitos, sin 0, sin 15 y sin +54.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-correo">Correo</label>
+                                <input type="email" id="tec-correo" maxlength="255"
+                                       value="${escape(t?.correo ?? '')}" placeholder="tecnico@ejemplo.com">
+                                <div class="field-error" id="tec-correo-err" style="display:none"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><i class="fa-solid fa-location-dot"></i>Ubicación</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-domicilio">Domicilio</label>
+                                <input type="text" id="tec-domicilio" maxlength="255"
+                                       value="${escape(t?.domicilio ?? '')}" placeholder="San Martín 735">
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-postal">Código postal</label>
+                                <input type="text" id="tec-postal" maxlength="10"
+                                       value="${escape(t?.postal ?? '')}" placeholder="J5400">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-pais">País (catálogo)</label>
+                                <select id="tec-pais">${tecnicoCatalogoOpciones(cat.paises, paisIni, 'Sin asignar')}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-pais-txt">País</label>
+                                <input type="text" id="tec-pais-txt" maxlength="255" value="${escape(t?.pais_ ?? '')}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-provincia">Provincia (catálogo)</label>
+                                <select id="tec-provincia">${tecnicoCatalogoOpciones(provinciasIni, provinciaIni, 'Sin asignar')}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-provincia-txt">Provincia</label>
+                                <input type="text" id="tec-provincia-txt" maxlength="255" value="${escape(t?.provincia_ ?? '')}">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-localidad">Localidad (catálogo)</label>
+                                <select id="tec-localidad">${tecnicoCatalogoOpciones(localidadesIni, String(t?.localidad ?? '').trim(), 'Sin asignar')}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-localidad-txt">Localidad</label>
+                                <input type="text" id="tec-localidad-txt" maxlength="255" value="${escape(t?.localidad_ ?? '')}">
+                            </div>
+                        </div>
+                        <div class="form-nota">
+                            La tabla guarda las dos formas: el <strong>texto</strong> es lo que muestra el sitio
+                            público y el <strong>catálogo</strong> es el id de <code>paises</code> /
+                            <code>provincias</code> / <code>localidades</code>. Elegir del catálogo completa el texto
+                            sólo si está vacío — nunca pisa lo que ya estaba cargado.
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><i class="fa-solid fa-globe"></i>Publicación</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-aprobacion">Aprobación</label>
+                                <select id="tec-aprobacion">${aprHuerfano}${aprOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label>Visible en el sitio</label>
+                                <label class="toggle-switch" style="margin-top:6px">
+                                    <input type="checkbox" id="tec-visible" ${visibleIni ? 'checked' : ''}>
+                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    <span class="toggle-label" id="tec-visible-label">${visibleIni ? 'Sí' : 'No'}</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-nota" id="tec-publicacion-nota"></div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title"><i class="fa-solid fa-lock"></i>Asignado por el sistema</div>
+                        ${isEdit ? `
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tec-uuid">Identificador</label>
+                                <input type="text" id="tec-uuid" value="${escape(t.uuid ?? '')}" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="tec-registrado">Registrado</label>
+                                <input type="text" id="tec-registrado" value="${escape(formatDate(t.registrado))}" readonly>
+                            </div>
+                        </div>
+                        <div class="form-nota">
+                            No se editan: el identificador es la URL de la ficha que el técnico ya le pasó a sus
+                            clientes, y la fecha es la del alta.
+                        </div>
+                        ` : `
+                        <div class="form-nota">
+                            El identificador de la ficha pública y la fecha de registro se asignan al guardar.
+                        </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const nombreInput    = backdrop.querySelector('#tec-nombre');
+        const actividadInput = backdrop.querySelector('#tec-actividad');
+        const celularInput   = backdrop.querySelector('#tec-celular');
+        const correoInput    = backdrop.querySelector('#tec-correo');
+        const domicilioInput = backdrop.querySelector('#tec-domicilio');
+        const postalInput    = backdrop.querySelector('#tec-postal');
+        const paisSel        = backdrop.querySelector('#tec-pais');
+        const paisTxt        = backdrop.querySelector('#tec-pais-txt');
+        const provSel        = backdrop.querySelector('#tec-provincia');
+        const provTxt        = backdrop.querySelector('#tec-provincia-txt');
+        const locSel         = backdrop.querySelector('#tec-localidad');
+        const locTxt         = backdrop.querySelector('#tec-localidad-txt');
+        const aprobacionSel  = backdrop.querySelector('#tec-aprobacion');
+        const visibleChk     = backdrop.querySelector('#tec-visible');
+        const visibleLbl     = backdrop.querySelector('#tec-visible-label');
+        const publicacionNota= backdrop.querySelector('#tec-publicacion-nota');
+        const nombreErr      = backdrop.querySelector('#tec-nombre-err');
+        const celularErr     = backdrop.querySelector('#tec-celular-err');
+        const correoErr      = backdrop.querySelector('#tec-correo-err');
+        const saveBtn        = backdrop.querySelector('[data-act="save"]');
+
+        // El estado resultante se dice en palabras y en vivo: son dos controles
+        // separados y ninguno de los dos alcanza solo para salir publicado.
+        function pintarPublicacion() {
+            const aprobado = aprobacionSel.value === '2';
+            const visible  = visibleChk.checked;
+            publicacionNota.innerHTML = aprobado && visible
+                ? 'Queda <strong>publicado</strong> en la vidriera de técnicos del sitio.'
+                : (visible
+                    ? 'Marcado como visible, pero <strong>no sale publicado</strong> hasta que esté aprobado.'
+                    : (aprobado
+                        ? 'Aprobado como técnico, pero <strong>no sale publicado</strong>: falta marcarlo visible.'
+                        : '<strong>No sale publicado</strong>: hacen falta la aprobación y la visibilidad.'));
+        }
+        aprobacionSel.addEventListener('change', pintarPublicacion);
+        visibleChk.addEventListener('change', () => {
+            visibleLbl.textContent = visibleChk.checked ? 'Sí' : 'No';
+            pintarPublicacion();
+        });
+        pintarPublicacion();
+
+        // Separadores: se sacan mientras se tipea (quitar un guion deja EL MISMO
+        // número) pero NUNCA se recorta el sobrante — cortar `5492644123456` en
+        // el dígito 10 daría un número que no es de nadie. Lo que sobra queda a
+        // la vista y lo rechaza la validación (CLAUDE.md).
+        celularInput.addEventListener('input', () => {
+            const limpio = celularInput.value.replace(/[^0-9]/g, '');
+            if (limpio !== celularInput.value) celularInput.value = limpio;
+        });
+
+        // Encadenado de los tres catálogos: al cambiar el padre se repuebla el
+        // hijo con lo que le cuelga, y el valor que dejó de pertenecerle se
+        // descarta en vez de quedar guardado bajo otro padre.
+        function repoblar(sel, items) {
+            const sigueValiendo = (items || []).some(i => String(i.id) === sel.value);
+            sel.innerHTML = tecnicoCatalogoOpciones(items, sigueValiendo ? sel.value : '', 'Sin asignar');
+        }
+        function provinciasDelPais() {
+            const p = paisSel.value;
+            return (cat.provincias || []).filter(x => !p || String(x.pais) === p);
+        }
+        function localidadesDeLaProvincia() {
+            const p  = paisSel.value;
+            const pr = provSel.value;
+            return (cat.localidades || []).filter(x =>
+                (!p  || String(x.pais)      === p) &&
+                (!pr || String(x.provincia) === pr));
+        }
+        // Espejo hacia el texto: sólo cuando está vacío. Pisar un texto cargado
+        // reescribiría lo que el sitio público ya muestra de esa persona.
+        function espejo(sel, txt, items) {
+            const item = (items || []).find(x => String(x.id) === sel.value);
+            if (item && txt.value.trim() === '') txt.value = item.nombre;
+        }
+
+        paisSel.addEventListener('change', () => {
+            espejo(paisSel, paisTxt, cat.paises);
+            repoblar(provSel, provinciasDelPais());
+            repoblar(locSel,  localidadesDeLaProvincia());
+        });
+        provSel.addEventListener('change', () => {
+            espejo(provSel, provTxt, cat.provincias);
+            repoblar(locSel, localidadesDeLaProvincia());
+        });
+        locSel.addEventListener('change', () => espejo(locSel, locTxt, cat.localidades));
+
+        nombreInput.focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const nombre    = nombreInput.value.trim();
+            const celular   = celularInput.value.trim();
+            const correo    = correoInput.value.trim().toLowerCase();
+
+            [nombreErr, celularErr, correoErr].forEach(el => el.style.display = 'none');
+            [nombreInput, celularInput, correoInput].forEach(el => el.classList.remove('input-invalid'));
+
+            let firstInvalid = null;
+            if (!nombre) {
+                nombreErr.textContent = 'El nombre es obligatorio';
+                nombreErr.style.display = 'block';
+                nombreInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || nombreInput;
+            }
+            // Mismo criterio que el backend: el celular que ya estaba guardado
+            // pasa tal cual (6 de las 95 filas traen el formato internacional),
+            // lo que se escriba nuevo va con los 10 dígitos.
+            if (celular !== '' && celular !== String(t?.celular ?? '') && !/^[0-9]{10}$/.test(celular)) {
+                celularErr.textContent = 'El celular tiene que ser de 10 dígitos, sin 0, sin 15 y sin +54. Ejemplo: 2644123456.';
+                celularErr.style.display = 'block';
+                celularInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || celularInput;
+            }
+            if (correo !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+                correoErr.textContent = 'Ese correo no parece válido';
+                correoErr.style.display = 'block';
+                correoInput.classList.add('input-invalid');
+                firstInvalid = firstInvalid || correoInput;
+            }
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = {
+                nombre,
+                actividad:   actividadInput.value.trim(),
+                celular,
+                correo,
+                domicilio:   domicilioInput.value.trim(),
+                postal:      postalInput.value.trim(),
+                pais:        paisSel.value,
+                pais_:       paisTxt.value.trim(),
+                provincia:   provSel.value,
+                provincia_:  provTxt.value.trim(),
+                localidad:   locSel.value,
+                localidad_:  locTxt.value.trim(),
+                aprobacion:  aprobacionSel.value,
+                visibilidad: visibleChk.checked ? '1' : '0',
+            };
+
+            saveBtn.disabled = true;
+            try {
+                if (isEdit) {
+                    await api('tecnicos', { method: 'PUT', body: { id: t.id, ...payload } });
+                    toast('Técnico actualizado');
+                } else {
+                    await api('tecnicos', { method: 'POST', body: payload });
+                    toast('Técnico creado');
+                }
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, 'error');
+            }
+        });
+    }
+
+    // Sin modal de impacto: `tecnicos` es una isla del esquema —ninguna FK
+    // apunta a ella—, así que alcanza el confirmDialog estándar (ABM.md). Lo
+    // que sí se lleva es la ficha pública, y eso se dice cuando está publicada:
+    // la URL ya circula fuera de Reactor.
+    function confirmDeleteTecnico(t) {
+        const fichaNota = t.publicado
+            ? ' Está publicado: su ficha del sitio deja de responder y el enlace que haya compartido queda roto.'
+            : '';
+        confirmDialog(
+            'Eliminar técnico',
+            `¿Eliminar a "${t.nombre ?? '#' + t.id}"?${fichaNota} Esta acción no se puede deshacer.`,
+            async () => {
+                try {
+                    await api('tecnicos?id=' + t.id, { method: 'DELETE' });
+                    toast('Técnico eliminado');
                     navigate();
                 } catch (e) {
                     toast(e.message, 'error');

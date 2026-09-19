@@ -2464,6 +2464,31 @@ Escribe `difusiones` (la campaña) y `difusiones_destinatarios` (una fila por pe
 
 ---
 
+## 38. Propiedad · Técnicos
+
+ABM de `tecnicos`: la red de técnicos instaladores que publica el sitio público (`www/tecnicos/`, ver `www/CLAUDE.md`). Cuelga de **Propiedad**, debajo de `Perfiles`, con `fa-user-helmet-safety`.
+
+Es el **lado de escritura de una tabla que este repo sólo sabía leer**: `www` inserta solicitudes desde un formulario abierto en internet —que nacen sin aprobar y sin publicar a propósito— y aprobarlas pasaba por el back office viejo, que está fuera del repositorio. Este módulo lo reemplaza.
+
+El módulo **no aporta componentes nuevos**: sale entero de las piezas ya documentadas — `moduleHeader()` (§23), `abmToolbar()` (§9), tabla estándar (§10), badges (§11), secciones de formulario (§8.1), toggle (§17), Modal de Filtros compartido (§23-bis) y tarjetas de consulta (§25).
+
+**Reglas:**
+
+- **PUBLICADO ES LA CONJUNCIÓN DE DOS COLUMNAS Y ASÍ SE MUESTRA.** Un técnico sale en la vidriera sólo con `aprobacion = '2'` **y** `visibilidad = '1'`; hay 7 aprobados que no se publican, porque la aprobación lo habilita como técnico y la visibilidad decide si además aparece. Por eso la columna del listado es `Publicado` (la conjunción, calculada por el backend en `publicado`) y no una de las dos banderas, el filtro `Publicación` opera sobre eso mismo, y el estado del medio se dice con todas las letras: `Visible, sin aprobar`. Un badge que dijera "visible" sobre alguien que no sale en el sitio es la confusión que el módulo existe para sacar.
+- **NINGUNA DE LAS DOS ES LA BANDERA `habilitado`.** Son `varchar(1)` y van comparadas contra la **cadena**; `aprobacion` ni siquiera es booleana (`'1'` sin revisar, `'2'` aprobado). No se tocan con `esHabilitado()` / `valorHabilitado()` ni se bindean como enteros — es la excepción que ya documenta `www/CLAUDE.md`, y acá vale igual.
+- **Un valor fuera de las dos listas se dibuja como lo que es.** La columna no tiene `ENUM` ni `CHECK`: si el legacy escribiera un tercer código, el badge lo muestra crudo en `badge-danger` y el select lo agrega marcado (`9 (fuera de catálogo)`), como los planes deshabilitados de Contratos. Sin esa opción el navegador caería en la primera y guardar le cambiaría el estado a la fila en silencio.
+- **La ubicación son SEIS columnas y el formulario muestra las seis, apareadas.** Las de nombre limpio (`localidad`, `provincia`, `pais`) guardan el id del catálogo (`localidades` / `provincias` / `paises`) y las de guion bajo al final (`localidad_`, `provincia_`, `pais_`) guardan el **texto, que es lo único que el sitio público lee**. Hoy el texto lo tienen casi todas las filas y el id casi ninguna (`localidad` está vacía en las 95). Mostrar sólo una de las dos formas dejaría media ubicación invisible desde acá.
+- **Los tres selects de catálogo están encadenados, y elegir uno completa el texto sólo si está vacío.** Al cambiar el país se repuebla la provincia con las que le cuelgan y el valor que dejó de pertenecerle se descarta; ídem provincia → localidad. El espejo hacia el campo de texto **nunca pisa lo cargado**: ese texto es el que ya se está publicando de esa persona (y trae cosas como `San Telmo,caba`, que no existen en el catálogo).
+- **Lo heredado pasa, pero sólo mientras nadie toque el padre.** `tecnicoCatalogoValidado()` acepta el id que la fila ya traía —aunque hoy no esté en su catálogo— para no bloquear la edición del nombre por un dato que cargó el legacy; pero si el operador cambia el país, la provincia heredada **se revalida y corta**, porque ese par ya no es el que estaba guardado. Mismo criterio con el celular: los 10 dígitos se exigen a lo que se escribe nuevo, y las 6 filas que traen el número en formato internacional se re-guardan tal cual.
+- **El celular se limpia mientras se tipea pero NUNCA se recorta**, igual que en las dos invitaciones: sacar un guion deja el mismo número, cortar `5492644123456` en el dígito 10 da uno que no es de nadie. Lo que sobra queda a la vista y lo rechaza la validación —del servidor, que es la que corre siempre.
+- **El correo no es obligatorio acá y en el formulario público sí.** Este módulo edita las 95 filas que ya existen y una no tiene correo: exigirlo la dejaría sin poder corregirse por un dato que su alta nunca pidió. Lo que sí se exige es que lo que llegue **sea** un correo.
+- **`uuid` y `registrado` se muestran y no se editan**, en su propia sección (`Asignado por el sistema`). El primero es la URL de la ficha que el técnico ya le pasó a sus clientes; la segunda es la fecha del alta. Es la excepción declarada de `ABM.md`: la restricción es de escritura, no de lectura. En el alta los asigna el backend —el uuid con el **mismo alfabeto de 16 caracteres** que genera `www`, y consultando antes que esté libre, porque la tabla no tiene `UNIQUE` y `tecnicoPorUuid()` resuelve con `LIMIT 1`.
+- **`Ver ficha pública` va pegada a `Consultar`, sin divisor** (es otra forma de ver el registro) y **sólo cuando está publicado**: si no, esa URL responde 404. Abre `www.reactor.com.ar/tecnicos/consultar?uid=…` en otra pestaña, con el host escrito, igual que el visor de contratos.
+- **Diecisiete tarjetas en Consultar: dieciséis `half` y `Domicilio` full en la ranura 9** (impar), así los ocho campos de arriba y los ocho de abajo cierran de a dos (§25). Agregar o quitar un campo obliga a rehacer esa cuenta.
+- **La baja va con el `confirmDialog` estándar** (§15) y no con el modal de desglose: `tecnicos` es una isla del esquema, ninguna FK apunta a ella. Lo que sí se avisa —cuando corresponde— es que la ficha pública deja de responder: esa URL ya circula fuera de Reactor.
+
+---
+
 ## Reglas duras (criterios de aceptación)
 
 1. **Ningún color hardcodeado** en el HTML/CSS final. Todo sale de las variables.
@@ -2475,5 +2500,5 @@ Escribe `difusiones` (la campaña) y `difusiones_destinatarios` (una fila por pe
 7. **Densidad**: padding `10–14px` en celdas; gaps `12–20px` entre cards.
 8. **Mobile**: `<768px` colapsa sidebar a overlay; grids `form-row*` a una columna.
 9. **Sin librerías UI pesadas** (Bootstrap / Tailwind / Material). CSS plano + variables.
-10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los diecisiete módulos. Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
+10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los dieciocho módulos. Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
 11. **Si dudás, mirá los componentes de arriba antes de crear uno nuevo.**

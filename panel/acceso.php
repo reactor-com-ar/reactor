@@ -11,15 +11,20 @@ declare(strict_types=1);
  * ES UNA PAGINA PUBLICA: no puede exigir sesion, porque su razon de ser es
  * crearla. Todo el control esta en el token.
  *
- * EL CANJE ES UN `UPDATE` CONDICIONAL, NO UN SELECT + UPDATE. La fila se marca
- * usada con `WHERE usada IS NULL AND expira > NOW()` en la MISMA sentencia que
- * la valida: si dos requests llegan con el mismo enlace, solo una afecta filas y
- * la otra rebota. Con un SELECT previo las dos pasarian el chequeo antes de que
- * ninguna escribiera.
+ * EL CANJE ES UN `UPDATE` CONDICIONAL, NO UN SELECT + UPDATE. El contador se
+ * incrementa con `WHERE usos < usos_max AND expira > NOW()` en la MISMA
+ * sentencia que lo valida: si dos requests llegan con el mismo enlace, el lock
+ * de fila de InnoDB los serializa y el segundo ve el contador ya subido. Con un
+ * SELECT previo los dos pasarian el chequeo antes de que ninguno escribiera.
+ *
+ * EL CUPO ES UNA COLUMNA, NO UN "UN SOLO USO" FIJO. `usos_max` lo elige el
+ * operador en cloud al emitir el enlace y vale 1 por default, que es lo que la
+ * tabla hizo siempre; `usada` / `origen_uso` son el ULTIMO canje.
  *
  * SE REVALIDA TODO, aunque cloud ya lo haya hecho al emitir. Entre la emision y
- * el uso pasan hasta 15 minutos y en el medio la cuenta se pudo deshabilitar o
- * quedarse sin perfiles. El enlace prueba QUIEN es, no que siga pudiendo entrar.
+ * el uso pasa una hora —o los dias que le haya puesto el operador— y en el medio
+ * la cuenta se pudo deshabilitar o quedarse sin perfiles. El enlace prueba QUIEN
+ * es, no que siga pudiendo entrar.
  *
  * `destino = 'panel'` VA EN EL WHERE: un enlace emitido para `app` no abre el
  * panel. Sin esa condicion, el enlace del proyecto menos privilegiado serviria
@@ -108,9 +113,10 @@ exit;
 /**
  * Consume el token y devuelve el id del usuario, o 0 si no sirve.
  *
- * El `UPDATE` es el candado: marca y valida en una sola sentencia. Si afecta 0
- * filas, el enlace no existe, ya se uso, vencio o es de otro destino -- y no se
- * distingue cual a proposito, porque el que lo trae no tiene por que enterarse.
+ * El `UPDATE` es el candado: cuenta y valida en una sola sentencia. Si afecta 0
+ * filas, el enlace no existe, agoto sus usos, vencio o es de otro destino -- y
+ * no se distingue cual a proposito, porque el que lo trae no tiene por que
+ * enterarse.
  */
 function canjearEnlace(string $token): int
 {
@@ -121,12 +127,16 @@ function canjearEnlace(string $token): int
     $hash = hash('sha256', $token);
     $ip   = mb_substr(trim((string) ($_SERVER['REMOTE_ADDR'] ?? '')), 0, 45) ?: null;
 
+    // `usos = usos + 1` se lee y se escribe dentro de la misma sentencia, asi
+    // que dos canjes simultaneos del ultimo uso disponible no pueden entrar los
+    // dos. Y como el contador siempre cambia cuando la fila matchea, el
+    // `rowCount()` de abajo sigue distinguiendo "canjeado" de "no sirve".
     $upd = db()->prepare(
         'UPDATE enlaces_acceso
-            SET usada = NOW(), origen_uso = :ip
+            SET usos = usos + 1, usada = NOW(), origen_uso = :ip
           WHERE token = :t
             AND destino = "panel"
-            AND usada IS NULL
+            AND usos < usos_max
             AND expira > NOW()'
     );
     $upd->execute([':t' => $hash, ':ip' => $ip]);

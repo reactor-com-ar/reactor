@@ -133,19 +133,16 @@ function handleList(): void
         $where[]          = 'i.emitida <= :hasta';
         $params[':hasta'] = $hasta;
     }
-    if ($q !== '') {
-        // Un placeholder por columna: con EMULATE_PREPARES=false (lib/db.php)
-        // PDO no admite repetir el mismo nombre en un statement (HY093).
-        $ors = [];
-        // Se busca por todo lo que el listado muestra, incluidos el correo y
-        // el celular del emisor: si estan en la columna, tienen que encontrarse.
-        foreach (['i.uuid', 'i.nombre', 'i.celular', 'i.correo',
-                  'u.nombre', 'u.usuario', 'u.correo', 'u.celular'] as $n => $columna) {
-            $ors[]             = $columna . ' LIKE :q' . $n;
-            $params[':q' . $n] = '%' . $q . '%';
-        }
-        $where[] = '(' . implode(' OR ', $ors) . ')';
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`. Se busca
+    // por todo lo que el listado muestra, incluidos el correo y el celular del
+    // emisor: si estan en la columna, tienen que encontrarse.
+    [$condiciones, $busq] = busquedaWhere(
+        $q,
+        ['i.uuid', 'i.nombre', 'i.celular', 'i.correo',
+         'u.nombre', 'u.usuario', 'u.correo', 'u.celular']
+    );
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
 
     // El listado muestra al emisor con sus tres datos de contacto, igual que
     // al destinatario, asi que el JOIN trae tambien correo y celular.

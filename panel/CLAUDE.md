@@ -124,6 +124,75 @@ debajo** con todos los botones (`.modal-menubar`) y **sin footer**.
   título y la de acciones quedan fijas (ya estaba así en el panel desde el
   arranque; `cloud/` se alineó después).
 
+## La búsqueda por texto libre: una sola, y vive en SQL
+
+**Todo buscador del panel filtra en la base**, no en el navegador: el front
+manda `?q=<lo tipeado>` con 300 ms de debounce y el endpoint arma el `WHERE`.
+A diferencia de `cloud/` —donde casi todo se filtra client-side— acá **no hay
+ninguna implementación de búsqueda en `assets/js/app.js`**, así que
+[lib/busqueda.php](lib/busqueda.php) es la única que existe. La carga
+`api/bootstrap.php`, así que la tienen todos los endpoints.
+
+Lo usan los seis listados con buscador: **Usuarios**, **Dispositivos**,
+**Chips**, **Actividad**, **Invitaciones** y **Comprobantes** (Facturas y
+Recibos).
+
+```php
+[$condiciones, $busq] = busquedaWhere($q, ['u.usuario', 'u.nombre', 'u.correo']);
+$where  = array_merge($where, $condiciones);
+$params = array_merge($params, $busq);
+```
+
+Las cuatro garantías —son el contrato de la skill `buscador_avanzado`, y valen
+igual para las tres apps del repo:
+
+1. **Los acentos no importan, y en las dos puntas**: `gonzalez` encuentra a
+   `González` y al revés. También la `ñ` (`nino` → `Niño`) y la diéresis.
+2. **Mayúsculas y minúsculas indistintas.**
+3. **Se buscan pedazos de palabra**, no palabras completas ni prefijos.
+4. **Los términos van sueltos y en cualquier orden**: `mari gon` encuentra a
+   `María González` — verificado contra la base de dev, junto con `gon mari`.
+
+Reglas que no se deducen del código:
+
+- **LOS TÉRMINOS SE CRUZAN CON Y; CADA TÉRMINO SE BUSCA EN TODAS LAS COLUMNAS
+  CON O.** Agregar una palabra tiene que **acotar** el resultado. Con la O al
+  revés el segundo término lo agranda y el buscador empeora justo cuando más se
+  lo necesita — que es cuando el primero trajo demasiado. Hasta el 21/09/2026
+  los seis endpoints mandaban **lo tipeado entero** como un solo `LIKE`, así que
+  `mari gon` no encontraba nada.
+- **Los acentos y las mayúsculas los pliega la COLLATION, no la query.** Las
+  columnas son `utf8mb4_..._ci` (`db/schema.sql`) y esas collations comparan
+  `a` = `á` y `n` = `ñ`; medido contra el motor, `SELECT "Niño" LIKE "%nino%"`
+  da 1. **Si alguna columna quedara con una collation acento-sensible
+  (`..._as_cs`, `..._bin`) la garantía 1 se cae para esa columna**, y lo que hay
+  que arreglar es la collation — no meterle un `REPLACE` a la query.
+- **UN PLACEHOLDER POR TÉRMINO Y POR COLUMNA**, aunque el valor sea el mismo:
+  la conexión usa `ATTR_EMULATE_PREPARES => false` ([lib/db.php](lib/db.php)) y
+  con prepares nativos PDO mapea cada nombre a **una** posición, así que reusar
+  `:q0` corta con `SQLSTATE[HY093] Invalid parameter number`. Los cinco
+  endpoints ya lo documentaban cada uno por su lado; ahora lo resuelve el
+  helper una sola vez.
+- **Los comodines de `LIKE` se escapan** (`busquedaEscapar()`). Quien busca
+  `50%` quiere ese texto: sin escapar son 48 filas y con escape son 0 (medido
+  sobre `usuarios.celular`). Un `_` suelto matchearía cualquier caracter.
+- **La consulta vacía no filtra**: sin términos `busquedaWhere()` devuelve las
+  dos listas vacías, así que el llamador ya no lleva el `if ($q !== '')` que
+  tenía cada endpoint.
+- **Comprobantes no usa el helper**, y es a propósito: suma a cada término una
+  condición propia (`c.serie = :qserN`, igualdad y no `LIKE`, porque el número
+  de comprobante es un entero y `12` no puede traer el 112). Lo que sí reusa es
+  el criterio Y/O y las dos primitivas, `busquedaTerminos()` y
+  `busquedaEscapar()`.
+- **Las columnas salen del código, nunca del request**: van interpoladas en el
+  SQL. Un nombre de columna que llegue de afuera es inyección.
+- `LIKE '%…%'` **no usa índice**: es un scan. Está bien sobre el universo ya
+  acotado (el dominio de la sesión, y en Actividad la ventana de 200.000 ids);
+  la búsqueda va **después** de esa cota y nunca en su lugar.
+
+El archivo es **copia idéntica de `cloud/lib/busqueda.php`**, como
+`habilitado.php` y `permisos.php`: las apps no comparten docroot.
+
 ## Bump de version.txt
 
 Al tocar cualquier archivo bajo `panel/assets/css/` o `panel/assets/js/` hay

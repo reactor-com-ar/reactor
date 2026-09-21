@@ -345,6 +345,43 @@ cambia es de qué login cuelga cada una:
   `app` es stateless y dura un año; no hay nada en él que se pueda invalidar
   desde la base. Es la misma limitación que ya documenta el panel.
 
+## `enlaces_acceso`: el cupo es `usos < usos_max`, no "un solo uso"
+
+Los enlaces mágicos —la URL que abre sesión en `panel` o en `app` como otra
+persona, sin su contraseña— dejaron de ser de un solo uso **por definición** el
+21/09/2026
+([cloud/sql/migrations/20260921_1000_enlaces_acceso_usos.sql](cloud/sql/migrations/20260921_1000_enlaces_acceso_usos.sql)):
+`usos_max` (cuántas veces se puede canjear, `DEFAULT 1`) y `usos` (cuántas ya se
+canjeó) son columnas, y el uso único pasó a ser el **default**.
+
+- **El candado sigue siendo un `UPDATE` condicional**, y eso no es negociable:
+  `SET usos = usos + 1 ... WHERE usos < usos_max AND expira > NOW()` valida y
+  cuenta en la **misma** sentencia, resuelta dentro del lock de fila de InnoDB.
+  Con un `SELECT` previo, dos canjes simultáneos del último uso disponible
+  pasarían los dos. Era `usada IS NULL`, que sólo sabía decir "cero veces o una".
+- **Está escrito dos veces**, en [app/acceso.php](app/acceso.php) y
+  [panel/acceso.php](panel/acceso.php), como todo lo que comparten las apps sin
+  compartir docroot. Lo único que cambia entre las dos es el `destino` del
+  `WHERE`, que es lo que impide que un enlace de `app` abra el panel.
+- **`usada` y `origen_uso` son el ÚLTIMO canje, no el único.** Con `usos_max = 1`
+  —el default y lo que tienen todas las filas viejas— significan exactamente lo
+  mismo que antes. Se guarda el último y no el primero porque al auditar lo que
+  se necesita es desde dónde se está usando ahora; cuándo empezó ya lo acota
+  `emitido` y cuántas veces lo dice `usos`.
+- **Quien emite elige los dos límites, dentro de dos topes**: 60 minutos y 1 uso
+  por defecto, hasta 30 días y 100 usos
+  ([cloud/api/enlaces_acceso.php](cloud/api/enlaces_acceso.php)). El `PUT` los
+  cambia **sin tocar el token**: es la misma pantalla que lo está mostrando, y
+  como el token se ve una sola vez, emitir otro obligaría a descartar el que ya
+  se copió.
+- **Las dos fechas se comparan contra `NOW()` de la base**, nunca contra el reloj
+  de PHP ni contra el del navegador — mismo drift que ya documenta el resto del
+  repo. Por eso el formulario recibe `ahora` / `expira_max` calculados por la
+  base y manda la fecha tal cual la muestra, sin convertir de zona.
+- **El alta de `panel/invitacion/aceptar.php` no pasa `usos_max`** y por eso nace
+  en 1: ese enlace es para que una persona entre una vez, recién creada su
+  cuenta.
+
 ## `perfiles.registrante`: quién otorgó el acceso
 
 Columna de `perfiles` entre `panel` y `habilitado`, creada por

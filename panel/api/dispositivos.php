@@ -110,17 +110,13 @@ function handleList(): void
         // La columna es NOT NULL: "no habilitado" es exactamente 0.
         $where[] = 'd.habilitado = 0';
     }
-    if ($q !== '') {
-        // Un placeholder por columna: con EMULATE_PREPARES=false, PDO no admite
-        // repetir el mismo nombre en un statement (SQLSTATE HY093).
-        $columnas = ['d.uuid', 'd.nombre', 'd.mac', 'd.ip', 'd.serial', 'd.identidad'];
-        $ors      = [];
-        foreach ($columnas as $i => $columna) {
-            $ors[]               = $columna . ' LIKE :q' . $i;
-            $params[':q' . $i]   = '%' . $q . '%';
-        }
-        $where[] = '(' . implode(' OR ', $ors) . ')';
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`.
+    [$condiciones, $busq] = busquedaWhere(
+        $q,
+        ['d.uuid', 'd.nombre', 'd.mac', 'd.ip', 'd.serial', 'd.identidad']
+    );
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
 
     $sql = 'SELECT d.id, d.uuid, d.nombre, d.mac, d.ip, d.senal, d.firmware,
                    d.habilitado, d.enlace, d.monitoreo, d.latido, d.conexion,

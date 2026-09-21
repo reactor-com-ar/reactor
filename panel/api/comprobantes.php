@@ -150,18 +150,31 @@ function handleList(string $tipo): void
         $where[]          = 'c.emision <= :hasta';
         $params[':hasta'] = $hasta;
     }
-    if ($q !== '') {
-        // Un placeholder por columna: con EMULATE_PREPARES=false (lib/db.php)
-        // PDO no admite repetir el mismo nombre en un statement (HY093).
+    // Busqueda por texto libre. No se usa `busquedaWhere()` porque este listado
+    // suma una condicion propia a cada termino —la igualdad contra `c.serie`,
+    // que es un entero— y el helper solo arma LIKEs. Lo que SI se reusa es su
+    // criterio: terminos cruzados con Y, cada uno buscado en todas las columnas
+    // con O (`lib/busqueda.php`).
+    foreach (busquedaTerminos($q) as $i => $termino) {
+        $valor = '%' . busquedaEscapar($termino) . '%';
+
+        // Un placeholder por termino Y por columna: con EMULATE_PREPARES=false
+        // (lib/db.php) PDO no admite repetir el mismo nombre en un statement
+        // (HY093).
         $ors = [];
         foreach (['c.razon', 'c.cuit', 'c.caenro', 'c.uuid'] as $n => $columna) {
-            $ors[]             = $columna . ' LIKE :q' . $n;
-            $params[':q' . $n] = '%' . $q . '%';
+            $ph          = ':q' . $i . '_' . $n;
+            $ors[]       = $columna . ' LIKE ' . $ph;
+            $params[$ph] = $valor;
         }
-        if (ctype_digit($q)) {
-            $ors[]           = 'c.serie = :qser';
-            $params[':qser'] = (int) $q;
+        // El numero de comprobante se busca por igualdad y no por LIKE: es un
+        // entero, asi que `12` tiene que traer el 12 y no el 112 ni el 1200.
+        if (ctype_digit($termino)) {
+            $ph          = ':qser' . $i;
+            $ors[]       = 'c.serie = ' . $ph;
+            $params[$ph] = (int) $termino;
         }
+
         $where[] = '(' . implode(' OR ', $ors) . ')';
     }
 

@@ -433,7 +433,9 @@ No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como 
 ```
 
 **Reglas:**
-- El `placeholder` del input de búsqueda rápida lista los campos sobre los que opera la búsqueda (UID / nombre / tipo / ubicación, operador / nº / ICCID / notas, etc.).
+- El `placeholder` del input de búsqueda rápida lista los campos sobre los que opera la búsqueda (UID / nombre / tipo / ubicación, operador / nº / ICCID / notas, etc.) — **y son exactamente los campos que la búsqueda mira**: buscar sobre una columna que la pantalla no anuncia devuelve filas que el operador no puede explicar.
+- **La búsqueda es una sola en todo el panel, y no es un `includes()`.** El texto libre —el de la toolbar y el del Modal de Filtros— pasa por `terminosBusqueda()` + `coincideBusqueda()` (`ABM.md` § "Cómo busca el texto libre"): sin acentos en ninguna de las dos puntas (`gonzalez` ↔ `González`, `nino` ↔ `Niño`), sin distinguir mayúsculas, por **pedazos** de palabra y con los términos **sueltos y en cualquier orden** (`mari gon` encuentra a `María González`). Los términos se cruzan con Y y cada uno se busca en todos los campos con O, que es la misma regla del combo con buscador (§34-bis): agregar una palabra **acota** el resultado, nunca lo agranda. Ningún módulo arma su propio filtro de texto.
+  - **Lo que filtra en la base usa la contraparte SQL**, `busquedaWhere()` de `lib/busqueda.php` (Comprobantes → `Razón social`, Visor de sucesos, Programador de tareas). Misma regla Y/O y mismo resultado; el plegado de acentos y mayúsculas lo hace la collation `utf8mb4_..._ci` de las columnas. Los dos buscadores son el mismo buscador para quien los usa, así que si alguna vez difieren es un bug, no dos criterios.
 - El filtrado en vivo se aplica al `input`/`change` event sin re-fetch (filtrado client-side por defecto). Señales y Registros son casos mixtos: filtran client-side sobre la última página descargada, pero re-fetchean cuando cambian los parámetros `?dispositivo=` o `?limit=` server-side.
 - El botón `Filtros` es secundario, no primario — la acción primaria del listado es siempre `+ Nuevo <entidad>`, una sola por pantalla (ver §6).
 - **`Refrescar` va inmediatamente a la derecha de `Filtros`, sin texto** (`btn-icon-only` con `fa-rotate`, `title` + `aria-label` "Refrescar listado"). No lleva rótulo porque el ícono de recarga es universal y porque en la zona izquierda compite con la búsqueda rápida, que es lo que el usuario tiene que encontrar primero; comparte variante con `Filtros` para que se lean como un par y no como una acción suelta.
@@ -2486,6 +2488,54 @@ El módulo **no aporta componentes nuevos**: sale entero de las piezas ya docume
 - **`Ver ficha pública` va pegada a `Consultar`, sin divisor** (es otra forma de ver el registro) y **sólo cuando está publicado**: si no, esa URL responde 404. Abre `www.reactor.com.ar/tecnicos/consultar?uid=…` en otra pestaña, con el host escrito, igual que el visor de contratos.
 - **Diecisiete tarjetas en Consultar: dieciséis `half` y `Domicilio` full en la ranura 9** (impar), así los ocho campos de arriba y los ocho de abajo cierran de a dos (§25). Agregar o quitar un campo obliga a rehacer esa cuenta.
 - **La baja va con el `confirmDialog` estándar** (§15) y no con el modal de desglose: `tecnicos` es una isla del esquema, ninguna FK apunta a ella. Lo que sí se avisa —cuando corresponde— es que la ficha pública deja de responder: esa URL ya circula fuera de Reactor.
+
+---
+
+## 39. Modal `Acceso a Panel / App` (el enlace mágico y su configuración)
+
+Lo abre `Usuarios → Consultar → Acciones → Generar acceso a…` después de que el
+`POST api/enlaces_acceso` devolvió la URL. **Muestra el enlace y, debajo, los dos
+límites que lo definen**: hasta cuándo vale y cuántas veces se puede abrir. No
+aporta componentes nuevos — `.modal-wide` (§14) con cabecera primaria + barra de
+acciones (§21-bis), `.form-row` / `.form-group` (§8), `.form-nota`,
+`.field-error` y el recuadro rojo `.del-blocker` (§15.1).
+
+**Reglas:**
+
+- **Los campos operan sobre el enlace que ya está arriba, no sobre uno nuevo.**
+  `Guardar` manda `PUT api/enlaces_acceso {id, expira, usos_max}` y **el token no
+  cambia**: lo que el operador ya copió sigue sirviendo. Emitir otro con los
+  valores nuevos obligaría a descartar el primero — y el token se muestra una
+  sola vez, así que descartarlo es perderlo.
+- **La caja del enlace es de dos renglones** (`.enlace-url`) y no el
+  `.json-editor` de 360px que usaba hasta el 21/09/2026: ese alto es para pegar
+  un JSON entero y acá hay una URL de una línea. El espacio que sobraba es
+  exactamente el que ocupan ahora los dos campos. Envuelve (`pre-wrap` +
+  `break-all`) porque la URL no tiene espacios donde cortar y con el `pre` del
+  editor aparecía scroll horizontal.
+- **Los defaults son 60 minutos y 1 uso**, y los elige el backend al emitir
+  (`ENLACE_MINUTOS` / `ENLACE_USOS`): el modal los muestra ya cargados, así que
+  el camino normal —generar y mandar— no obliga a tocar nada. Los topes también
+  vienen de ahí (`expira_max`, 30 días; `usos_tope`, 100) y el front no los
+  repite: el `max` del campo de fecha es el que calculó la base.
+- **Las fechas se manejan en la hora de la BASE y no pasan por `new Date()`.** El
+  valor del campo sale de recortar el string que devolvió la API
+  (`2026-09-21 15:30:00` → `2026-09-21T15:30`) y vuelve igual; `min` y `max`
+  salen de `ahora` / `expira_max`, que calcula la base. El canje compara contra
+  `NOW()` de la base, así que reinterpretar la fecha contra la zona del navegador
+  correría el límite — es el mismo drift que ya documentan los gráficos de señal.
+- **El `min` / `max` del input no es el control.** El endpoint revalida los dos
+  campos contra el reloj de la base y corta con 422; el front sólo ataja el campo
+  vacío para no gastar un request.
+- **Después de guardar se repinta con lo que devolvió la base**, no con lo
+  tipeado: los campos y la línea del recuadro rojo dicen lo que quedó guardado y
+  no lo que se pidió guardar.
+- **El recuadro rojo sigue siendo el aviso de "se muestra una sola vez"**, y su
+  última línea es la que resume los dos límites (`Vence el … y sirve hasta N
+  veces`). Es lo único del modal que cambia al guardar.
+- **`Guardar` es un botón más de la barra, no la única acción**: convive con
+  `Copiar enlace` y `Abrir`, que operan sobre el mismo enlace. `Cerrar` sigue
+  primero y sigue siendo el único ghost (§21-bis).
 
 ---
 

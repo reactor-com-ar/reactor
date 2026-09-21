@@ -69,11 +69,10 @@ function handleGetTareas(): void
 
     $where  = [];
     $params = [];
-    if ($q !== '') {
-        $where[] = '(nombre LIKE :q1 OR script LIKE :q2 OR descripcion LIKE :q3 OR cron_expr LIKE :q4)';
-        $like    = '%' . $q . '%';
-        $params[':q1'] = $like; $params[':q2'] = $like; $params[':q3'] = $like; $params[':q4'] = $like;
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`.
+    [$condiciones, $busq] = busquedaWhere($q, ['nombre', 'script', 'descripcion', 'cron_expr']);
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
     if ($activo === '0' || $activo === '1') {
         $where[] = 'activo = :ac'; $params[':ac'] = (int) $activo;
     }

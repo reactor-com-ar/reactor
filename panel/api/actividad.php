@@ -136,16 +136,13 @@ function handleList(): void
         $where[]          = 'r.fecha <= :hasta';
         $params[':hasta'] = $hasta;
     }
-    // Un placeholder por ocurrencia: la conexion usa ATTR_EMULATE_PREPARES
-    // = false (lib/db.php) y con prepares nativos un nombre repetido tira
-    // "Invalid parameter number".
-    if ($q !== '') {
-        $where[] = '(u.nombre LIKE :q1 OR u.usuario LIKE :q2 OR d.nombre LIKE :q3
-                     OR d.uuid LIKE :q4 OR c.nombre LIKE :q5 OR r.estado LIKE :q6)';
-        foreach (['q1', 'q2', 'q3', 'q4', 'q5', 'q6'] as $ph) {
-            $params[':' . $ph] = '%' . $q . '%';
-        }
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`.
+    [$condiciones, $busq] = busquedaWhere(
+        $q,
+        ['u.nombre', 'u.usuario', 'd.nombre', 'd.uuid', 'c.nombre', 'r.estado']
+    );
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
 
     $sql = 'SELECT r.id, r.fecha, r.sentido, r.estado,
                    r.usuario, r.dispositivo, r.canal,

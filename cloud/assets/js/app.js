@@ -619,7 +619,12 @@
        normalizada sea el mismo índice en la original — que es lo que necesita
        `comboResaltar()` para no correr el subrayado. Un `.normalize('NFD')`
        sobre la cadena entera separa el acento en un caracter aparte y desalinea
-       todo lo que viene después. */
+       todo lo que viene después.
+
+       Es el MISMO plegado que `normalizarBusqueda()` —el de los buscadores de
+       los listados, que pliega la cadena entera de una porque no resalta nada—.
+       Si cambia la regla de plegado, cambian las dos: un combo que encuentra lo
+       que el listado no es un bug que nadie va a saber leer. */
     function comboNormalizar(s) {
         return String(s ?? '').split('').map(c => {
             const min = c.toLowerCase();
@@ -1522,15 +1527,15 @@
         const btnNew    = document.getElementById('dev-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allDispositivos.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
                 if (state.estado  && d.estado !== state.estado) return false;
                 if (state.dominio && String(d.dominio_id) !== state.dominio) return false;
-                if (q && !(d.uid + ' ' + (d.serial || '') + ' ' + d.nombre + ' ' + d.tipo + ' ' + (d.dominio_nombre || '') + ' ' + (d.ubicacion || ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([d.uid, d.serial, d.nombre, d.tipo,
+                                       d.dominio_nombre, d.ubicacion], terminos)) return false;
                 return true;
             });
 
@@ -2232,16 +2237,15 @@
         const btnNew    = document.getElementById('chip-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allChips.filter(c => {
                 if (Number.isFinite(codigo) && c.id !== codigo) return false;
                 if (state.estado  && c.estado !== state.estado) return false;
                 if (state.dominio && String(c.dominio_id) !== state.dominio) return false;
-                if (q && !(c.numero + ' ' + c.iccid + ' ' + c.operador + ' ' +
-                           (c.apn || '') + ' ' + (c.plan || '') + ' ' + (c.notas || ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([c.numero, c.iccid, c.operador,
+                                       c.apn, c.plan, c.notas], terminos)) return false;
                 return true;
             });
 
@@ -2689,14 +2693,12 @@
         const btnNew    = document.getElementById('trx-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allTransceptores.filter(t => {
                 if (Number.isFinite(codigo) && t.id !== codigo) return false;
-                if (q && !((t.nombre || '') + ' ' + (t.host || '') + ' ' +
-                           (t.usuario || '') + ' ' + (t.entrada || ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([t.nombre, t.host, t.usuario, t.entrada], terminos)) return false;
                 return true;
             });
 
@@ -3180,8 +3182,8 @@
         const btnNew    = document.getElementById('con-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             const filtered = allContratos.filter(c => {
                 if (Number.isFinite(codigo) && c.id !== codigo) return false;
@@ -3197,11 +3199,9 @@
                 // facture en el año 1500, es que no tiene fecha.
                 if (state.facturarDesde && (!c.facturar || c.facturar < state.facturarDesde)) return false;
                 if (state.facturarHasta && (!c.facturar || c.facturar > state.facturarHasta)) return false;
-                if (q && !(
-                    (c.dominio_nombre || '') + ' ' + (c.cliente_nombre || '') + ' ' +
-                    (c.plan_nombre || '')    + ' ' + (c.plan_descripcion || '') + ' ' +
-                    (c.tipo_texto || '')     + ' ' + (c.uuid || '')
-                ).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([c.dominio_nombre, c.cliente_nombre,
+                                       c.plan_nombre, c.plan_descripcion,
+                                       c.tipo_texto, c.uuid], terminos)) return false;
                 return true;
             });
 
@@ -4327,17 +4327,15 @@
         let consulta = data.consulta;
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const filtrados = !q ? ventana : ventana.filter(c => (
-                (c.razon || '') + ' ' + (c.numero || '') + ' ' + (c.uuid || '') + ' ' +
-                (c.cliente_nombre || '') + ' ' + (c.empresa_nombre || '') + ' ' +
-                (c.tipo_completo || '') + ' ' + (c.cuit || '')
-            ).toLowerCase().includes(q));
+            const terminos = terminosBusqueda(state.texto);
+            const filtrados = !terminos.length ? ventana : ventana.filter(c =>
+                coincideBusqueda([c.razon, c.numero, c.uuid, c.cliente_nombre,
+                                  c.empresa_nombre, c.tipo_completo, c.cuit], terminos));
 
             // Con la búsqueda rápida activa el pie mostraría los totales de la
             // consulta entera debajo de una tabla ya recortada: se recalcula
             // sobre lo que realmente se ve.
-            const pie = q
+            const pie = terminos.length
                 ? { filas: filtrados.length, traidos: filtrados.length,
                     total: filtrados.reduce((a, c) => a + (c.total || 0), 0) }
                 : consulta;
@@ -5741,8 +5739,8 @@
         const btnNew    = document.getElementById('tal-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             const filtered = allTalonarios.filter(t => {
                 if (Number.isFinite(codigo) && t.id !== codigo) return false;
@@ -5751,10 +5749,8 @@
                 if (state.subtipo && t.subtipo !== state.subtipo) return false;
                 if (state.fiscal  && t.fiscal  !== state.fiscal)  return false;
                 if (state.estado  && String(t.estado) !== state.estado) return false;
-                if (q && !(
-                    t.nombre + ' ' + (t.empresa_nombre || '') + ' ' + (t.empresa_razon || '') + ' ' +
-                    (t.correo || '') + ' ' + (t.web || '') + ' ' + t.proximo
-                ).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([t.nombre, t.empresa_nombre, t.empresa_razon,
+                                       t.correo, t.web, t.proximo], terminos)) return false;
                 return true;
             });
 
@@ -6429,14 +6425,15 @@
         const btnNew    = document.getElementById('dom-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            // Los términos se pliegan UNA vez por render y no una por fila.
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allDominios.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
                 // Se busca sobre lo que la ficha muestra: nombre, número e
                 // identificador. `descripcion` no existe en la tabla.
-                if (q && !(d.nombre + ' ' + (d.numero || '') + ' ' + (d.uuid || '')).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([d.nombre, d.numero, d.uuid], terminos)) return false;
                 return true;
             });
 
@@ -6905,14 +6902,14 @@
         const btnNew    = document.getElementById('usr-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allUsuarios.filter(u => {
                 if (Number.isFinite(codigo) && u.id !== codigo) return false;
                 if (state.estado === 'activo'   && !u.activo) return false;
                 if (state.estado === 'inactivo' &&  u.activo) return false;
-                if (q && !(u.email + ' ' + u.nombre + ' ' + (u.celular || '')).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([u.email, u.nombre, u.celular], terminos)) return false;
                 return true;
             });
 
@@ -7452,7 +7449,8 @@
         confirmDialog(
             `Generar acceso a ${rotulo}`,
             `Se va a generar un enlace que abre sesión en ${rotulo} COMO "${usr.nombre}", ` +
-            `sin pedirle su contraseña. Dura 15 minutos, sirve una sola vez y queda registrado a tu nombre.`,
+            `sin pedirle su contraseña. Nace con 60 minutos de vigencia y un solo uso ` +
+            `—los dos se ajustan en la pantalla siguiente— y queda registrado a tu nombre.`,
             async () => {
                 try {
                     const r = await api('enlaces_acceso', {
@@ -7469,7 +7467,30 @@
         );
     }
 
+    /* El enlace se muestra JUNTO A SU CONFIGURACIÓN, y los dos campos operan
+       sobre el enlace QUE YA ESTÁ ARRIBA: el token no cambia al guardar (`PUT
+       api/enlaces_acceso`), así que lo que el operador haya copiado sigue
+       sirviendo. Emitir otro con los valores nuevos obligaría a descartar el
+       que ya mandó, que es justo lo que no se puede hacer con un token que se
+       muestra una sola vez.
+
+       LA CAJA DEL ENLACE ES CHICA A PROPÓSITO (`.enlace-url`, dos renglones) y
+       no el `.json-editor` de 360px que usaba antes: eso es para pegar un JSON
+       y acá lo que hay es una URL de una línea. El alto que sobraba es el que
+       ahora ocupan los campos.
+
+       LAS FECHAS SE MANEJAN EN LA HORA DE LA BASE, sin pasar por `new Date()`:
+       el valor del campo sale de recortar el string que devolvió la API
+       (`2026-09-21 15:30:00` → `2026-09-21T15:30`) y vuelve igual. El canje
+       compara contra `NOW()` de la base, así que convertir a la zona del
+       navegador correría el límite — es el mismo drift que ya documentan los
+       gráficos de señal. `min` y `max` salen por eso de `ahora` / `expira_max`,
+       que también los calcula la base. */
     function openEnlaceAccesoModal(usr, rotulo, datos) {
+        // `2026-09-21 15:30:00` → `2026-09-21T15:30`, que es lo único que
+        // acepta un <input type="datetime-local">.
+        const aCampo = s => String(s || '').replace(' ', 'T').slice(0, 16);
+
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
@@ -7481,6 +7502,9 @@
                 <div class="modal-menubar" role="toolbar" aria-label="Acciones del enlace">
                     <button class="btn btn-sm btn-ghost" data-act="close">
                         <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="guardar">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
                     </button>
                     <button class="btn btn-sm btn-primary" data-act="copiar">
                         <i class="fa-regular fa-copy"></i> Copiar enlace
@@ -7496,7 +7520,25 @@
                     </div>
                     <div class="form-group">
                         <label for="enlace-url">Enlace</label>
-                        <textarea id="enlace-url" class="json-editor" rows="3" readonly>${escape(datos.url)}</textarea>
+                        <textarea id="enlace-url" class="enlace-url" rows="2" readonly>${escape(datos.url)}</textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="enlace-expira">Vigente hasta</label>
+                            <input type="datetime-local" id="enlace-expira" step="60"
+                                   value="${escape(aCampo(datos.expira))}"
+                                   min="${escape(aCampo(datos.ahora))}"
+                                   max="${escape(aCampo(datos.expira_max))}">
+                            <div class="form-nota">Por defecto, ${datos.minutos} minutos desde ahora.</div>
+                            <div class="field-error" id="enlace-expira-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="enlace-usos">Usos permitidos</label>
+                            <input type="number" id="enlace-usos" min="1" max="${datos.usos_tope}" step="1"
+                                   value="${datos.usos_max}">
+                            <div class="form-nota">Cuántas veces se puede abrir el mismo enlace (1 a ${datos.usos_tope}).</div>
+                            <div class="field-error" id="enlace-usos-err" style="display:none"></div>
+                        </div>
                     </div>
                     <div class="del-blocker">
                         <i class="fa-solid fa-triangle-exclamation"></i>
@@ -7504,8 +7546,7 @@
                             <strong>Se muestra una sola vez.</strong>
                             En la base se guarda sólo un hash, así que no se puede volver a ver:
                             si cerrás sin copiarlo, generá otro.
-                            Vence el <strong>${escape(formatDate(datos.expira))}</strong>
-                            (${datos.minutos} minutos) y sirve una sola vez.
+                            <span id="enlace-vigencia">${vigenciaTexto(datos)}</span>
                         </div>
                     </div>
                 </div>
@@ -7521,13 +7562,79 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        const campo = backdrop.querySelector('#enlace-url');
+        const campo     = backdrop.querySelector('#enlace-url');
+        const expiraIn  = backdrop.querySelector('#enlace-expira');
+        const usosIn    = backdrop.querySelector('#enlace-usos');
+        const expiraErr = backdrop.querySelector('#enlace-expira-err');
+        const usosErr   = backdrop.querySelector('#enlace-usos-err');
+        const guardarBt = backdrop.querySelector('[data-act="guardar"]');
+        const vigencia  = backdrop.querySelector('#enlace-vigencia');
+
         campo.focus();
         campo.select();
 
         backdrop.querySelector('[data-act="copiar"]').addEventListener('click', () => {
             copyToClipboard(datos.url);
         });
+
+        /* El navegador no es el control: `min` / `max` del input son una ayuda
+           y el que corta de verdad es el endpoint, que además compara contra el
+           reloj de la base. Acá sólo se ataja lo evidente para no gastar un
+           request en un campo vacío. */
+        guardarBt.addEventListener('click', async () => {
+            expiraErr.style.display = 'none';
+            usosErr.style.display   = 'none';
+            expiraIn.classList.remove('input-invalid');
+            usosIn.classList.remove('input-invalid');
+
+            const expira = expiraIn.value.trim();
+            const usos   = parseInt(usosIn.value, 10);
+            let primero  = null;
+
+            if (!expira) {
+                expiraErr.textContent   = 'Indicá hasta cuándo vale el enlace';
+                expiraErr.style.display = 'block';
+                expiraIn.classList.add('input-invalid');
+                primero = primero || expiraIn;
+            }
+            if (!Number.isInteger(usos) || usos < 1 || usos > datos.usos_tope) {
+                usosErr.textContent   = `Entre 1 y ${datos.usos_tope}`;
+                usosErr.style.display = 'block';
+                usosIn.classList.add('input-invalid');
+                primero = primero || usosIn;
+            }
+            if (primero) { primero.focus(); return; }
+
+            guardarBt.disabled = true;
+            try {
+                const r = await api('enlaces_acceso', {
+                    method: 'PUT',
+                    body:   { id: datos.id, expira, usos_max: usos },
+                });
+                // El estado que vale es el que devolvió la base, no lo tipeado:
+                // así el cartel de abajo y los campos dicen lo que quedó
+                // guardado y no lo que se pidió guardar.
+                Object.assign(datos, r);
+                expiraIn.value      = aCampo(datos.expira);
+                usosIn.value        = datos.usos_max;
+                vigencia.textContent = vigenciaTexto(datos);
+                toast('Enlace actualizado');
+            } catch (e) {
+                toast(e.message, { error: true, duration: 6000 });
+            } finally {
+                guardarBt.disabled = false;
+            }
+        });
+    }
+
+    /* La línea del recuadro de aviso que resume los dos límites. Está afuera
+       del modal porque se vuelve a armar cada vez que se guarda. */
+    function vigenciaTexto(datos) {
+        const usos = datos.usos_max === 1
+            ? 'sirve una sola vez'
+            : `sirve hasta ${datos.usos_max} veces`;
+
+        return `Vence el ${formatDate(datos.expira)} y ${usos}.`;
     }
 
     // Borrar un usuario arrastra dependencias en 13 tablas con tres
@@ -7931,8 +8038,8 @@
         const btnNew    = document.getElementById('prf-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             /* Sólo los permisos con filtro puesto. Los tres en `''` es el caso
                normal, y así el `permisosDelPerfil()` de cada fila —que arma un
@@ -7956,8 +8063,8 @@
                         if (tiene[x.clave] !== (state.permisos[x.clave] === 'si')) return false;
                     }
                 }
-                if (q && !(p.usuario_nombre + ' ' + p.usuario_email + ' ' + p.dominio_nombre)
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([p.usuario_nombre, p.usuario_email,
+                                       p.dominio_nombre], terminos)) return false;
                 return true;
             });
 
@@ -8940,18 +9047,16 @@
         const btnNew    = document.getElementById('tec-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allTecnicos.filter(t => {
                 if (Number.isFinite(codigo) && t.id !== codigo) return false;
                 if (state.aprobacion && String(t.aprobacion ?? '') !== state.aprobacion) return false;
                 if (state.publicacion === 'si' && !t.publicado) return false;
                 if (state.publicacion === 'no' &&  t.publicado) return false;
-                if (q && !((t.nombre || '') + ' ' + (t.actividad || '') + ' ' +
-                           (t.correo || '') + ' ' + (t.celular || '') + ' ' +
-                           (t.domicilio || '') + ' ' + tecnicoUbicacion(t))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([t.nombre, t.actividad, t.correo, t.celular,
+                                       t.domicilio, tecnicoUbicacion(t)], terminos)) return false;
                 return true;
             });
 
@@ -9961,8 +10066,8 @@
         let senales = allSenales;
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = senales.filter(s => {
                 if (Number.isFinite(codigo) && s.id !== codigo) return false;
@@ -9970,12 +10075,9 @@
                 if (state.dominio && String(s.dominio_id ?? '') !== state.dominio) return false;
                 if (state.sentido && s.sentido !== state.sentido) return false;
                 if (state.estado !== '' && String(s.estado ?? '') !== state.estado) return false;
-                if (q && !((s.dispositivo_nombre ?? '') + ' ' +
-                           (s.dispositivo_uuid   ?? '') + ' ' +
-                           (s.topic              ?? '') + ' ' +
-                           (s.mensaje            ?? '') + ' ' +
-                           (s.transceptor_nombre ?? ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([s.dispositivo_nombre, s.dispositivo_uuid,
+                                       s.topic, s.mensaje,
+                                       s.transceptor_nombre], terminos)) return false;
                 return true;
             });
 
@@ -10443,22 +10545,21 @@
         let registros = allRegistros;
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
-            const estadoQ = state.estado.toLowerCase();
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
+            // `Estado` es otro campo de texto libre (del modal de Filtros), así
+            // que busca con el mismo método — sólo que sobre una columna sola.
+            const terminosEstado = terminosBusqueda(state.estado);
 
             let filtered = registros.filter(r => {
                 if (Number.isFinite(codigo) && r.id !== codigo) return false;
                 if (state.dispositivo && String(r.dispositivo) !== state.dispositivo) return false;
                 if (state.dominio && String(r.dominio ?? '') !== state.dominio) return false;
                 if (state.sentido && r.sentido !== state.sentido) return false;
-                if (estadoQ && !String(r.estado ?? '').toLowerCase().includes(estadoQ)) return false;
-                if (q && !((r.dispositivo_nombre ?? '') + ' ' +
-                           (r.dispositivo_uuid   ?? '') + ' ' +
-                           (r.usuario_nombre     ?? '') + ' ' +
-                           (r.usuario_login      ?? '') + ' ' +
-                           (r.estado             ?? ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([r.estado], terminosEstado)) return false;
+                if (!coincideBusqueda([r.dispositivo_nombre, r.dispositivo_uuid,
+                                       r.usuario_nombre, r.usuario_login,
+                                       r.estado], terminos)) return false;
                 return true;
             });
 
@@ -10844,8 +10945,8 @@
         let adopciones = allAdopciones;
 
         function applyAndRender() {
-            const q      = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = adopciones.filter(a => {
                 if (Number.isFinite(codigo) && a.id !== codigo) return false;
@@ -10863,14 +10964,10 @@
                     if (state.desde && dia < state.desde) return false;
                     if (state.hasta && dia > state.hasta) return false;
                 }
-                if (q && !((a.dispositivo_nombre ?? '') + ' ' +
-                           (a.dispositivo_uuid   ?? '') + ' ' +
-                           (a.dominio_nombre     ?? '') + ' ' +
-                           (a.adoptador_nombre   ?? '') + ' ' +
-                           (a.adoptador_login    ?? '') + ' ' +
-                           (a.liberador_nombre   ?? '') + ' ' +
-                           (a.liberador_login    ?? ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([a.dispositivo_nombre, a.dispositivo_uuid,
+                                       a.dominio_nombre,
+                                       a.adoptador_nombre, a.adoptador_login,
+                                       a.liberador_nombre, a.liberador_login], terminos)) return false;
                 return true;
             });
 
@@ -11299,8 +11396,8 @@
         let notificaciones = allNotificaciones;
 
         function applyAndRender() {
-            const q      = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = notificaciones.filter(n => {
                 if (Number.isFinite(codigo) && n.id !== codigo) return false;
@@ -11317,12 +11414,9 @@
                     if (state.desde && dia < state.desde) return false;
                     if (state.hasta && dia > state.hasta) return false;
                 }
-                if (q && !((n.mensaje        ?? '') + ' ' +
-                           (n.dominio_nombre ?? '') + ' ' +
-                           (n.usuario_nombre ?? '') + ' ' +
-                           (n.usuario_login  ?? '') + ' ' +
-                           (n.destino        ?? ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([n.mensaje, n.dominio_nombre,
+                                       n.usuario_nombre, n.usuario_login,
+                                       n.destino], terminos)) return false;
                 return true;
             });
 
@@ -11752,18 +11846,15 @@
         let difusiones = allDifusiones;
 
         function applyAndRender() {
-            const q      = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = difusiones.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
                 if (state.dominio && String(d.dominio ?? '') !== state.dominio) return false;
                 if (state.estado  && d.estado !== state.estado) return false;
-                if (q && !((d.asunto         ?? '') + ' ' +
-                           (d.cuerpo         ?? '') + ' ' +
-                           (d.dominio_nombre ?? '') + ' ' +
-                           (d.emisor_nombre  ?? ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([d.asunto, d.cuerpo, d.dominio_nombre,
+                                       d.emisor_nombre], terminos)) return false;
                 return true;
             });
 
@@ -12343,10 +12434,10 @@
         let destEstado  = '';
 
         function pintarDestinatarios() {
-            const q = destQuick.value.trim().toLowerCase();
+            const terminos = terminosBusqueda(destQuick.value);
             const filtrados = destinatarios.filter(x => {
                 if (destEstado && x.estado !== destEstado) return false;
-                if (q && !((x.correo ?? '') + ' ' + (x.nombre ?? '')).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([x.correo, x.nombre], terminos)) return false;
                 return true;
             });
 
@@ -12614,8 +12705,8 @@
         const btnNew    = document.getElementById('ctl-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allControladores.filter(c => {
                 if (Number.isFinite(codigo) && c.id !== codigo) return false;
@@ -12626,8 +12717,7 @@
                 if (state.rol === 'sin-rol' && (c.roles || []).length) return false;
                 if (state.rol && state.rol !== 'sin-rol' &&
                     !(c.roles || []).some(r => String(r.id) === state.rol)) return false;
-                if (q && !(c.nombre + ' ' + c.correo + ' ' + (c.celular || ''))
-                    .toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([c.nombre, c.correo, c.celular], terminos)) return false;
                 return true;
             });
 
@@ -13083,7 +13173,7 @@
             const extra = it[extraKey] || '';
             return `
             <label class="id-picker-item"
-                   data-busca="${escape((it.nombre + ' ' + extra + ' ' + it.id).toLowerCase())}">
+                   data-busca="${escape(normalizarBusqueda(it.nombre + ' ' + extra + ' ' + it.id))}">
                 <input type="checkbox" value="${it.id}"${sel.has(Number(it.id)) ? ' checked' : ''}>
                 <span class="id-picker-item-text">${escape(it.nombre)} <code>#${it.id}</code>${
                     extra ? ` <span class="muted">· ${escape(extra)}</span>` : ''
@@ -13130,10 +13220,15 @@
             cuenta.textContent = `${activo} de ${todos.length}`;
         }
 
+        /* `data-busca` es el índice ya plegado de la fila (los tres campos
+           unidos por espacio): se calcula una vez al dibujar la lista y no en
+           cada tecla. Se le vuelve a pasar por `coincideBusqueda()` —que
+           replegarlo no cambia nada, el plegado es idempotente— para que el
+           método de búsqueda siga siendo uno solo. */
         function filtrar() {
-            const q = buscar.value.trim().toLowerCase();
+            const terminos = terminosBusqueda(buscar.value);
             items().forEach(el => {
-                el.hidden = q !== '' && !el.dataset.busca.includes(q);
+                el.hidden = !coincideBusqueda([el.dataset.busca], terminos);
             });
         }
 
@@ -13287,14 +13382,14 @@
         const btnNew    = document.getElementById('rol-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allRoles.filter(r => {
                 if (Number.isFinite(codigo) && r.id !== codigo) return false;
                 if (state.estado === 'activo'   && !r.activo) return false;
                 if (state.estado === 'inactivo' &&  r.activo) return false;
-                if (q && !(r.nombre + ' ' + (r.descripcion || '')).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([r.nombre, r.descripcion], terminos)) return false;
                 return true;
             });
 
@@ -13791,14 +13886,14 @@
         const btnNew    = document.getElementById('per-new');
 
         function applyAndRender() {
-            const q = state.texto.toLowerCase();
-            const codigo = parseInt(state.codigo, 10);
+            const terminos = terminosBusqueda(state.texto);
+            const codigo   = parseInt(state.codigo, 10);
 
             let filtered = allPermisos.filter(p => {
                 if (Number.isFinite(codigo) && p.id !== codigo) return false;
                 if (state.uso === 'usado'   && p.roles_count === 0) return false;
                 if (state.uso === 'sin-uso' && p.roles_count > 0)   return false;
-                if (q && !(p.slug + ' ' + p.nombre + ' ' + (p.descripcion || '')).toLowerCase().includes(q)) return false;
+                if (!coincideBusqueda([p.slug, p.nombre, p.descripcion], terminos)) return false;
                 return true;
             });
 
@@ -14343,12 +14438,10 @@
     }
 
     function _paramFiltroAplicado() {
-        if (!_paramFiltroQ) return _paramCache;
-        const q = _paramFiltroQ.toLowerCase();
+        const terminos = terminosBusqueda(_paramFiltroQ);
+        if (!terminos.length) return _paramCache;
         return _paramCache.filter(p =>
-            ((p.variable   ?? '') + ' ' +
-             (p.valor      ?? '') + ' ' +
-             (p.comentario ?? '')).toLowerCase().includes(q)
+            coincideBusqueda([p.variable, p.valor, p.comentario], terminos)
         );
     }
 
@@ -15510,10 +15603,10 @@
     function dbExpRenderTablas() {
         const tbody = _dbExpBackdrop.querySelector('#dbExpTablesTbody');
         const info  = _dbExpBackdrop.querySelector('#dbExpTablesInfo');
-        const q = dbExpFiltro.toLowerCase();
-        const rows = q ? dbExpTablas.filter(t => t.nombre.toLowerCase().includes(q)) : dbExpTablas;
+        const terminos = terminosBusqueda(dbExpFiltro);
+        const rows = dbExpTablas.filter(t => coincideBusqueda([t.nombre], terminos));
         if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="4" class="db-exp-empty">${q ? 'Sin resultados para el filtro.' : 'No hay tablas.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" class="db-exp-empty">${terminos.length ? 'Sin resultados para el filtro.' : 'No hay tablas.'}</td></tr>`;
         } else {
             tbody.innerHTML = rows.map(t => `
                 <tr class="row-clickable" data-tabla="${escape(t.nombre)}">
@@ -15606,13 +15699,13 @@
             return `<th>${esPk ? `<i class="fa-solid fa-key" style="color:var(--warn);margin-right:4px"></i>` : ''}${escape(c)}</th>`;
         }).join('') + '</tr>';
 
-        const q = dbExpFiltroRegs.toLowerCase();
-        const filas = q
-            ? dbExpRegistros.filter(r => Object.values(r).some(v => (v == null ? '' : String(v)).toLowerCase().includes(q)))
-            : dbExpRegistros;
+        // Acá los "campos" son TODAS las columnas de la fila: es el buscador de
+        // un explorador de tablas y no sabe cuáles importan.
+        const terminos = terminosBusqueda(dbExpFiltroRegs);
+        const filas = dbExpRegistros.filter(r => coincideBusqueda(Object.values(r), terminos));
 
         if (!filas.length) {
-            tbody.innerHTML = `<tr><td colspan="${Math.max(1, dbExpColsTabla.length)}" class="db-exp-empty">${q ? `Sin resultados para "${escape(dbExpFiltroRegs)}"` : 'Esta tabla está vacía.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="${Math.max(1, dbExpColsTabla.length)}" class="db-exp-empty">${terminos.length ? `Sin resultados para "${escape(dbExpFiltroRegs)}"` : 'Esta tabla está vacía.'}</td></tr>`;
         } else {
             const tienePk = dbExpPkCols.length > 0;
             tbody.innerHTML = filas.map(r => {
@@ -15836,7 +15929,10 @@
         s3ExpCargar(false);
     }
     function s3ExpFiltrar() {
-        s3ExpFiltro = (_s3ExpBackdrop.querySelector('#s3ExpBuscador').value || '').trim().toLowerCase();
+        // Se guarda lo tipeado tal cual: el estado vacío lo muestra entre
+        // comillas, y plegarlo acá haría que la pantalla le devuelva al usuario
+        // algo distinto de lo que escribió.
+        s3ExpFiltro = (_s3ExpBackdrop.querySelector('#s3ExpBuscador').value || '').trim();
         s3ExpRenderTabla(s3ExpPrefix);
     }
     function s3ExpRenderBreadcrumbs(prefix) {
@@ -15860,8 +15956,9 @@
         const relName = k => (k || '').startsWith(prefix) ? k.slice(prefix.length) : k;
         const foldersOrig = s3ExpUltimaLista.folders || [];
         const objectsOrig = s3ExpUltimaLista.objects || [];
-        const folders = s3ExpFiltro ? foldersOrig.filter(f => relName(f).toLowerCase().includes(s3ExpFiltro)) : foldersOrig;
-        const objects = s3ExpFiltro ? objectsOrig.filter(o => relName(o.key).toLowerCase().includes(s3ExpFiltro)) : objectsOrig;
+        const terminos = terminosBusqueda(s3ExpFiltro);
+        const folders = foldersOrig.filter(f => coincideBusqueda([relName(f)],     terminos));
+        const objects = objectsOrig.filter(o => coincideBusqueda([relName(o.key)], terminos));
 
         let rowsHtml = '';
         if (prefix) {
@@ -16709,6 +16806,76 @@
         const n = Number(v);
         if (!Number.isFinite(n)) return '—';
         return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(n);
+    }
+
+    /* ---------- Búsqueda avanzada (el texto libre de todo listado) --------
+     *
+     * Método único de búsqueda por texto del panel. Reemplaza al
+     * `(a + ' ' + b).toLowerCase().includes(q)` que armaba cada listado, que
+     * fallaba en las tres cosas que quien busca da por sentadas:
+     *
+     * 1. ACENTOS. Se pliegan los DOS lados, así que `gonzalez` encuentra a
+     *    `González` y `González` encuentra a `gonzalez`. La simetría es el
+     *    punto: nadie sabe de memoria si el dato se cargó con tilde. El plegado
+     *    se lleva además la virgulilla (`nino` trae `Niño`) y la diéresis.
+     * 2. MAYÚSCULAS. Indistintas en los dos lados.
+     * 3. PEDAZOS DE PALABRA, SUELTOS Y EN CUALQUIER ORDEN. La consulta se parte
+     *    en términos por espacios y cada término se busca como SUBCADENA. Por
+     *    eso `mari gon` encuentra a `María González`: no hace falta la palabra
+     *    entera, ni el orden, ni que los dos términos caigan en el mismo campo.
+     *
+     * LOS TÉRMINOS SE CRUZAN CON Y; CADA UNO SE BUSCA EN TODOS LOS CAMPOS CON O.
+     * Es la misma regla que ya usa el combo con buscador (`comboCoincide()`):
+     * agregar una palabra tiene que ACOTAR el resultado. Con la O al revés el
+     * segundo término lo agranda, y el buscador empeora justo cuando más se lo
+     * necesita — que es cuando el primero trajo demasiado.
+     *
+     * La consulta vacía NO filtra: `coincideBusqueda()` devuelve `true` sin
+     * términos, así que el llamador ya no necesita el viejo `if (q && …)`.
+     */
+
+    /* Texto plegado a la forma en la que se comparan consulta y dato.
+
+       `toLowerCase()` va ANTES del `normalize('NFD')`: hay mayúsculas cuyo
+       minúsculo trae un combinante propio (`İ` → `i` + punto) que al revés
+       sobreviviría al strip. U+0300–U+036F son las marcas diacríticas que NFD
+       separa de su letra; el rango va escapado y no como literales, igual que
+       en `slugificar()`: pegados en el archivo son caracteres invisibles que
+       cualquier editor puede comerse.
+
+       Es el MISMO plegado que `comboNormalizar()`. Ese existe aparte porque el
+       combo resalta lo que coincidió y necesita que un índice de la cadena
+       normalizada apunte al mismo lugar en la original, y para eso va caracter
+       por caracter. Acá no se resalta nada, así que se pliega la cadena entera
+       de una sola vez. Si cambia la regla de plegado, cambian las dos. */
+    function normalizarBusqueda(s) {
+        return String(s ?? '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+    }
+
+    /* Lo tipeado, partido en términos ya plegados. Se calcula UNA vez por
+       render y NO una vez por fila. */
+    function terminosBusqueda(consulta) {
+        return normalizarBusqueda(consulta).split(/\s+/).filter(Boolean);
+    }
+
+    /* `campos` son los valores de la fila sobre los que busca el módulo: los
+       mismos que anuncia el `placeholder` del input, ni más ni menos — buscar
+       sobre una columna que la pantalla no muestra devuelve filas que el
+       operador no puede explicar.
+
+       Se comparan campo por campo y no sobre la concatenación: pegando `...12`
+       con `34...` aparece un `1234` que no está en ninguna columna. */
+    function coincideBusqueda(campos, terminos) {
+        if (!terminos.length) return true;
+
+        const valores = (Array.isArray(campos) ? campos : [campos])
+            .map(normalizarBusqueda)
+            .filter(Boolean);
+
+        return terminos.every(t => valores.some(v => v.includes(t)));
     }
 
     function escape(s) {

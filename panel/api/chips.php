@@ -100,16 +100,13 @@ function handleList(): void
     } elseif ($estado === 'deshabilitados') {
         $where[] = '(c.estado IS NULL OR c.estado <> 1)';
     }
-    if ($q !== '') {
-        // Un placeholder por columna: con EMULATE_PREPARES=false, PDO no admite
-        // repetir el mismo nombre en un statement (SQLSTATE HY093).
-        $ors = [];
-        foreach (['c.telefono', 'c.serie', 'c.titular', 'c.comentario'] as $i => $columna) {
-            $ors[]             = $columna . ' LIKE :q' . $i;
-            $params[':q' . $i] = '%' . $q . '%';
-        }
-        $where[] = '(' . implode(' OR ', $ors) . ')';
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`.
+    [$condiciones, $busq] = busquedaWhere(
+        $q,
+        ['c.telefono', 'c.serie', 'c.titular', 'c.comentario']
+    );
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
 
     $sql = 'SELECT c.id, c.dominio, c.titular, c.responsable, c.pais, c.telefono,
                    c.serie, c.compania, c.plan, c.datos, c.mensajes, c.articulo,

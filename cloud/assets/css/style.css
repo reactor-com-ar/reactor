@@ -288,6 +288,12 @@ input[type=password], input[type=search], select, textarea {
     transition: border .15s, box-shadow .15s;
     font-family: inherit;
 }
+/* El calendario y el reloj los dibuja el navegador, no el CSS: sin declarar el
+ * esquema, Chrome los pinta para fondo claro y el icono queda negro sobre el
+ * gris oscuro del input. `color-scheme` es lo unico que lo alcanza — un filtro
+ * sobre el pseudo-elemento sirve en Chrome y no en el resto. */
+input[type=date], input[type=time], input[type=datetime-local] { color-scheme: dark; }
+
 input:focus, select:focus, textarea:focus {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(193,19,19,.25);
@@ -830,6 +836,24 @@ tbody tr.row-clickable { cursor: pointer; }
     white-space: pre;
     overflow: auto;
     tab-size: 2;
+}
+
+/* Caja del enlace magico (modal "Acceso a Panel / App"): monoespaciada como el
+ * editor de JSON, pero de DOS RENGLONES y envolviendo.
+ *
+ * Usaba `.json-editor` y heredaba sus 360px de alto minimo, pensados para pegar
+ * un JSON entero: una URL de una linea dejaba medio modal vacio. Ese alto es el
+ * que hoy ocupan los campos de vigencia y de usos, que configuran este mismo
+ * enlace. `white-space: pre-wrap` + `word-break` porque la URL no tiene espacios
+ * donde cortar y con el `pre` del editor quedaba con scroll horizontal. */
+.enlace-url {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .82rem;
+    line-height: 1.5;
+    min-height: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    resize: vertical;
 }
 
 /* ---------- 15. Confirm dialog ---------- */

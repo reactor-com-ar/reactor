@@ -154,16 +154,15 @@ function handleList(): void
         $where[]         = 'p.habilitado = :hab';
         $params[':hab']  = DESHABILITADO;
     }
-    if ($q !== '') {
-        // Un placeholder por columna: con EMULATE_PREPARES=false, PDO no admite
-        // repetir el mismo nombre en un statement (SQLSTATE HY093).
-        $ors = [];
-        foreach (['u.usuario', 'u.nombre', 'u.correo', 'u.celular', 'p.nombre'] as $i => $columna) {
-            $ors[]             = $columna . ' LIKE :q' . $i;
-            $params[':q' . $i] = '%' . $q . '%';
-        }
-        $where[] = '(' . implode(' OR ', $ors) . ')';
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`. Los
+    // terminos se cruzan con Y y cada uno se busca en todas las columnas con O,
+    // sin acentos y sin distinguir mayusculas. La consulta vacia no agrega nada.
+    [$condiciones, $busq] = busquedaWhere(
+        $q,
+        ['u.usuario', 'u.nombre', 'u.correo', 'u.celular', 'p.nombre']
+    );
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
 
     // LEFT JOIN y no INNER: hay perfiles sin cuenta (`perfiles.usuario` NULL o
     // con el centinela 0). Con INNER se esconderian, y esconder una fila que

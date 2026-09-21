@@ -10,6 +10,10 @@ require_once dirname(__DIR__) . '/lib/auth_check.php';
 require_once dirname(__DIR__) . '/lib/db.php';
 require_once dirname(__DIR__) . '/lib/sesion.php';
 require_once dirname(__DIR__) . '/lib/acceso.php';
+// Metodo unico de busqueda por texto libre. En el panel el buscador rapido de
+// TODOS los listados filtra en SQL (el front manda `?q=`), asi que esta es la
+// unica implementacion de la busqueda del producto.
+require_once dirname(__DIR__) . '/lib/busqueda.php';
 
 if (APP_ENV !== 'production') {
     ini_set('display_errors', '1');

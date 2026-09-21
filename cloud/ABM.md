@@ -74,6 +74,100 @@ refrescar sólo la tabla deja los KPIs contando lo viejo arriba de datos nuevos,
 y perder los filtros convierte el refresh en un cambio de pantalla. Ver
 `DESIGN.md` §9.
 
+### Cómo busca el texto libre (método único, obligatorio)
+
+Todo campo de texto libre —el **buscador rápido** de la toolbar y el campo
+`Buscar` del **Modal de Filtros**, que en casi todos los módulos son el mismo
+`state.texto`— busca con las tres funciones compartidas de `app.js`:
+`terminosBusqueda(consulta)` + `coincideBusqueda(campos, terminos)`, las dos
+apoyadas en `normalizarBusqueda(s)`. **Ningún módulo arma el suyo**, igual que
+con `abmToolbar()`.
+
+```js
+function applyAndRender() {
+    // Los términos se pliegan UNA vez por render y no una por fila.
+    const terminos = terminosBusqueda(state.texto);
+
+    const filtered = allFilas.filter(f => {
+        if (!coincideBusqueda([f.nombre, f.numero, f.uuid], terminos)) return false;
+        return true;
+    });
+    …
+}
+```
+
+Lo que el método garantiza —y que un `.toLowerCase().includes(q)` no da—:
+
+- **Los acentos no importan, en ninguna de las dos puntas.** `gonzalez`
+  encuentra a `González` y `González` encuentra a `gonzalez`. La simetría es el
+  punto: nadie sabe de memoria si el dato se cargó con tilde. El plegado se
+  lleva también la virgulilla (`nino` trae `Niño`) y la diéresis.
+- **Mayúsculas y minúsculas son indistintas.**
+- **Se buscan pedazos de palabra, sueltos y en cualquier orden.** La consulta se
+  parte en términos por espacios y cada término se busca como **subcadena**:
+  `mari gon` encuentra a `María González` y también a `González, María`.
+- **Los términos se cruzan con Y; cada término se busca en todos los campos con
+  O.** Agregar una palabra tiene que **acotar** el resultado. Con la O al revés
+  el segundo término lo agranda y el buscador empeora justo cuando más se lo
+  necesita, que es cuando el primero trajo demasiado. Es la misma regla que el
+  combo con buscador (`comboCoincide()`, `DESIGN.md` §34-bis).
+- **La consulta vacía no filtra**: `coincideBusqueda()` devuelve `true` sin
+  términos, así que el llamador **no** lleva el viejo `if (q && …)` de guarda.
+
+Reglas al aplicarlo:
+
+- **Los campos son los que anuncia el `placeholder`, ni más ni menos.** Buscar
+  sobre una columna que la pantalla no muestra devuelve filas que el operador no
+  puede explicar; no listarla en el `placeholder` esconde por qué apareció.
+- **Se comparan campo por campo y no sobre la concatenación.** Pegando `…12` con
+  `34…` aparece un `1234` que no está en ninguna columna.
+- **Los términos se calculan una vez por render**, fuera del `.filter()`, no una
+  vez por fila.
+- **El plegado es uno solo.** `normalizarBusqueda()` y `comboNormalizar()` tienen
+  que plegar igual; el segundo existe aparte porque el combo resalta lo que
+  coincidió y necesita que los índices de la cadena normalizada apunten al mismo
+  lugar en la original. Si cambia la regla, cambian las dos.
+- **Cuando el filtrado es server-side** (§ "Dónde se filtra"), esto sigue siendo
+  el buscador rápido client-side sobre la ventana traída — no cambia nada de lo
+  que ya dice esa sección. Lo que filtra en SQL busca con la contraparte de
+  abajo, que tiene que dar el mismo resultado.
+
+#### La contraparte en SQL: `lib/busqueda.php`
+
+Los campos de texto que **filtran en la base** —`Razón social` de Comprobantes,
+el buscador del Visor de sucesos y el del Programador de tareas— usan
+`busquedaWhere($consulta, $columnas)` de
+[lib/busqueda.php](lib/busqueda.php), que el `api/bootstrap.php` carga para
+todos los endpoints. Devuelve `[$condiciones, $params]` para meter en el
+`WHERE`; con la consulta vacía las dos vienen vacías y no se agrega nada.
+
+```php
+[$condiciones, $busq] = busquedaWhere($q, ['nombre', 'script', 'descripcion']);
+$where  = array_merge($where, $condiciones);
+$params = array_merge($params, $busq);
+```
+
+Arma `(col1 LIKE :q0_0 OR col2 LIKE :q0_1) AND (col1 LIKE :q1_0 OR …)` — la
+misma regla Y/O del front. Tres cosas que no se deducen del código:
+
+- **Los acentos y las mayúsculas los pliega la COLLATION, no la query.** Todas
+  las columnas del esquema son `utf8mb4_..._ci`, y esas collations comparan
+  `a` = `á`, `n` = `ñ` y `u` = `ü`. Verificado contra el motor: `SELECT "Niño"
+  LIKE "%nino%"` da 1. **Una columna con collation acento-sensible
+  (`..._as_cs`, `..._bin`) dejaría de cumplir la garantía**, y lo que hay que
+  arreglar ahí es la collation, no agregarle un `REPLACE` a la query.
+- **UN PLACEHOLDER POR TÉRMINO Y POR COLUMNA**, aunque el valor sea idéntico:
+  con `ATTR_EMULATE_PREPARES => false` PDO mapea cada nombre a **una** posición,
+  así que reusar `:q0` en las cuatro columnas corta con `SQLSTATE[HY093]
+  Invalid parameter number`. Es el error que ya documentaban a mano los cinco
+  endpoints del panel, y el helper lo resuelve de una vez.
+- **Los comodines de `LIKE` se escapan** (`busquedaEscapar()`): quien busca
+  `50%` quiere ese texto y no "cualquier cosa que empiece con 50" (medido:
+  48 filas contra 0), y un `_` suelto matchea cualquier caracter.
+
+El archivo es **copia idéntica de [panel/lib/busqueda.php](../panel/lib/busqueda.php)**,
+como `habilitado.php` y `permisos.php`: las apps no comparten docroot.
+
 ### Modal de Filtros
 
 El formulario de búsqueda debe respetar este orden de campos:

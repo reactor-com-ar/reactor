@@ -1616,13 +1616,16 @@ CREATE TABLE `enlaces___` (
 --
 -- Table structure for table `enlaces_acceso`
 --
--- Enlaces mágicos de un solo uso: abren sesión en `panel` o en `app` como el
--- usuario indicado, sin su contraseña. Los emite un operador desde cloud
+-- Enlaces mágicos: abren sesión en `panel` o en `app` como el usuario indicado,
+-- sin su contraseña. Los emite un operador desde cloud
 -- (Usuarios -> Consultar -> Acciones). ES SUPLANTACIÓN DE IDENTIDAD, y por eso
 -- la tabla guarda quién lo emitió, cuándo, desde qué IP y cuándo se usó.
 -- `token` guarda el SHA-256, no el token: quien lea la base no puede fabricar
 -- un enlace válido. `destino` impide que un enlace de app abra el panel.
+-- El cupo es `usos < usos_max` (default 1 = el enlace de un solo uso de
+-- siempre), y `usada` / `origen_uso` son el ÚLTIMO uso.
 -- Creada por cloud/sql/migrations/20260906_2000_crear_enlaces_acceso.sql
+-- `usos_max` / `usos`, por  cloud/sql/migrations/20260921_1000_enlaces_acceso_usos.sql
 --
 
 DROP TABLE IF EXISTS `enlaces_acceso`;
@@ -1637,6 +1640,8 @@ CREATE TABLE `enlaces_acceso` (
   `emisor_tabla` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `emitido` datetime NOT NULL,
   `expira` datetime NOT NULL,
+  `usos_max` int NOT NULL DEFAULT '1' COMMENT 'cuantas veces se puede canjear',
+  `usos` int NOT NULL DEFAULT '0' COMMENT 'cuantas veces se canjeo ya',
   `usada` datetime DEFAULT NULL,
   `origen` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `origen_uso` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,

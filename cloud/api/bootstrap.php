@@ -13,6 +13,10 @@ require_once dirname(__DIR__) . '/lib/habilitado.php';
 // entidad de la base, no un endpoint: la ficha del perfil la muestran dos
 // modulos (Perfiles y la solapa Perfiles de Usuarios).
 require_once dirname(__DIR__) . '/lib/permisos.php';
+// Metodo unico de busqueda por texto libre de los listados que filtran en SQL.
+// Va en el bootstrap por lo mismo que `permisos.php`: lo usa mas de un endpoint
+// y tiene que ser uno solo (ver `ABM.md`, "Como busca el texto libre").
+require_once dirname(__DIR__) . '/lib/busqueda.php';
 
 if (APP_ENV !== 'production') {
     ini_set('display_errors', '1');

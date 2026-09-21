@@ -53,12 +53,10 @@ function sucesosHandleList(PDO $pdo, array $q): void
     $where  = [];
     $params = [];
 
-    if ($search !== '') {
-        $where[] = '(origen LIKE :s1 OR detalle LIKE :s2)';
-        $like = '%' . $search . '%';
-        $params[':s1'] = $like;
-        $params[':s2'] = $like;
-    }
+    // Busqueda por texto libre: metodo unico de `lib/busqueda.php`.
+    [$condiciones, $busq] = busquedaWhere($search, ['origen', 'detalle'], 's');
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
     if ($tipo !== '' && in_array($tipo, TIPOS_SUCESOS_VISOR, true)) {
         $where[] = 'tipo = :tipo';
         $params[':tipo'] = $tipo;

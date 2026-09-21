@@ -120,11 +120,13 @@ function handleList(): void
         $params[':empresa'] = $empresa;
     }
 
+    // `Razon social` es un campo de texto libre del modal de Filtros, asi que
+    // busca con el mismo metodo que todo el resto (`lib/busqueda.php`) — solo
+    // que sobre una columna sola.
     $razon = isset($_GET['razon']) ? trim((string) $_GET['razon']) : '';
-    if ($razon !== '') {
-        $where[]          = 'c.razon LIKE :razon';
-        $params[':razon'] = '%' . $razon . '%';
-    }
+    [$condiciones, $busq] = busquedaWhere($razon, ['c.razon'], 'razon');
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
 
     foreach ([['emisionDesde', 'emision', '>='], ['emisionHasta', 'emision', '<='],
               ['vtoDesde', 'vencimiento', '>='], ['vtoHasta', 'vencimiento', '<=']] as [$get, $col, $op]) {

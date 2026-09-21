@@ -92,7 +92,21 @@ function handleList(): void
     // JOINs las filas se multiplican entre si y cada COUNT devolveria el
     // producto (mismo criterio que api/dominios.php y api/contratos.php). Las
     // dos columnas contadas tienen indice -- lo trae su FK.
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    //
+    // `proximo` NO es una columna: es `sprintf('%04d-%08d', punto, serie)`
+    // armado en PHP. Se reconstruye la MISMA forma en SQL para poder buscar
+    // por lo que la pantalla muestra (`0003-00000123`) y no por los dos
+    // enteros sueltos. `busquedaWhere()` interpola lo que recibe, asi que una
+    // expresion vale igual que una columna.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        't.nombre', 'em.nombre', 'em.razon', 't.correo', 't.web',
+        "CONCAT(LPAD(t.punto, 4, '0'), '-', LPAD(t.serie, 8, '0'))",
+    ]);
+
+    $stmt = db()->prepare(
         'SELECT t.id,
                 t.nombre,
                 t.empresa,
@@ -111,9 +125,11 @@ function handleList(): void
                 (SELECT COUNT(*) FROM comprobantes cp WHERE cp.talonario = t.id) AS comprobantes_count,
                 (SELECT COUNT(*) FROM clientes     cl WHERE cl.talonario = t.id) AS clientes_count
          FROM talonarios t
-         LEFT JOIN empresas em ON em.id = t.empresa
+         LEFT JOIN empresas em ON em.id = t.empresa'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
          ORDER BY t.id DESC'
     );
+    $stmt->execute($busq);
 
     $talonarios = array_map(static function (array $r): array {
         $tipo    = trim((string) ($r['tipo']    ?? ''));

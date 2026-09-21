@@ -44,11 +44,35 @@ function handleList(): void
             LEFT JOIN dominios      dom ON dom.id = d.dominio
             LEFT JOIN transceptores t   ON t.id   = s.transceptor';
 
+    $where  = [];
     $params = [];
     if ($dispositivo > 0) {
-        $sql .= ' WHERE s.dispositivo = :did';
+        $where[]        = 's.dispositivo = :did';
         $params[':did'] = $dispositivo;
     }
+
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'd.nombre', 'd.uuid', 's.topic', 's.mensaje', 't.nombre',
+    ]);
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
+
+    // VENTANA POR ID, Y SOLO CUANDO HAY BUSQUEDA. Sin busqueda el
+    // `ORDER BY s.id DESC LIMIT n` se sirve del indice de la PK y para en la
+    // fila n; con un `LIKE` tiene que recorrer la tabla hacia atras hasta
+    // juntar n coincidencias, que en el peor caso son las 863.350 filas.
+    // Medido en dev: 811 ms sin ventana contra 138 ms con ella.
+    //
+    // La contrapartida es que la busqueda NO ve mas alla de la ventana, que es
+    // el mismo trato que ya hace el panel en Actividad y con el mismo tamanio.
+    if ($condiciones) {
+        $where[] = 's.id > (SELECT MAX(id) FROM senales) - ' . VENTANA_BUSQUEDA;
+    }
+
+    if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
     $sql .= ' ORDER BY s.id DESC LIMIT ' . $limit;
 
     $stmt = db()->prepare($sql);

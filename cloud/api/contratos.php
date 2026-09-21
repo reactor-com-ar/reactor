@@ -106,7 +106,22 @@ function handleList(): void
     // subconsultas correlacionadas y no LEFT JOIN: con JOINs las filas se
     // multiplican entre si y cada COUNT devolveria el producto (ver el mismo
     // criterio en api/dominios.php). Las dos tienen indice -- lo trae la FK.
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    //
+    // `tipo_texto` NO es una columna: lo arma `combo(COMBO_TIPO)` en PHP. Para
+    // poder buscar por el texto que la pantalla muestra ("Mensual") y no por
+    // el codigo que guarda la fila, se une `combos` por esa misma clave. Es la
+    // unica forma de que el buscador encuentre lo que se ve; la contrapartida
+    // es que un tipo que solo exista en COMBOS_FALLBACK —porque `combos` no lo
+    // tiene cargado— no se puede buscar por su texto.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'do.nombre', 'cl.nombre', 'pl.nombre', 'pl.descripcion', 'cbt.texto', 'c.uuid',
+    ]);
+    $busq[':combo_tipo'] = COMBO_TIPO;
+
+    $stmt = db()->prepare(
         'SELECT c.id,
                 c.uuid,
                 c.cliente,
@@ -139,8 +154,11 @@ function handleList(): void
          LEFT JOIN dominios  do ON do.id = c.dominio
          LEFT JOIN planes    pl ON pl.id = c.plan
          LEFT JOIN articulos ar ON ar.id = pl.articulo
+         LEFT JOIN combos    cbt ON cbt.combo = :combo_tipo AND cbt.valor = c.tipo'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
          ORDER BY c.id DESC'
     );
+    $stmt->execute($busq);
 
     $hoy = date('Y-m-d');
 

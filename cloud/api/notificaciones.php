@@ -101,6 +101,16 @@ function handleList(): void
     } elseif ($estado === 'leidas') {
         $where[] = 'n.leida = ' . NOTIFICACION_LEIDA;
     }
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Sin ventana por id: son 68.717
+    // filas y el peor caso medido en dev es de 78 ms.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'n.mensaje', 'dom.nombre', 'u.nombre', 'u.usuario', 'n.destino',
+    ]);
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
+
     if ($destinatario === 'dominio') {
         $where[] = '(n.usuario IS NULL OR n.usuario = 0)';
     } elseif ($destinatario === 'usuario') {

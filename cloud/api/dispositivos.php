@@ -109,7 +109,17 @@ function handleList(): void
     //   last_seen_at -> latido
     //   created_at   -> COALESCE(instalacion, fabricacion)
     //   dominio_id   -> dominio
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Van las columnas REALES y no
+    // los alias del SELECT —`d.uuid` y no `uid`, `d.coordenadas` y no
+    // `ubicacion`—: MySQL no admite un alias en el `WHERE`, que se evalua
+    // antes de la proyeccion. `tipo` es `m.nombre` por el mismo motivo.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'd.uuid', 'd.serial', 'd.nombre', 'm.nombre', 'dom.nombre', 'd.coordenadas',
+    ]);
+
+    $stmt = db()->prepare(
         "SELECT d.id,
                 d.uuid                                 AS uid,
                 d.nombre,
@@ -127,7 +137,8 @@ function handleList(): void
                 COALESCE(dom.nombre, '—')              AS dominio_nombre
          FROM dispositivos d
          LEFT JOIN dominios dom ON dom.id = d.dominio
-         LEFT JOIN modelos  m   ON m.id   = d.modelo
+         LEFT JOIN modelos  m   ON m.id   = d.modelo"
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . "
          ORDER BY FIELD(
                       CASE
                           WHEN d.habilitado <> 1 THEN 'error'
@@ -138,6 +149,7 @@ function handleList(): void
                   ),
                   d.nombre ASC"
     );
+    $stmt->execute($busq);
 
     $dispositivos = array_map(static function (array $r): array {
         $r['dominio_id'] = (int) $r['dominio_id'];

@@ -128,6 +128,28 @@ function handleList(): void
     $where  = array_merge($where, $condiciones);
     $params = array_merge($params, $busq);
 
+    // El buscador rapido de la toolbar. Son las mismas columnas que el front
+    // juntaba a mano antes de que la busqueda fuera SQL.
+    //
+    // `numero` NO es una columna: lo arma `comprobanteNumero(t.punto, c.serie)`
+    // con `str_pad`. Se reconstruye la MISMA forma en SQL —y con las mismas dos
+    // constantes de largo— para poder buscar por lo que la pantalla muestra
+    // (`0003-00000123`) y no por los dos enteros sueltos.
+    //
+    // `tipo_completo` queda AFUERA de la busqueda, y es el unico campo que el
+    // filtro JS miraba y este no: lo arma PHP juntando textos de catalogo, y
+    // reproducirlo en SQL pedia tres joins mas para una columna por la que
+    // nadie busca ("Factura A" ya se elige desde el filtro `Tipo`).
+    $numeroSql = "CONCAT(LPAD(COALESCE(t.punto, 0), " . NUMERO_PUNTO_DIGITOS . ", '0'),"
+               . " '-', LPAD(c.serie, " . NUMERO_SERIE_DIGITOS . ", '0'))";
+
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condQ, $busqQ] = busquedaWhere($q, [
+        'c.razon', 'c.cuit', 'c.uuid', $numeroSql, 'cl.nombre', 'em.nombre',
+    ]);
+    $where  = array_merge($where, $condQ);
+    $params = array_merge($params, $busqQ);
+
     foreach ([['emisionDesde', 'emision', '>='], ['emisionHasta', 'emision', '<='],
               ['vtoDesde', 'vencimiento', '>='], ['vtoHasta', 'vencimiento', '<=']] as [$get, $col, $op]) {
         $v = isset($_GET[$get]) ? trim((string) $_GET[$get]) : '';
@@ -156,10 +178,16 @@ function handleList(): void
     // Totales de LA CONSULTA, no de la ventana: el pie del listado legacy
     // suma lo que trajo el LIMIT, y con 100 de 2.326 ese numero no significa
     // nada. Se cuenta con el mismo WHERE y sin el limite.
+    // Los dos JOIN de mas son por el buscador: `$sqlWhere` puede nombrar
+    // `cl.nombre` y `em.nombre`, asi que esta consulta necesita los mismos
+    // alias que la de arriba o revienta con "Unknown column". Son 1:1 por PK y
+    // LEFT, asi que no multiplican filas ni cambian el COUNT ni el SUM.
     $tot = db()->prepare(
         'SELECT COUNT(*) AS filas, COALESCE(SUM(c.total), 0) AS total
          FROM comprobantes c
-         LEFT JOIN talonarios t ON t.id = c.talonario'
+         LEFT JOIN talonarios t  ON t.id  = c.talonario
+         LEFT JOIN empresas   em ON em.id = t.empresa
+         LEFT JOIN clientes   cl ON cl.id = c.cliente'
         . $sqlWhere
     );
     $tot->execute($params);

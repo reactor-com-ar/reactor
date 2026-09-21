@@ -502,6 +502,81 @@
             .addEventListener('click', () => refrescarVista(route, state));
     }
 
+    /* Milisegundos entre la última tecla y la consulta del buscador rápido.
+       Mismo valor que el panel, que ya busca así. */
+    const BUSQUEDA_DEBOUNCE = 300;
+
+    /* ---------- Buscador rápido: lo resuelve la BASE, no el navegador -------
+     *
+     * El texto NO recorta el array ya traído: se manda al endpoint como `?q=` y
+     * la búsqueda se resuelve en el `WHERE` (`ABM.md`, "Cómo busca el texto
+     * libre"). Filtrar en JS sólo ve lo que se trajo, así que el día que el
+     * endpoint gane un `LIMIT` contestaría "no hay resultados" sobre filas que
+     * existen — y esa es la única respuesta que un buscador no puede dar.
+     *
+     * Por eso cada tecla puede costar una consulta y va con debounce.
+     *
+     * LA `stats-bar` NO SE REPINTA. Sus KPIs son del universo y no de la
+     * consulta (`DESIGN.md` §9), y el endpoint lo hace explícito: con búsqueda
+     * devuelve `resumen: null`. Lo único que cambia acá es la tabla.
+     *
+     * Devuelve `recargar()` para que el módulo la use donde la necesite.
+     */
+    function wireBuscadorSql({ quick, quickClr, tableWrap, state, pedir, alLlegar, recargar: propio }) {
+        let debounce = null;
+        let pedido   = 0;
+
+        // Un módulo que YA pedía al backend pasa su propia función (Comprobantes,
+        // cuya consulta entera es server-side): así no queda un segundo camino
+        // que pueda mandar filtros distintos de los que manda el modal.
+        if (propio) {
+            quick.value = state.texto;
+            quick.addEventListener('input', () => {
+                state.texto = quick.value.trim();
+                clearTimeout(debounce);
+                debounce = setTimeout(propio, BUSQUEDA_DEBOUNCE);
+            });
+            quickClr.addEventListener('click', () => {
+                quick.value = ''; state.texto = '';
+                clearTimeout(debounce);
+                propio();
+                quick.focus();
+            });
+            return propio;
+        }
+
+        async function recargar() {
+            // Token de carrera: con debounce igual pueden quedar dos consultas
+            // en vuelo (una red lenta, un pegado de texto). Sin esto, la que
+            // llega última pinta la tabla aunque sea la respuesta VIEJA.
+            const mio = ++pedido;
+            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
+            try {
+                const filas = await pedir(state.texto);
+                if (mio !== pedido) return;
+                alLlegar(filas);
+            } catch (e) {
+                if (mio !== pedido) return;
+                tableWrap.innerHTML = `<div class="table-empty">${escape(e.message)}</div>`;
+            }
+        }
+
+        quick.value = state.texto;
+        quick.addEventListener('input', () => {
+            state.texto = quick.value.trim();
+            clearTimeout(debounce);
+            debounce = setTimeout(recargar, BUSQUEDA_DEBOUNCE);
+        });
+        quickClr.addEventListener('click', () => {
+            quick.value = ''; state.texto = '';
+            clearTimeout(debounce);   // limpiar no espera al debounce pendiente
+            recargar();
+            quick.focus();
+        });
+
+        return recargar;
+    }
+
     // Abre el Modal de Filtros (ABM.md §3), con el formato estándar de modal:
     // título en primario + barra de acciones `Cancelar / Limpiar / Aplicar`,
     // sin footer (DESIGN.md §21-bis). Es un helper compartido: lo usan los
@@ -1527,15 +1602,12 @@
         const btnNew    = document.getElementById('dev-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allDispositivos.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
                 if (state.estado  && d.estado !== state.estado) return false;
                 if (state.dominio && String(d.dominio_id) !== state.dominio) return false;
-                if (!coincideBusqueda([d.uid, d.serial, d.nombre, d.tipo,
-                                       d.dominio_nombre, d.ubicacion], terminos)) return false;
                 return true;
             });
 
@@ -1579,23 +1651,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => {
-            state.texto = quick.value.trim();
-            applyAndRender();
-        });
-        quickClr.addEventListener('click', () => {
-            quick.value = '';
-            state.texto = '';
-            applyAndRender();
-            quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('dispositivos?q=' + encodeURIComponent(q)).then(d => d.dispositivos),
+            alLlegar: filas => { allDispositivos = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openDevicesFiltersModal(state, allDominios, applyAndRender));
+        btnFilt.addEventListener('click', () => openDevicesFiltersModal(state, allDominios, recargar));
         btnNew.addEventListener('click',  () => openDeviceModal(null));
         wireRefresh('dev', 'dispositivos', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openDevicesFiltersModal(state, allDominios, onApply) {
@@ -2237,15 +2305,12 @@
         const btnNew    = document.getElementById('chip-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allChips.filter(c => {
                 if (Number.isFinite(codigo) && c.id !== codigo) return false;
                 if (state.estado  && c.estado !== state.estado) return false;
                 if (state.dominio && String(c.dominio_id) !== state.dominio) return false;
-                if (!coincideBusqueda([c.numero, c.iccid, c.operador,
-                                       c.apn, c.plan, c.notas], terminos)) return false;
                 return true;
             });
 
@@ -2285,17 +2350,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('chips?q=' + encodeURIComponent(q)).then(d => d.chips),
+            alLlegar: filas => { allChips = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openChipsFiltersModal(state, allDominios, applyAndRender));
+        btnFilt.addEventListener('click', () => openChipsFiltersModal(state, allDominios, recargar));
         btnNew.addEventListener('click',  () => openChipModal(null, allDominios));
         wireRefresh('chip', 'chips', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openChipsFiltersModal(state, allDominios, onApply) {
@@ -2693,12 +2760,10 @@
         const btnNew    = document.getElementById('trx-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allTransceptores.filter(t => {
                 if (Number.isFinite(codigo) && t.id !== codigo) return false;
-                if (!coincideBusqueda([t.nombre, t.host, t.usuario, t.entrada], terminos)) return false;
                 return true;
             });
 
@@ -2738,17 +2803,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('transceptores?q=' + encodeURIComponent(q)).then(d => d.transceptores),
+            alLlegar: filas => { allTransceptores = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openTransceptoresFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openTransceptoresFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openTransceptorModal(null));
         wireRefresh('trx', 'transceptores', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openTransceptoresFiltersModal(state, onApply) {
@@ -3182,8 +3249,7 @@
         const btnNew    = document.getElementById('con-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             const filtered = allContratos.filter(c => {
                 if (Number.isFinite(codigo) && c.id !== codigo) return false;
@@ -3199,9 +3265,6 @@
                 // facture en el año 1500, es que no tiene fecha.
                 if (state.facturarDesde && (!c.facturar || c.facturar < state.facturarDesde)) return false;
                 if (state.facturarHasta && (!c.facturar || c.facturar > state.facturarHasta)) return false;
-                if (!coincideBusqueda([c.dominio_nombre, c.cliente_nombre,
-                                       c.plan_nombre, c.plan_descripcion,
-                                       c.tipo_texto, c.uuid], terminos)) return false;
                 return true;
             });
 
@@ -3263,17 +3326,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('contratos?q=' + encodeURIComponent(q)).then(d => d.contratos),
+            alLlegar: filas => { allContratos = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openContratosFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openContratosFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openContratoModal(null));
         wireRefresh('con', 'contratos', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     // El estado de cuenta del cliente vive fuera de cloud: es la pantalla
@@ -4186,9 +4251,12 @@
     // string dice exactamente qué se está filtrando.
     function comprobantesQuery(state) {
         const p = new URLSearchParams();
+        // `texto` es el buscador rápido y viaja como `q`: la búsqueda la
+        // resuelve la base, igual que el resto de los filtros.
         ['id', 'talonario', 'contrato', 'cliente', 'medio', 'estado', 'tipo',
          'empresa', 'razon', 'emisionDesde', 'emisionHasta', 'vtoDesde', 'vtoHasta']
             .forEach(k => { if (state[k] !== '') p.set(k, state[k]); });
+        if (state.texto) p.set('q', state.texto);
         p.set('limit', String(state.limit));
         return p.toString();
     }
@@ -4327,15 +4395,14 @@
         let consulta = data.consulta;
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const filtrados = !terminos.length ? ventana : ventana.filter(c =>
-                coincideBusqueda([c.razon, c.numero, c.uuid, c.cliente_nombre,
-                                  c.empresa_nombre, c.tipo_completo, c.cuit], terminos));
+            // La búsqueda ya la resolvió la base: `ventana` es el resultado de
+            // la consulta. Lo único que queda es dibujarlo.
+            const filtrados = ventana;
 
             // Con la búsqueda rápida activa el pie mostraría los totales de la
             // consulta entera debajo de una tabla ya recortada: se recalcula
             // sobre lo que realmente se ve.
-            const pie = terminos.length
+            const pie = state.texto
                 ? { filas: filtrados.length, traidos: filtrados.length,
                     total: filtrados.reduce((a, c) => a + (c.total || 0), 0) }
                 : consulta;
@@ -4419,17 +4486,18 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
-        });
+        // El buscador usa `recargar()`, que es el MISMO camino al backend que el
+        // modal de Filtros: acá la consulta ya era server-side y lo único que se
+        // sumó es que el texto viaje adentro (`comprobantesQuery`).
+        wireBuscadorSql({ quick, quickClr, tableWrap, state, recargar });
 
         btnFilt.addEventListener('click', () => openComprobantesFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openComprobanteNuevoModal(recargar));
         wireRefresh('cpb', 'comprobantes', state);
 
-        applyAndRender();
+        // El render ya pidió la ventana SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     // Los tres links del visor público, indexados por el `uuid`. Viven fuera
@@ -5739,8 +5807,7 @@
         const btnNew    = document.getElementById('tal-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             const filtered = allTalonarios.filter(t => {
                 if (Number.isFinite(codigo) && t.id !== codigo) return false;
@@ -5749,8 +5816,6 @@
                 if (state.subtipo && t.subtipo !== state.subtipo) return false;
                 if (state.fiscal  && t.fiscal  !== state.fiscal)  return false;
                 if (state.estado  && String(t.estado) !== state.estado) return false;
-                if (!coincideBusqueda([t.nombre, t.empresa_nombre, t.empresa_razon,
-                                       t.correo, t.web, t.proximo], terminos)) return false;
                 return true;
             });
 
@@ -5801,17 +5866,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('talonarios?q=' + encodeURIComponent(q)).then(d => d.talonarios),
+            alLlegar: filas => { allTalonarios = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openTalonariosFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openTalonariosFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openTalonarioModal(null));
         wireRefresh('tal', 'talonarios', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openTalonariosFiltersModal(state, onApply) {
@@ -6424,16 +6491,15 @@
         const btnFilt   = document.getElementById('dom-filters');
         const btnNew    = document.getElementById('dom-new');
 
-        function applyAndRender() {
-            // Los términos se pliegan UNA vez por render y no una por fila.
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+        // Lo que devolvió la última consulta. NO es "toda la tabla": cuando hay
+        // búsqueda es lo que la base encontró (ver `wireBuscadorSql`).
+        let dominios = allDominios;
 
-            let filtered = allDominios.filter(d => {
+        function applyAndRender() {
+            const codigo = parseInt(state.codigo, 10);
+
+            let filtered = dominios.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
-                // Se busca sobre lo que la ficha muestra: nombre, número e
-                // identificador. `descripcion` no existe en la tabla.
-                if (!coincideBusqueda([d.nombre, d.numero, d.uuid], terminos)) return false;
                 return true;
             });
 
@@ -6464,7 +6530,7 @@
         function wireRowActions() {
             tableWrap.querySelectorAll('tbody tr').forEach(tr => {
                 const id  = +tr.dataset.id;
-                const dom = allDominios.find(x => x.id === id);
+                const dom = dominios.find(x => x.id === id);
                 if (!dom) return;
                 tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
                     e.stopPropagation();
@@ -6479,17 +6545,20 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('dominios?q=' + encodeURIComponent(q)).then(d => d.dominios),
+            alLlegar: filas => { dominios = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openDominiosFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openDominiosFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openDomainModal(null));
         wireRefresh('dom', 'dominios', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q` —así los KPIs y los catálogos
+        // son del universo—, así que sólo se vuelve a pedir si el estado venía
+        // con una búsqueda puesta (Refrescar conserva los filtros vigentes).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openDominiosFiltersModal(state, onApply) {
@@ -6902,14 +6971,12 @@
         const btnNew    = document.getElementById('usr-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allUsuarios.filter(u => {
                 if (Number.isFinite(codigo) && u.id !== codigo) return false;
                 if (state.estado === 'activo'   && !u.activo) return false;
                 if (state.estado === 'inactivo' &&  u.activo) return false;
-                if (!coincideBusqueda([u.email, u.nombre, u.celular], terminos)) return false;
                 return true;
             });
 
@@ -6953,17 +7020,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('users?q=' + encodeURIComponent(q)).then(d => d.usuarios),
+            alLlegar: filas => { allUsuarios = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openUsersFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openUsersFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openUserModal(null));
         wireRefresh('usr', 'users', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openUsersFiltersModal(state, onApply) {
@@ -8038,8 +8107,7 @@
         const btnNew    = document.getElementById('prf-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             /* Sólo los permisos con filtro puesto. Los tres en `''` es el caso
                normal, y así el `permisosDelPerfil()` de cada fila —que arma un
@@ -8063,8 +8131,6 @@
                         if (tiene[x.clave] !== (state.permisos[x.clave] === 'si')) return false;
                     }
                 }
-                if (!coincideBusqueda([p.usuario_nombre, p.usuario_email,
-                                       p.dominio_nombre], terminos)) return false;
                 return true;
             });
 
@@ -8104,17 +8170,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('profiles?q=' + encodeURIComponent(q)).then(d => d.perfiles),
+            alLlegar: filas => { allPerfiles = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openProfilesFiltersModal(state, allUsuarios, allDominios, applyAndRender));
+        btnFilt.addEventListener('click', () => openProfilesFiltersModal(state, allUsuarios, allDominios, recargar));
         btnNew.addEventListener('click',  () => openProfileModal(null, allUsuarios, allDominios));
         wireRefresh('prf', 'profiles', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openProfilesFiltersModal(state, allUsuarios, allDominios, onApply) {
@@ -9047,16 +9115,13 @@
         const btnNew    = document.getElementById('tec-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allTecnicos.filter(t => {
                 if (Number.isFinite(codigo) && t.id !== codigo) return false;
                 if (state.aprobacion && String(t.aprobacion ?? '') !== state.aprobacion) return false;
                 if (state.publicacion === 'si' && !t.publicado) return false;
                 if (state.publicacion === 'no' &&  t.publicado) return false;
-                if (!coincideBusqueda([t.nombre, t.actividad, t.correo, t.celular,
-                                       t.domicilio, tecnicoUbicacion(t)], terminos)) return false;
                 return true;
             });
 
@@ -9113,17 +9178,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('tecnicos?q=' + encodeURIComponent(q)).then(d => d.tecnicos),
+            alLlegar: filas => { allTecnicos = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openTecnicosFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openTecnicosFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openTecnicoModal(null));
         wireRefresh('tec', 'tecnicos', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openTecnicosFiltersModal(state, onApply) {
@@ -10066,8 +10133,7 @@
         let senales = allSenales;
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = senales.filter(s => {
                 if (Number.isFinite(codigo) && s.id !== codigo) return false;
@@ -10075,9 +10141,6 @@
                 if (state.dominio && String(s.dominio_id ?? '') !== state.dominio) return false;
                 if (state.sentido && s.sentido !== state.sentido) return false;
                 if (state.estado !== '' && String(s.estado ?? '') !== state.estado) return false;
-                if (!coincideBusqueda([s.dispositivo_nombre, s.dispositivo_uuid,
-                                       s.topic, s.mensaje,
-                                       s.transceptor_nombre], terminos)) return false;
                 return true;
             });
 
@@ -10092,19 +10155,12 @@
             wireRowActions();
         }
 
-        async function refetchFromServer() {
+        function signalsQuery(q) {
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
             if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
-
-            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
-            try {
-                const data = await api('signals?' + qs.toString());
-                senales = data.senales;
-                applyAndRender();
-            } catch (e) {
-                tableWrap.innerHTML = errorBox(e.message);
-            }
+            if (q) qs.set('q', q);
+            return qs.toString();
         }
 
         function rowMenuFor(s) {
@@ -10142,21 +10198,26 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        // Un solo camino al backend: el buscador y el modal de Filtros piden por
+        // la misma función, así que la ventana y la búsqueda viajan siempre
+        // juntas en vez de pisarse.
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('signals?' + signalsQuery(q)).then(d => d.senales),
+            alLlegar: filas => { senales = filas; applyAndRender(); },
         });
 
         btnFilt.addEventListener('click', () =>
             openSignalsFiltersModal(state, allDispositivos, allDominios, ({ refetch }) => {
-                if (refetch) refetchFromServer();
-                else        applyAndRender();
+                if (refetch) recargar();
+                else         applyAndRender();
             })
         );
         wireRefresh('sig', 'signals', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openSignalsFiltersModal(state, allDispositivos, allDominios, onApply) {
@@ -10545,21 +10606,13 @@
         let registros = allRegistros;
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
-            // `Estado` es otro campo de texto libre (del modal de Filtros), así
-            // que busca con el mismo método — sólo que sobre una columna sola.
-            const terminosEstado = terminosBusqueda(state.estado);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = registros.filter(r => {
                 if (Number.isFinite(codigo) && r.id !== codigo) return false;
                 if (state.dispositivo && String(r.dispositivo) !== state.dispositivo) return false;
                 if (state.dominio && String(r.dominio ?? '') !== state.dominio) return false;
                 if (state.sentido && r.sentido !== state.sentido) return false;
-                if (!coincideBusqueda([r.estado], terminosEstado)) return false;
-                if (!coincideBusqueda([r.dispositivo_nombre, r.dispositivo_uuid,
-                                       r.usuario_nombre, r.usuario_login,
-                                       r.estado], terminos)) return false;
                 return true;
             });
 
@@ -10574,19 +10627,13 @@
             wireRowActions();
         }
 
-        async function refetchFromServer() {
+        function registrosQuery(q) {
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
             if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
-
-            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
-            try {
-                const data = await api('registros?' + qs.toString());
-                registros = data.registros;
-                applyAndRender();
-            } catch (e) {
-                tableWrap.innerHTML = errorBox(e.message);
-            }
+            if (state.estado)      qs.set('estado',      state.estado);
+            if (q)                 qs.set('q',           q);
+            return qs.toString();
         }
 
         function rowMenuFor(r) {
@@ -10612,21 +10659,26 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        // Un solo camino al backend: el buscador y el modal de Filtros piden por
+        // la misma función, así que la ventana y la búsqueda viajan siempre
+        // juntas en vez de pisarse.
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('registros?' + registrosQuery(q)).then(d => d.registros),
+            alLlegar: filas => { registros = filas; applyAndRender(); },
         });
 
         btnFilt.addEventListener('click', () =>
             openRegistrosFiltersModal(state, allDispositivos, allDominios, ({ refetch }) => {
-                if (refetch) refetchFromServer();
-                else        applyAndRender();
+                if (refetch) recargar();
+                else         applyAndRender();
             })
         );
         wireRefresh('reg', 'registros', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openRegistrosFiltersModal(state, allDispositivos, allDominios, onApply) {
@@ -10699,6 +10751,8 @@
             onApply(modal) {
                 const prevDispositivo = state.dispositivo;
                 const prevLimit       = state.limit;
+                const prevEstado      = state.estado;
+                const prevTexto       = state.texto;
 
                 state.codigo      = modal.querySelector('#reg-fm-codigo').value.trim();
                 state.texto       = modal.querySelector('#reg-fm-texto').value.trim();
@@ -10710,10 +10764,14 @@
                 state.dir         = modal.querySelector('#reg-fm-dir').value;
                 state.limit       = readLimit(modal.querySelector('#reg-fm-limit'), 100);
 
-                // Dispositivo y límite viajan al backend (?dispositivo=&limit=);
-                // el resto se aplica client-side sobre el set ya descargado.
+                // Dispositivo, límite y los dos campos de TEXTO viajan al
+                // backend (?dispositivo=&limit=&estado=&q=): la búsqueda la
+                // resuelve la base. El resto se aplica client-side sobre el set
+                // que devolvió esa consulta.
                 const needsRefetch = state.dispositivo !== prevDispositivo
-                                  || state.limit       !== prevLimit;
+                                  || state.limit       !== prevLimit
+                                  || state.estado      !== prevEstado
+                                  || state.texto       !== prevTexto;
                 onApply({ refetch: needsRefetch });
             },
             onClear(modal) {
@@ -10945,8 +11003,7 @@
         let adopciones = allAdopciones;
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = adopciones.filter(a => {
                 if (Number.isFinite(codigo) && a.id !== codigo) return false;
@@ -10964,10 +11021,6 @@
                     if (state.desde && dia < state.desde) return false;
                     if (state.hasta && dia > state.hasta) return false;
                 }
-                if (!coincideBusqueda([a.dispositivo_nombre, a.dispositivo_uuid,
-                                       a.dominio_nombre,
-                                       a.adoptador_nombre, a.adoptador_login,
-                                       a.liberador_nombre, a.liberador_login], terminos)) return false;
                 return true;
             });
 
@@ -10983,21 +11036,14 @@
             wireRowActions();
         }
 
-        async function refetchFromServer() {
+        function adopcionesQuery(q) {
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
             if (state.dispositivo) qs.set('dispositivo', state.dispositivo);
             if (state.dominio)     qs.set('dominio',     state.dominio);
             if (state.vigente)     qs.set('vigente',     state.vigente);
-
-            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
-            try {
-                const data = await api('adopciones?' + qs.toString());
-                adopciones = data.adopciones;
-                applyAndRender();
-            } catch (e) {
-                tableWrap.innerHTML = errorBox(e.message);
-            }
+            if (q)                 qs.set('q',           q);
+            return qs.toString();
         }
 
         function rowMenuFor(a) {
@@ -11023,21 +11069,26 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        // Un solo camino al backend: el buscador y el modal de Filtros piden por
+        // la misma función, así que los filtros y la búsqueda viajan siempre
+        // juntos en vez de pisarse.
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('adopciones?' + adopcionesQuery(q)).then(d => d.adopciones),
+            alLlegar: filas => { adopciones = filas; applyAndRender(); },
         });
 
         btnFilt.addEventListener('click', () =>
             openAdopcionesFiltersModal(state, allDispositivos, allDominios, allUsuarios, ({ refetch }) => {
-                if (refetch) refetchFromServer();
-                else        applyAndRender();
+                if (refetch) recargar();
+                else         applyAndRender();
             })
         );
         wireRefresh('ado', 'adopciones', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openAdopcionesFiltersModal(state, allDispositivos, allDominios, allUsuarios, onApply) {
@@ -11396,8 +11447,7 @@
         let notificaciones = allNotificaciones;
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = notificaciones.filter(n => {
                 if (Number.isFinite(codigo) && n.id !== codigo) return false;
@@ -11414,9 +11464,6 @@
                     if (state.desde && dia < state.desde) return false;
                     if (state.hasta && dia > state.hasta) return false;
                 }
-                if (!coincideBusqueda([n.mensaje, n.dominio_nombre,
-                                       n.usuario_nombre, n.usuario_login,
-                                       n.destino], terminos)) return false;
                 return true;
             });
 
@@ -11432,21 +11479,14 @@
             wireRowActions();
         }
 
-        async function refetchFromServer() {
+        function notificacionesQuery(q) {
             const qs = new URLSearchParams();
             qs.set('limit', String(state.limit));
             if (state.dominio)      qs.set('dominio',      state.dominio);
             if (state.estado)       qs.set('estado',       state.estado);
             if (state.destinatario) qs.set('destinatario', state.destinatario);
-
-            tableWrap.innerHTML = `<div class="table-empty"><div class="spin"></div></div>`;
-            try {
-                const data = await api('notificaciones?' + qs.toString());
-                notificaciones = data.notificaciones;
-                applyAndRender();
-            } catch (e) {
-                tableWrap.innerHTML = errorBox(e.message);
-            }
+            if (q)                  qs.set('q',            q);
+            return qs.toString();
         }
 
         function rowMenuFor(n) {
@@ -11476,21 +11516,26 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        // Un solo camino al backend: el buscador y el modal de Filtros piden por
+        // la misma función, así que los filtros y la búsqueda viajan siempre
+        // juntos en vez de pisarse.
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('notificaciones?' + notificacionesQuery(q)).then(d => d.notificaciones),
+            alLlegar: filas => { notificaciones = filas; applyAndRender(); },
         });
 
         btnFilt.addEventListener('click', () =>
             openNotificacionesFiltersModal(state, allDominios, ({ refetch }) => {
-                if (refetch) refetchFromServer();
-                else        applyAndRender();
+                if (refetch) recargar();
+                else         applyAndRender();
             })
         );
         wireRefresh('not', 'notificaciones', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openNotificacionesFiltersModal(state, allDominios, onApply) {
@@ -11846,15 +11891,12 @@
         let difusiones = allDifusiones;
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = difusiones.filter(d => {
                 if (Number.isFinite(codigo) && d.id !== codigo) return false;
                 if (state.dominio && String(d.dominio ?? '') !== state.dominio) return false;
                 if (state.estado  && d.estado !== state.estado) return false;
-                if (!coincideBusqueda([d.asunto, d.cuerpo, d.dominio_nombre,
-                                       d.emisor_nombre], terminos)) return false;
                 return true;
             });
 
@@ -11911,10 +11953,10 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('difusion?q=' + encodeURIComponent(q)).then(d => d.difusiones),
+            alLlegar: filas => { difusiones = filas; applyAndRender(); },
         });
 
         btnFilt.addEventListener('click', () =>
@@ -11923,7 +11965,9 @@
         btnNew.addEventListener('click', () => openDifusionFormModal(catalogos.dominios));
         wireRefresh('dif', 'difusion', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openDifusionFiltersModal(state, allDominios, onApply) {
@@ -12705,8 +12749,7 @@
         const btnNew    = document.getElementById('ctl-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allControladores.filter(c => {
                 if (Number.isFinite(codigo) && c.id !== codigo) return false;
@@ -12717,7 +12760,6 @@
                 if (state.rol === 'sin-rol' && (c.roles || []).length) return false;
                 if (state.rol && state.rol !== 'sin-rol' &&
                     !(c.roles || []).some(r => String(r.id) === state.rol)) return false;
-                if (!coincideBusqueda([c.nombre, c.correo, c.celular], terminos)) return false;
                 return true;
             });
 
@@ -12761,17 +12803,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('controladores?q=' + encodeURIComponent(q)).then(d => d.controladores),
+            alLlegar: filas => { allControladores = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openControladoresFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openControladoresFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openControladorModal(null));
         wireRefresh('ctl', 'controladores', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openControladoresFiltersModal(state, onApply) {
@@ -13382,14 +13426,12 @@
         const btnNew    = document.getElementById('rol-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allRoles.filter(r => {
                 if (Number.isFinite(codigo) && r.id !== codigo) return false;
                 if (state.estado === 'activo'   && !r.activo) return false;
                 if (state.estado === 'inactivo' &&  r.activo) return false;
-                if (!coincideBusqueda([r.nombre, r.descripcion], terminos)) return false;
                 return true;
             });
 
@@ -13432,17 +13474,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('roles?q=' + encodeURIComponent(q)).then(d => d.roles),
+            alLlegar: filas => { allRoles = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openRolesFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openRolesFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openRolModal(null));
         wireRefresh('rol', 'roles', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openRolesFiltersModal(state, onApply) {
@@ -13886,14 +13930,12 @@
         const btnNew    = document.getElementById('per-new');
 
         function applyAndRender() {
-            const terminos = terminosBusqueda(state.texto);
-            const codigo   = parseInt(state.codigo, 10);
+            const codigo = parseInt(state.codigo, 10);
 
             let filtered = allPermisos.filter(p => {
                 if (Number.isFinite(codigo) && p.id !== codigo) return false;
                 if (state.uso === 'usado'   && p.roles_count === 0) return false;
                 if (state.uso === 'sin-uso' && p.roles_count > 0)   return false;
-                if (!coincideBusqueda([p.slug, p.nombre, p.descripcion], terminos)) return false;
                 return true;
             });
 
@@ -13938,17 +13980,19 @@
             });
         }
 
-        quick.value = state.texto;
-        quick.addEventListener('input', () => { state.texto = quick.value.trim(); applyAndRender(); });
-        quickClr.addEventListener('click', () => {
-            quick.value = ''; state.texto = ''; applyAndRender(); quick.focus();
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('permisos?q=' + encodeURIComponent(q)).then(d => d.permisos),
+            alLlegar: filas => { allPermisos = filas; applyAndRender(); },
         });
 
-        btnFilt.addEventListener('click', () => openPermisosFiltersModal(state, applyAndRender));
+        btnFilt.addEventListener('click', () => openPermisosFiltersModal(state, recargar));
         btnNew.addEventListener('click',  () => openPermisoModal(null));
         wireRefresh('per', 'permisos', state);
 
-        applyAndRender();
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
     }
 
     function openPermisosFiltersModal(state, onApply) {

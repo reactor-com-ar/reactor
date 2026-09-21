@@ -68,11 +68,26 @@ try {
  */
 function handleList(): void
 {
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    //
+    // Van las columnas con GUION BAJO —`localidad_`, `provincia_`, `pais_`—,
+    // que son los NOMBRES; las que no lo llevan son los ids del catalogo. Es
+    // la misma terna con la que el front armaba `tecnicoUbicacion()`, y buscar
+    // por las otras seria buscar numeros que la pantalla no muestra.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'nombre', 'actividad', 'correo', 'celular', 'domicilio',
+        'localidad_', 'provincia_', 'pais_',
+    ]);
+
+    $stmt = db()->prepare(
         'SELECT ' . TECNICO_COLUMNAS . '
-           FROM tecnicos
+           FROM tecnicos'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
           ORDER BY id DESC'
     );
+    $stmt->execute($busq);
 
     $tecnicos = array_map(static function (array $r): array {
         $r['id']        = (int) $r['id'];

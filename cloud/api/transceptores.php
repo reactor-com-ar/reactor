@@ -34,7 +34,12 @@ try {
  */
 function handleList(): void
 {
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['t.nombre', 't.host', 't.usuario', 't.entrada']);
+
+    $stmt = db()->prepare(
         "SELECT t.id,
                 t.nombre,
                 t.host,
@@ -50,9 +55,11 @@ function handleList(): void
              FROM senales
              WHERE transceptor IS NOT NULL
              GROUP BY transceptor
-         ) s ON s.transceptor = t.id
+         ) s ON s.transceptor = t.id"
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . "
          ORDER BY t.nombre ASC, t.id ASC"
     );
+    $stmt->execute($busq);
 
     $transceptores = array_map(static function (array $r): array {
         $r['id']                = (int) $r['id'];

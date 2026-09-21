@@ -262,6 +262,14 @@ function handleList(): void
         $where[]        = 'd.estado = :est';
         $params[':est'] = $estado;
     }
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    // El emisor es un `controlador` y el alias del JOIN es `c` (difusionSelect).
+    [$condiciones, $busq] = busquedaWhere($q, ['d.asunto', 'd.cuerpo', 'dom.nombre', 'c.nombre']);
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
+
     if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
     $sql .= ' ORDER BY d.id DESC LIMIT ' . $limit;
 

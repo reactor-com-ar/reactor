@@ -89,7 +89,14 @@ function handleList(): void
     // por handleCredencial()— porque no es un secreto: es el nombre con el que
     // la persona entra, y lo consumen los dos modales (Consultar y Edicion) sin
     // pedir nada extra.
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Van las columnas REALES y no
+    // los alias del SELECT: `correo`, no `email` — MySQL no admite un alias en
+    // el `WHERE`, que se evalua antes de la proyeccion.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['correo', 'nombre', 'celular']);
+
+    $stmt = db()->prepare(
         "SELECT id,
                 correo     AS email,
                 nombre,
@@ -98,9 +105,11 @@ function handleList(): void
                 habilitado,
                 ingresado  AS last_login_at,
                 registrado AS created_at
-         FROM usuarios
+         FROM usuarios"
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . "
          ORDER BY habilitado DESC, nombre ASC"
     );
+    $stmt->execute($busq);
 
     $usuarios = array_map(static function (array $r): array {
         $r['activo'] = esHabilitado($r['habilitado'] ?? 0);

@@ -95,6 +95,16 @@ function handleList(): void
         $sql .= ' AND p.usuario = :uid';
         $params[':uid'] = $usuarioId;
     }
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Van las columnas REALES y no
+    // los alias del SELECT: `u.correo`, no `usuario_email`.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['u.nombre', 'u.correo', 'd.nombre']);
+    foreach ($condiciones as $cond) {
+        $sql .= ' AND ' . $cond;
+    }
+    $params = array_merge($params, $busq);
+
     $sql .= ' ORDER BY u.nombre ASC, d.nombre ASC';
 
     $stmt = db()->prepare($sql);

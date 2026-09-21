@@ -68,11 +68,18 @@ function handleList(): void
         $usos[(int) $r['permiso']] = (int) $r['n'];
     }
 
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['slug', 'nombre', 'descripcion']);
+
+    $stmt = db()->prepare(
         'SELECT id, slug, nombre, descripcion
-           FROM permisos
+           FROM permisos'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
           ORDER BY slug ASC, id ASC'
     );
+    $stmt->execute($busq);
 
     $permisos = array_map(static function (array $r) use ($usos): array {
         return [

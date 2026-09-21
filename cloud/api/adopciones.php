@@ -84,6 +84,17 @@ function handleList(): void
     } elseif ($vigente === 'N') {
         $where[] = "(a.vigente IS NULL OR UPPER(a.vigente) NOT IN ('S', '1', 'Y'))";
     }
+
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Sin ventana por id: son 225
+    // filas.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'd.nombre', 'd.uuid', 'dom.nombre',
+        'ua.nombre', 'ua.usuario', 'ul.nombre', 'ul.usuario',
+    ]);
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
     if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
 
     // Sin índice sobre `adoptado`: se ordena por PK (equivalente cronológico)

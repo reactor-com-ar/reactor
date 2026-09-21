@@ -40,6 +40,27 @@ declare(strict_types=1);
  */
 
 /**
+ * Cuántos ids hacia atrás, desde el último, mira una búsqueda sobre una tabla
+ * grande.
+ *
+ * `LIKE '%…%'` no usa índice. Sin búsqueda, un `ORDER BY id DESC LIMIT n` se
+ * sirve del índice de la PK y para en la fila n; con el `LIKE` tiene que
+ * recorrer la tabla hacia atrás hasta juntar n coincidencias, y si el término
+ * no está en ninguna, la recorre entera. Medido en dev: `registros` (2.952.693
+ * filas) pasó de 2.567 ms a 132 ms con esta ventana, y `senales` (863.350) de
+ * 811 ms a 138 ms.
+ *
+ * **Sólo la aplican los listados sobre tablas grandes y sólo cuando hay
+ * búsqueda**: `senales` y `registros`. `notificaciones` (68.717 filas, 78 ms) y
+ * `adopciones` (225) no la necesitan, y agregársela sería recortarles el
+ * alcance a cambio de nada.
+ *
+ * **La contrapartida es real: la búsqueda no ve más allá de la ventana.** Es el
+ * mismo trato que el panel ya hace en Actividad, y con el mismo tamaño.
+ */
+const VENTANA_BUSQUEDA = 200000;
+
+/**
  * Lo tipeado, partido en términos. Devuelve [] si no hay nada que buscar, que
  * es lo que hace que la consulta vacía no filtre.
  *

@@ -35,7 +35,18 @@ function handleList(): void
     //   dominio_id  -> dominio
     // El `estado` en el esquema es smallint; se traduce a las etiquetas que
     // espera el front: 1='activo', 2='suspendido', resto='inactivo'.
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Van las columnas REALES y no
+    // los alias del SELECT —`c.telefono` y no `numero`, `c.serie` y no
+    // `iccid`, `c.comentario` y no `notas`—: MySQL no admite un alias en el
+    // `WHERE`. `apn` no se busca porque no existe en el esquema: el SELECT lo
+    // proyecta como NULL fijo.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'c.telefono', 'c.serie', 'c.compania', 'c.plan', 'c.comentario',
+    ]);
+
+    $stmt = db()->prepare(
         "SELECT c.id,
                 c.dominio                AS dominio_id,
                 c.telefono               AS numero,
@@ -53,9 +64,11 @@ function handleList(): void
                 c.recargado              AS updated_at,
                 COALESCE(dom.nombre,'—') AS dominio_nombre
          FROM chips c
-         LEFT JOIN dominios dom ON dom.id = c.dominio
+         LEFT JOIN dominios dom ON dom.id = c.dominio"
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . "
          ORDER BY (c.estado = 1) DESC, c.compania ASC, c.telefono ASC"
     );
+    $stmt->execute($busq);
 
     $chips = array_map(static function (array $r): array {
         $r['dominio_id'] = (int) $r['dominio_id'];

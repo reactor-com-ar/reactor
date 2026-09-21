@@ -60,7 +60,14 @@ function handleList(): void
     // COUNT(DISTINCT p.usuario) porque un usuario puede tener mas de un perfil
     // en el mismo dominio -- hoy hay 8 pares (usuario, dominio) repetidos, que
     // sin el DISTINCT se contarian dos veces.
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre"). Las columnas son las que la
+    // ficha muestra: nombre, numero e identificador. `descripcion` no existe
+    // en la tabla.
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['d.nombre', 'd.numero', 'd.uuid']);
+
+    $stmt = db()->prepare(
         'SELECT d.id,
                 d.uuid,
                 d.nombre,
@@ -80,9 +87,11 @@ function handleList(): void
                 (SELECT COUNT(*)                  FROM paneles      pa  WHERE pa.dominio  = d.id) AS paneles_count
          FROM dominios d
          LEFT JOIN agentes  ag ON ag.id = d.agente
-         LEFT JOIN clientes cl ON cl.id = d.cliente
+         LEFT JOIN clientes cl ON cl.id = d.cliente'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
          ORDER BY d.nombre ASC'
     );
+    $stmt->execute($busq);
 
     $dominios = array_map(static function (array $r): array {
         $situacion       = trim((string) ($r['situacion'] ?? ''));

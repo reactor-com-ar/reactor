@@ -72,11 +72,18 @@ try {
  */
 function handleList(): void
 {
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['nombre', 'correo', 'celular']);
+
+    $stmt = db()->prepare(
         'SELECT id, nombre, correo, celular, habilitado, registrado, ingresado
-           FROM controladores
+           FROM controladores'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
           ORDER BY habilitado DESC, nombre ASC'
     );
+    $stmt->execute($busq);
 
     // Los roles asignados salen de una segunda consulta y no de un JOIN con
     // GROUP_CONCAT: son dos tablas chicas, y con el JOIN habria que volver a

@@ -42,7 +42,8 @@ Las columnas del listado deben respetar este orden:
 
 ### Dónde se filtra: en el navegador o en el servidor
 
-- **Por defecto, en el navegador.** El módulo se trae la tabla entera en el `render*()` y el modal de Filtros recorta ese array. Es lo que hacen casi todos: con 18 talonarios o 50 contratos traer todo es más barato que ida y vuelta por cada filtro.
+- **EL TEXTO LIBRE SIEMPRE EN EL SERVIDOR.** El buscador rápido y el campo `Buscar` del modal de Filtros se resuelven en SQL, en los **18** listados, sin excepción — ver "Cómo busca el texto libre". Esto no depende del tamaño de la tabla: un filtro de texto en el navegador sólo ve lo que se trajo, así que el día que el endpoint gane un `LIMIT` contesta *"no hay resultados"* sobre filas que existen, que es la única respuesta que un buscador no puede dar.
+- **El resto de los filtros, por defecto en el navegador.** El módulo se trae la tabla entera en el `render*()` y el modal de Filtros recorta ese array. Es lo que hacen casi todos: con 18 talonarios o 50 contratos traer todo es más barato que ida y vuelta por cada filtro.
 - **En el servidor cuando la tabla es grande y crece** (Comprobantes: 2.326 filas y una más por cada facturación). Ahí el modal de Filtros arma una query string, el endpoint filtra en SQL y `Aplicar` **vuelve a pedir la ventana** en vez de recortar un array.
 - **Cuando se filtra en el servidor, la búsqueda rápida de la toolbar sigue siendo client-side** y opera **sólo sobre la ventana traída**. Son dos cosas distintas y hay que decirlo en la pantalla, o el operador concluye que un comprobante no existe cuando lo que pasa es que quedó fuera del límite:
   - el `placeholder` del buscador lo aclara (`Buscar en los resultados…`),
@@ -74,27 +75,43 @@ refrescar sólo la tabla deja los KPIs contando lo viejo arriba de datos nuevos,
 y perder los filtros convierte el refresh en un cambio de pantalla. Ver
 `DESIGN.md` §9.
 
-### Cómo busca el texto libre (método único, obligatorio)
+### Cómo busca el texto libre (método único, obligatorio, y EN SQL)
 
 Todo campo de texto libre —el **buscador rápido** de la toolbar y el campo
 `Buscar` del **Modal de Filtros**, que en casi todos los módulos son el mismo
-`state.texto`— busca con las tres funciones compartidas de `app.js`:
-`terminosBusqueda(consulta)` + `coincideBusqueda(campos, terminos)`, las dos
-apoyadas en `normalizarBusqueda(s)`. **Ningún módulo arma el suyo**, igual que
-con `abmToolbar()`.
+`state.texto`— viaja al endpoint como **`?q=`** y lo resuelve
+`busquedaWhere()` de [lib/busqueda.php](lib/busqueda.php) en el `WHERE` de la
+consulta. **Ningún módulo filtra texto en el navegador y ninguno arma el suyo**,
+igual que con `abmToolbar()`.
+
+Del lado del front lo cablea el helper compartido `wireBuscadorSql()`:
 
 ```js
-function applyAndRender() {
-    // Los términos se pliegan UNA vez por render y no una por fila.
-    const terminos = terminosBusqueda(state.texto);
-
-    const filtered = allFilas.filter(f => {
-        if (!coincideBusqueda([f.nombre, f.numero, f.uuid], terminos)) return false;
-        return true;
-    });
-    …
-}
+const recargar = wireBuscadorSql({
+    quick, quickClr, tableWrap, state,
+    pedir:    q => api('dominios?q=' + encodeURIComponent(q)).then(d => d.dominios),
+    alLlegar: filas => { dominios = filas; applyAndRender(); },
+});
+btnFilt.addEventListener('click', () => openDominiosFiltersModal(state, recargar));
+// El render ya pidió el listado SIN `q`: sólo se re-pide si venía con búsqueda.
+if (state.texto) recargar(); else applyAndRender();
 ```
+
+Reglas del cableado, las tres por un motivo:
+
+- **`Aplicar` del modal de Filtros llama a `recargar`, no a `applyAndRender`.**
+  Ese modal también edita `state.texto`, y el texto ya no recorta nada en el
+  navegador: sin re-pedir, escribir ahí no haría nada.
+- **Debounce de 300 ms y token de carrera.** Cada tecla puede costar una
+  consulta; y aunque haya debounce, dos consultas pueden quedar en vuelo (red
+  lenta, texto pegado) y sin el token la que llega última pinta la tabla aunque
+  sea la respuesta vieja.
+- **La `stats-bar` NO se repinta al buscar, y por eso el `render*()` pide SIEMPRE
+  sin `q`.** Los KPIs son del universo y no de la consulta (`DESIGN.md` §9), y
+  el `resumen` que devuelve un endpoint es del universo **sólo** si se lo pidió
+  sin `q`. De ahí la última línea: el render ya trajo el universo, así que
+  únicamente se vuelve a pedir cuando el estado venía con una búsqueda puesta
+  (Refrescar conserva los filtros vigentes).
 
 Lo que el método garantiza —y que un `.toLowerCase().includes(q)` no da—:
 
@@ -111,35 +128,45 @@ Lo que el método garantiza —y que un `.toLowerCase().includes(q)` no da—:
   el segundo término lo agranda y el buscador empeora justo cuando más se lo
   necesita, que es cuando el primero trajo demasiado. Es la misma regla que el
   combo con buscador (`comboCoincide()`, `DESIGN.md` §34-bis).
-- **La consulta vacía no filtra**: `coincideBusqueda()` devuelve `true` sin
-  términos, así que el llamador **no** lleva el viejo `if (q && …)` de guarda.
+- **La consulta vacía no filtra**: sin términos `busquedaWhere()` no devuelve
+  ninguna condición, así que el endpoint **no** lleva el viejo `if ($q !== '')`.
 
 Reglas al aplicarlo:
 
 - **Los campos son los que anuncia el `placeholder`, ni más ni menos.** Buscar
   sobre una columna que la pantalla no muestra devuelve filas que el operador no
   puede explicar; no listarla en el `placeholder` esconde por qué apareció.
-- **Se comparan campo por campo y no sobre la concatenación.** Pegando `…12` con
-  `34…` aparece un `1234` que no está en ninguna columna.
-- **Los términos se calculan una vez por render**, fuera del `.filter()`, no una
-  vez por fila.
-- **El plegado es uno solo.** `normalizarBusqueda()` y `comboNormalizar()` tienen
-  que plegar igual; el segundo existe aparte porque el combo resalta lo que
-  coincidió y necesita que los índices de la cadena normalizada apunten al mismo
-  lugar en la original. Si cambia la regla, cambian las dos.
-- **Cuando el filtrado es server-side** (§ "Dónde se filtra"), esto sigue siendo
-  el buscador rápido client-side sobre la ventana traída — no cambia nada de lo
-  que ya dice esa sección. Lo que filtra en SQL busca con la contraparte de
-  abajo, que tiene que dar el mismo resultado.
+- **Van las columnas REALES, no los alias del `SELECT`.** `correo` y no `email`,
+  `d.uuid` y no `uid`, `c.telefono` y no `numero`: MySQL evalúa el `WHERE` antes
+  de la proyección, así que un alias ahí es `Unknown column`.
+- **Lo que el front derivaba en PHP se reconstruye en SQL o se declara afuera.**
+  El `numero` de Talonarios y de Comprobantes es un `str_pad` armado en PHP: se
+  rehace con `CONCAT(LPAD(...))` y las **mismas** constantes de largo, para
+  poder buscar lo que la pantalla muestra (`0003-00000123`) y no dos enteros
+  sueltos. El `tipo_texto` de Contratos sale de `combos` y se resuelve con un
+  `LEFT JOIN` por esa clave. El `tipo_completo` de Comprobantes es el único que
+  quedó **fuera** de la búsqueda —pedía tres joins más por una columna que ya
+  tiene su propio filtro—, y eso se dice acá porque es un cambio de
+  comportamiento, no un detalle.
+- **Ojo con la segunda consulta.** Comprobantes corre el mismo `WHERE` en la
+  query del listado y en la de totales: si la búsqueda nombra un alias que sólo
+  existe en una, la otra revienta. Se le agregaron los dos `LEFT JOIN` que le
+  faltaban — son 1:1 por PK, así que no cambian el `COUNT` ni el `SUM`
+  (verificado: 2.331 y 2.331 en las tres consultas probadas).
+- **El plegado en JS sigue existiendo para el combo con buscador.**
+  `normalizarBusqueda()` y `comboNormalizar()` tienen que plegar igual; el
+  segundo existe aparte porque el combo resalta lo que coincidió y necesita que
+  los índices apunten al mismo lugar en la original. Si cambia la regla, cambian
+  las dos.
 
-#### La contraparte en SQL: `lib/busqueda.php`
+#### Cómo lo resuelve `lib/busqueda.php`
 
-Los campos de texto que **filtran en la base** —`Razón social` de Comprobantes,
-el buscador del Visor de sucesos y el del Programador de tareas— usan
-`busquedaWhere($consulta, $columnas)` de
-[lib/busqueda.php](lib/busqueda.php), que el `api/bootstrap.php` carga para
-todos los endpoints. Devuelve `[$condiciones, $params]` para meter en el
-`WHERE`; con la consulta vacía las dos vienen vacías y no se agrega nada.
+`busquedaWhere($consulta, $columnas)` vive en
+[lib/busqueda.php](lib/busqueda.php) y lo carga `api/bootstrap.php` para todos
+los endpoints. Devuelve `[$condiciones, $params]` para meter en el `WHERE`; con
+la consulta vacía las dos vienen vacías y no se agrega nada. Lo usan los 18
+listados más `Razón social` de Comprobantes, el Visor de sucesos y el
+Programador de tareas.
 
 ```php
 [$condiciones, $busq] = busquedaWhere($q, ['nombre', 'script', 'descripcion']);
@@ -164,6 +191,17 @@ misma regla Y/O del front. Tres cosas que no se deducen del código:
 - **Los comodines de `LIKE` se escapan** (`busquedaEscapar()`): quien busca
   `50%` quiere ese texto y no "cualquier cosa que empiece con 50" (medido:
   48 filas contra 0), y un `_` suelto matchea cualquier caracter.
+- **`LIKE '%…%'` NO usa índice, y en las tablas grandes eso muerde.** Sin
+  búsqueda, un `ORDER BY id DESC LIMIT n` se sirve de la PK y para en la fila n;
+  con el `LIKE` recorre hacia atrás hasta juntar n coincidencias, y si el
+  término no está en ninguna, recorre la tabla entera. Por eso **Señales y
+  Registros acotan por `id > MAX(id) - VENTANA_BUSQUEDA` (200.000), y sólo
+  cuando hay búsqueda**: medido en dev, `registros` (2.952.693 filas) pasó de
+  2.567 ms a 132 ms y `senales` (863.350) de 811 ms a 138 ms. `notificaciones`
+  (68.717 filas, 78 ms) y `adopciones` (225) no la llevan — agregársela sería
+  recortarles el alcance a cambio de nada. **La contrapartida es real: en esos
+  dos la búsqueda no ve más allá de la ventana**, que es el mismo trato que el
+  panel ya hace en Actividad y con el mismo tamaño.
 
 El archivo es **copia idéntica de [panel/lib/busqueda.php](../panel/lib/busqueda.php)**,
 como `habilitado.php` y `permisos.php`: las apps no comparten docroot.

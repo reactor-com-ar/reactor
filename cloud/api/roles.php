@@ -65,12 +65,19 @@ function handleList(): void
     // asi que viaja en el listado y no solo en `?impacto=1`. Subconsulta y no
     // LEFT JOIN + GROUP BY: es una sola cuenta y asi el SELECT no cambia de
     // forma si manana vuelve a haber dos dependencias.
-    $stmt = db()->query(
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, ['r.nombre', 'r.descripcion']);
+
+    $stmt = db()->prepare(
         'SELECT r.id, r.nombre, r.habilitado, r.descripcion,
                 (SELECT COUNT(*) FROM controladores_roles cr WHERE cr.rol = r.id) AS controladores_count
-           FROM roles r
+           FROM roles r'
+        . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
           ORDER BY r.habilitado DESC, r.nombre ASC, r.id ASC'
     );
+    $stmt->execute($busq);
 
     $puente = permisosAsignados();
 

@@ -57,6 +57,40 @@ function handleList(): void
         $where[]        = 'r.sentido = :sent';
         $params[':sent'] = $sentido;
     }
+
+    // Busqueda por texto libre: la resuelve la BASE y no el navegador
+    // (`ABM.md`, "Como busca el texto libre").
+    $q = trim((string) ($_GET['q'] ?? ''));
+    [$condiciones, $busq] = busquedaWhere($q, [
+        'd.nombre', 'd.uuid', 'u.nombre', 'u.usuario', 'r.estado',
+    ]);
+    $where  = array_merge($where, $condiciones);
+    $params = array_merge($params, $busq);
+
+    // `Estado` es el otro campo de texto libre del modal de Filtros. Busca con
+    // el mismo metodo, solo que sobre una columna sola.
+    $estado = trim((string) ($_GET['estado'] ?? ''));
+    [$condEstado, $busqEstado] = busquedaWhere($estado, ['r.estado'], 'est');
+    $where  = array_merge($where, $condEstado);
+    $params = array_merge($params, $busqEstado);
+
+    // Los dos son `LIKE` sobre la tabla grande, asi que cualquiera de los dos
+    // necesita la ventana de abajo.
+    $condiciones = array_merge($condiciones, $condEstado);
+
+    // VENTANA POR ID, Y SOLO CUANDO HAY BUSQUEDA. Sin busqueda el
+    // `ORDER BY r.id DESC LIMIT n` se sirve del indice de la PK y para en la
+    // fila n; con un `LIKE` tiene que recorrer la tabla hacia atras hasta
+    // juntar n coincidencias, que en el peor caso son los 2.952.693 registros.
+    // Medido en dev: 2.567 ms sin ventana contra 132 ms con ella -- y la tabla
+    // sigue creciendo, asi que sin ventana el peor caso solo empeora.
+    //
+    // La contrapartida es que la busqueda NO ve mas alla de la ventana, que es
+    // el mismo trato que ya hace el panel en Actividad y con el mismo tamanio.
+    if ($condiciones) {
+        $where[] = 'r.id > (SELECT MAX(id) FROM registros) - ' . VENTANA_BUSQUEDA;
+    }
+
     if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
     $sql .= ' ORDER BY r.id DESC LIMIT ' . $limit;
 

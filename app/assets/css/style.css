@@ -112,6 +112,48 @@ body.has-banner .layout {
     height: calc(100dvh - 44px);
 }
 
+/* -------- Banner de conexion caida --------
+ *
+ * FIJO ABAJO, no en el flujo. El banner de version de arriba SI ocupa lugar y
+ * por eso obliga a `body.has-banner .layout` a descontarle 44px a la altura;
+ * con dos banners en el flujo ese `calc()` habria que hacerlo por combinacion
+ * (ninguno / uno / el otro / los dos). Superpuesto no toca la altura de nadie.
+ *
+ * Tapa la franja de abajo del `.content`, y esta bien que lo haga: aparece
+ * justamente cuando lo que hay debajo ya no es informacion confiable. */
+.conexion-banner {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 400;   /* por encima del toast (300) y del sidebar mobile (25) */
+    background: #b45309;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 16px;
+    font-size: .85rem;
+    text-align: center;
+    box-shadow: 0 -4px 16px rgba(0,0,0,.45);
+}
+.conexion-banner[hidden] { display: none; }
+.conexion-banner-text i { margin-right: 6px; }
+.conexion-banner-btn {
+    background: #fff;
+    color: #b45309;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-weight: 600;
+    font-size: .85rem;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.conexion-banner-btn:hover { background: #f3f4f6; }
+
 /* -------------------- Layout -------------------- */
 
 /* La altura va en `dvh` (dynamic viewport height), NO en `vh`.

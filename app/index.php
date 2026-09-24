@@ -251,11 +251,40 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
     <meta name="apple-mobile-web-app-title" content="Reactor">
     <meta name="mobile-web-app-capable" content="yes">
 
+    <!-- Font Awesome 6 Pro AUTOHOSPEDADO (assets/fontawesome/), igual que en
+         cloud/. Antes se cargaba desde cdnjs y ESA ERA UNA DE LAS CAUSAS DE LA
+         PANTALLA EN BLANCO: un `<link rel="stylesheet">` bloquea el primer
+         paint —hasta que la hoja no llega, el navegador no dibuja NADA— y
+         siendo de otro origen alcanzaba con que cdnjs no contestara (el
+         celular que vuelve de Doze con la radio a medio reconectar) para que
+         la app quedara vacia, sin interfaz ni mensaje y sin nada que tocar,
+         porque en `display: standalone` no hay barra de direcciones ni
+         pull-to-refresh.
+         Local el problema no existe: sale del mismo origen que el HTML que ya
+         llego, y el service worker la cachea, asi que a partir de la segunda
+         visita no depende de la red en absoluto. Por eso vuelve a ser un
+         `<link>` bloqueante normal, sin el truco de `media="print"`: los
+         iconos ya no aparecen un instante despues que el resto.
+
+         VERSIONADA POR `filemtime` Y NO POR version.txt, como en cloud/: FA
+         cambia una vez por año y version.txt sube en CADA deploy. Con `$cb`,
+         cada deploy le cambiaria la URL y obligaria a todos los celulares a
+         rebajarse 500 KB de CSS mas las tipografias, para nada.
+
+         Las hojas `sharp-*.min.css` que si carga cloud/ no van aca: declaran
+         las familias Sharp y esta app no usa ni un icono de esas. Serian
+         cuatro pedidos bloqueantes mas para no dibujar nada. -->
+    <?php $faVer = @filemtime(__DIR__ . '/assets/fontawesome/css/all.min.css') ?: $cb; ?>
     <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+          href="assets/fontawesome/css/all.min.css?v=<?= htmlspecialchars((string) $faVer, ENT_QUOTES) ?>">
 
     <!-- La fuente "LCD" del titulo del display se sirve local
-         (assets/fonts/small-lcd-sign.ttf, @font-face en style.css) -->
+         (assets/fonts/small-lcd-sign.ttf, @font-face en style.css)
+
+         Esta tambien bloquea el render, y tiene que hacerlo: es la hoja de la
+         app entera y pintar el HTML sin ella mostraria la pagina desarmada. Es
+         del mismo origen y el service worker la cachea por version, asi que la
+         recarga no depende de que la red conteste. -->
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= $cb ?>">
 
@@ -267,6 +296,25 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
 <div class="version-banner" id="version-banner" role="status" hidden>
     <span class="version-banner-text">Hay una nueva versi&oacute;n disponible.</span>
     <button type="button" class="version-banner-btn" id="version-banner-btn">Actualizar ahora</button>
+</div>
+
+<?php /* LA UNICA FORMA DE RECARGAR QUE TIENE EL USUARIO.
+         La app corre en `display: standalone`: sin barra de direcciones, sin
+         boton de recargar y con el pull-to-refresh desactivado por Chrome. Sin
+         este banner, cualquier falla deja al usuario sin ningun gesto posible
+         y la unica salida es cerrar la app a mano — que es exactamente lo que
+         se reportaba. Lo muestra `revisarConexion()` (assets/js/app.js) cuando
+         el panel lleva 20 segundos sin un sondeo bueno, o sea cuando lo que se
+         ve en pantalla ya no es el estado real de los equipos.
+         Va FIJO ABAJO y no en el flujo, al reves que el de version: asi no
+         participa del `calc()` de altura de `.layout` y los dos pueden
+         convivir sin recalcular nada. */ ?>
+<div class="conexion-banner" id="conexion-banner" role="alert" hidden>
+    <span class="conexion-banner-text">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        Sin conexi&oacute;n con Reactor. Lo que ves puede estar desactualizado.
+    </span>
+    <button type="button" class="conexion-banner-btn" id="conexion-banner-btn">Recargar</button>
 </div>
 
 <div class="layout">

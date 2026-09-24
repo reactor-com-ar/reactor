@@ -11,6 +11,49 @@
 (function () {
     'use strict';
 
+    // ---------- fetch con corte duro ----------
+    //
+    // `fetch` NO TIENE TIMEOUT. Una request que queda colgada —el caso tipico
+    // del celular que vuelve de Doze con la radio a medio reconectar, que abre
+    // el socket y no recibe nada— no resuelve NI rechaza NUNCA: ni el `.then`
+    // ni el `.catch` ni el `.finally` llegan a correr.
+    //
+    // Eso deja rota la pagina de formas que no se ven:
+    //
+    //   - `refrescarEstado()` deja `estadoEnVuelo = true` para siempre y el
+    //     panel no vuelve a actualizarse nunca, aunque la conexion ya haya
+    //     vuelto. Los displays quedan mostrando el estado de hace horas.
+    //   - el boton del control queda `disabled` de por vida: el `.finally()`
+    //     que lo reactiva nunca corre.
+    //   - los modales de historial se quedan en "Cargando..." para siempre.
+    //
+    // Con el corte, la promesa SIEMPRE termina —resuelta o rechazada— y cada
+    // uno de esos `finally` corre. Un tick perdido se recupera en el siguiente.
+    var CORTE_GET  = 8000;
+    // Los POST llevan mas plazo: del otro lado hay una orden que viaja al
+    // broker MQTT, y cortar antes de tiempo diria "no se pudo" sobre algo que
+    // en realidad se mando. El corte igual hace falta, porque quedarse colgado
+    // deja el boton apagado hasta que se recargue la pagina.
+    var CORTE_POST = 15000;
+
+    function fetchCorte(url, opciones, ms) {
+        var op = {};
+        var k;
+        for (k in (opciones || {})) {
+            if (Object.prototype.hasOwnProperty.call(opciones, k)) op[k] = opciones[k];
+        }
+
+        var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        if (ctrl) op.signal = ctrl.signal;
+
+        var reloj = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || CORTE_GET);
+
+        return fetch(url, op).then(
+            function (r) { clearTimeout(reloj); return r; },
+            function (e) { clearTimeout(reloj); throw e; }
+        );
+    }
+
     // ---------- Sidebar ----------
     // Se cierra en CUALQUIER ancho, pero de dos maneras distintas: en mobile
     // es un cajon flotante (.open + overlay), en desktop esta en el flujo y se
@@ -144,11 +187,11 @@
         if (!caja) return;
         caja.innerHTML = '<p class="lista-aviso">Cargando&hellip;</p>';
 
-        fetch(cfg.url, {
+        fetchCorte(cfg.url, {
             headers: { 'Accept': 'application/json' },
             credentials: 'same-origin',
             cache: 'no-store'
-        })
+        }, CORTE_GET)
             .then(function (r) { return r.json().catch(function () { return null; }); })
             .then(function (j) {
                 if (!j || j.ok !== true) {
@@ -215,11 +258,11 @@
         if (!caja) return;
         caja.innerHTML = '<p class="lista-aviso">Cargando&hellip;</p>';
 
-        fetch(cfg.url, {
+        fetchCorte(cfg.url, {
             headers: { 'Accept': 'application/json' },
             credentials: 'same-origin',
             cache: 'no-store'
-        })
+        }, CORTE_GET)
             .then(function (r) { return r.json().catch(function () { return null; }); })
             .then(function (j) {
                 if (!j || j.ok !== true) {
@@ -308,12 +351,12 @@
             var cuerpo = {};
             cuerpo[cfg.campo] = Number(btn.getAttribute('data-id'));
 
-            fetch(cfg.url, {
+            fetchCorte(cfg.url, {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
                 body: JSON.stringify(cuerpo),
                 credentials: 'same-origin'
-            })
+            }, CORTE_POST)
                 .then(function (r) { return r.json().catch(function () { return null; }); })
                 .then(function (j) {
                     if (!j || j.ok !== true) {
@@ -573,11 +616,11 @@
         cargarContrasena = function () {
             if (cargada) return;             // ya la tenemos de una apertura previa
             limpiarAviso();
-            fetch('api/contrasena', {
+            fetchCorte('api/contrasena', {
                 headers: { 'Accept': 'application/json' },
                 credentials: 'same-origin',
                 cache: 'no-store'
-            })
+            }, CORTE_GET)
                 .then(function (r) { return r.json().catch(function () { return null; }); })
                 .then(function (j) {
                     if (!j || j.ok !== true) {
@@ -603,12 +646,12 @@
             limpiarAviso();
 
             enviar.disabled = true;
-            fetch('api/contrasena', {
+            fetchCorte('api/contrasena', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
                 body: JSON.stringify({ nueva: campoPass.value }),
                 credentials: 'same-origin'
-            })
+            }, CORTE_POST)
                 .then(function (r) { return r.json().catch(function () { return null; }); })
                 .then(function (j) {
                     if (!j || j.ok !== true) {
@@ -694,12 +737,12 @@
             }
 
             invEnviar.disabled = true;
-            fetch('api/invitaciones', {
+            fetchCorte('api/invitaciones', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
                 body: JSON.stringify({ correo: correo }),
                 credentials: 'same-origin'
-            })
+            }, CORTE_POST)
                 .then(function (r) { return r.json().catch(function () { return null; }); })
                 .then(function (j) {
                     if (!j || j.ok !== true) {
@@ -746,12 +789,12 @@
             btn.disabled = true;
             btn.classList.add('enviando');
 
-            fetch('api/boton', {
+            fetchCorte('api/boton', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
                 body: JSON.stringify({ boton: Number(btn.getAttribute('data-boton')) }),
                 credentials: 'same-origin'
-            })
+            }, CORTE_POST)
                 .then(function (r) { return r.json().catch(function () { return null; }); })
                 .then(function (j) {
                     if (!j || j.ok !== true) {
@@ -785,6 +828,9 @@
     var CADENCIA = 2000;
     var estadoTimer = null;
     var estadoEnVuelo = false;
+    // Momento del ultimo sondeo que contesto bien. Es lo que mira el vigia de
+    // abajo para decidir si la app esta viva o quedo hablando sola.
+    var ultimoOk = Date.now();
 
     function pintarControl(art, c) {
         var display = art.querySelector('[data-rol="display"]');
@@ -818,21 +864,25 @@
         if (!document.querySelector('.panel[data-control]')) return;
         estadoEnVuelo = true;
 
-        fetch('api/canales', {
+        fetchCorte('api/canales', {
             headers: { 'Accept': 'application/json' },
             credentials: 'same-origin',
             cache: 'no-store'
-        })
+        }, CORTE_GET)
             .then(function (r) { return r.json().catch(function () { return null; }); })
             .then(function (j) {
                 if (!j || j.ok !== true) return;
+                ultimoOk = Date.now();
                 (j.controles || []).forEach(function (c) {
                     var art = document.querySelector('.panel[data-control="' + c.id + '"]');
                     if (art) pintarControl(art, c);
                 });
             })
             .catch(function () { /* un tick perdido se recupera en el siguiente */ })
-            .finally(function () { estadoEnVuelo = false; });
+            .finally(function () {
+                estadoEnVuelo = false;
+                revisarConexion();
+            });
     }
 
     function arrancarSondeo() {
@@ -846,17 +896,41 @@
         estadoTimer = null;
     }
 
-    document.addEventListener('visibilitychange', function () {
-        if (document.hidden) {
-            pararSondeo();
-        } else {
-            refrescarEstado();   // al volver, muestra el estado de ahora, no el de hace rato
-            arrancarSondeo();
-        }
-    });
-
     if (document.querySelector('.panel[data-control]')) {
         arrancarSondeo();
+    }
+
+    // ---------- Vigia de conexion ----------
+    //
+    // LA APP TIENE QUE PODER RECARGARSE DESDE ADENTRO. Corre en
+    // `display: standalone` (manifest.json), o sea SIN barra de direcciones,
+    // SIN boton de recargar y con el pull-to-refresh de Chrome desactivado: si
+    // algo se rompe, el usuario no tiene ningun gesto disponible y la unica
+    // salida es cerrar la app desde el administrador de tareas. Eso es lo que
+    // venia pasando.
+    //
+    // Este banner es esa salida. Aparece cuando el panel lleva un rato sin
+    // recibir un solo sondeo bueno —o sea, cuando lo que se ve en pantalla ya
+    // no representa el estado real de los equipos— y ofrece recargar. Se
+    // dibuja FIJO ABAJO y no en el flujo, a diferencia del banner de version:
+    // asi no toca la altura de `.layout` y no hay que rehacer el `calc()` de
+    // `body.has-banner` para el caso de los dos banners juntos.
+    var UMBRAL_CAIDA = 20000;   // 10 sondeos perdidos seguidos
+    var caidaBanner  = document.getElementById('conexion-banner');
+    var caidaBtn     = document.getElementById('conexion-banner-btn');
+
+    if (caidaBtn) {
+        caidaBtn.addEventListener('click', function () { window.location.reload(); });
+    }
+
+    function mostrarCaida(visible) {
+        if (!caidaBanner) return;
+        caidaBanner.hidden = !visible;
+    }
+
+    function revisarConexion() {
+        if (!caidaBanner) return;
+        mostrarCaida((Date.now() - ultimoOk) > UMBRAL_CAIDA);
     }
 
     // ---------- Toast ----------
@@ -882,7 +956,7 @@
 
     function checkVersion() {
         if (bannerShown) return;
-        fetch('api/version', { cache: 'no-store' })
+        fetchCorte('api/version', { cache: 'no-store' }, CORTE_GET)
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
                 if (!j || !j.ok || !j.version) return;
@@ -895,9 +969,96 @@
             .catch(function () { /* silenciar errores transitorios */ });
     }
 
-    if (banner) {
-        setInterval(checkVersion, 60000);
+    // Se para con la app en segundo plano, igual que el sondeo del panel. Era
+    // el unico temporizador que seguia corriendo con la app minimizada: un
+    // pedido por minuto durante horas, para enterarse de un deploy que el
+    // usuario no esta mirando. Al volver se consulta una vez y listo.
+    var versionTimer = null;
+
+    function arrancarVersion() {
+        if (versionTimer || !banner) return;
+        versionTimer = setInterval(checkVersion, 60000);
     }
+
+    function pararVersion() {
+        if (!versionTimer) return;
+        clearInterval(versionTimer);
+        versionTimer = null;
+    }
+
+    arrancarVersion();
+
+    // ---------- Ciclo de vida: volver a la app despues de un rato ----------
+    //
+    // EL PROBLEMA QUE RESUELVE ESTE BLOQUE. La PWA se deja abierta todo el dia
+    // y se usa a ratos. Mientras esta en segundo plano, Android es libre de
+    // matarle el proceso de render para recuperar memoria —y lo hace, tanto
+    // mas cuanto mas tiempo pasa y mas memoria ocupa la pestaña—. Al volver,
+    // el navegador recarga la pagina, y esa recarga cae justo en el peor
+    // momento posible: el equipo recien despierta y la radio todavia se esta
+    // reconectando. Si esa recarga se cuelga, en `standalone` no hay forma de
+    // reintentar y queda el viewport vacio hasta cerrar la app.
+    //
+    // Contra eso hay tres capas, y esta es la tercera:
+    //   1. el service worker corta toda navegacion colgada y sirve la pantalla
+    //      offline en vez de dejar al navegador esperando (serviceworker.js);
+    //   2. los estaticos que bloquean el render salen de la cache del worker,
+    //      asi que la recarga no depende de que la red conteste;
+    //   3. aca: al volver, la pagina se refresca sola ANTES de que el sistema
+    //      tenga que matarla, para que el usuario encuentre datos de ahora y
+    //      no un tablero de hace ocho horas.
+    //
+    // NO SE RECARGA A CIEGAS. Recargar con la red caida cambiaria una interfaz
+    // vieja pero usable por la pantalla offline. Por eso primero se comprueba
+    // que el servidor conteste (`api/version` es publico, no toca la base y ya
+    // se pide para el banner) y recien ahi se recarga. Si no contesta, se deja
+    // la pagina como esta y el vigia de conexion muestra el banner con el
+    // boton de recargar.
+    var RECARGA_TRAS = 15 * 60 * 1000;
+    var ocultoDesde  = document.hidden ? Date.now() : 0;
+
+    function recargarSiContesta() {
+        fetchCorte('api/version', { cache: 'no-store' }, 5000)
+            .then(function (r) {
+                if (r && r.ok) window.location.reload();
+            })
+            .catch(function () {
+                // Sin servidor no se recarga: ver arriba. El vigia se encarga.
+                revisarConexion();
+            });
+    }
+
+    function alVolver() {
+        var estuvo = ocultoDesde ? (Date.now() - ocultoDesde) : 0;
+        ocultoDesde = 0;
+
+        // Primero lo barato: mostrar el estado de ahora y no el de hace rato.
+        refrescarEstado();
+        arrancarSondeo();
+        arrancarVersion();
+        checkVersion();
+
+        if (estuvo >= RECARGA_TRAS) recargarSiContesta();
+    }
+
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            ocultoDesde = Date.now();
+            pararSondeo();
+            pararVersion();
+        } else {
+            alVolver();
+        }
+    });
+
+    // `pageshow` con `persisted` es la vuelta desde el bfcache: la pagina se
+    // reanuda tal cual estaba, con los temporizadores congelados y los datos
+    // viejos, y `visibilitychange` no siempre alcanza para distinguirlo. Es el
+    // mismo tratamiento; `alVolver()` es idempotente (los dos arranques estan
+    // guardados y `ocultoDesde` se limpia en la primera pasada).
+    window.addEventListener('pageshow', function (e) {
+        if (e.persisted) alVolver();
+    });
 
     // ---------- Service worker ----------
     // Se registra SIEMPRE, no solo para instalar la app: los celulares que hoy

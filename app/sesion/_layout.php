@@ -63,8 +63,15 @@ function sesionPantalla(string $encabezado, string $formulario, string $error = 
     <meta name="apple-mobile-web-app-title" content="Reactor">
     <meta name="mobile-web-app-capable" content="yes">
 
+    <!-- Font Awesome 6 Pro autohospedado, por el mismo motivo que en index.php:
+         desde cdnjs, una hoja de otro origen en el `<head>` frena el primer
+         paint y si el CDN no contesta la pantalla queda en blanco. Acá muerde
+         igual o más — es la primera pantalla que ve quien abre la app sin
+         sesión. Versionada por `filemtime` y no por version.txt (ver el
+         comentario largo en index.php). -->
+    <?php $faVer = @filemtime(dirname(__DIR__) . '/assets/fontawesome/css/all.min.css') ?: $cb; ?>
     <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+          href="/assets/fontawesome/css/all.min.css?v=<?= htmlspecialchars((string) $faVer, ENT_QUOTES) ?>">
     <link rel="stylesheet" href="/assets/css/style.css?v=<?= $cb ?>">
 
     <!-- El legacy incluye la etiqueta desde `sistema/cabeza.php`, que es el head

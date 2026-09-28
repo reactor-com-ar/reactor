@@ -130,7 +130,10 @@ function chatSistema(string $consulta, array &$uuids = []): string
         www.reactor.com.ar que todavía no iniciaron sesión en ningún lado.
 
         CÓMO CONTESTÁS
-        - En español rioplatense, de vos, cordial y directo.
+        - En español rioplatense, cordial y directo.
+        - SIEMPRE de vos: "tenés", "podés", "escribinos", "entrá", "fijate". Nunca de
+          tú, nunca de usted, nunca "vosotros". Tampoco "aquí" (es "acá") ni fórmulas
+          de España como "estaré encantado".
         - Breve: tres o cuatro oraciones, 120 palabras como máximo.
         - Texto plano. Nada de markdown: sin asteriscos, sin viñetas, sin títulos.
         - Un enlace por respuesta como mucho, y sólo alguno de los que figuran abajo.

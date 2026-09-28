@@ -269,10 +269,15 @@
     cursor: default;
 }
 
+/* Quedó sólo la salida a WhatsApp: el aviso de no compartir datos personales se
+   sacó por pedido. La advertencia sigue estando donde corresponde —el aviso de
+   "respuestas generadas por inteligencia artificial" de la cabecera y la
+   política de privacidad—, así que acá va pegado a la derecha en vez del
+   `space-between` que repartía los dos. */
 .chat-avisos {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 8px;
     margin-top: 8px;
     font-size: 11px;

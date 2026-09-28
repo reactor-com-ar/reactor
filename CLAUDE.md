@@ -2,6 +2,71 @@
 
 El esquema de base de datos de referencia para todo el repositorio es [db/schema.sql](db/schema.sql). Consultarlo antes de proponer queries, endpoints, modelos o cambios que toquen datos: nombres de tablas, columnas, tipos, charsets y relaciones deben coincidir con lo definido ahí. Si una funcionalidad requiere una tabla o columna que no existe en `db/schema.sql`, proponer primero la modificación al esquema antes de escribir código que la asuma.
 
+## Los sistemas legacy: andamio de transición, NO parte del producto
+
+Este repositorio convive con un sistema anterior —`reactor-app`, `reactor-api`,
+`reactor-panel`, `reactor-www`, **fuera de este repo**— que **comparte la misma
+base de datos**. Esa convivencia explica media docena de decisiones que de otro
+modo se leen como caprichos, y por eso está documentada acá.
+
+**[PRODUCT.md](PRODUCT.md) no lo nombra, y no es un olvido: es la regla.** Ese
+archivo describe **el producto**, o sea lo que el sistema hace para quien lo usa.
+El legacy es un **andamio temporal de migración**: no se le vende a nadie, no se
+mantiene, no se le agregan funcionalidades y el día que termine la transición
+desaparece sin que el producto cambie. Nombrarlo ahí convertiría una deuda de
+migración en una característica. Si al escribir en PRODUCT.md aparece la
+necesidad de decir "a diferencia del legacy…" o "el legacy hacía…", lo que
+corresponde es **describir el comportamiento actual a secas** y traer la
+comparación acá.
+
+### Qué sigue vivo del otro lado
+
+| Pieza legacy | Qué hace todavía | Cuándo se va |
+|---|---|---|
+| **El motor MQTT** (`reactor-api/motor/inicio.py`) | Es **el que corre en producción**: escucha el broker y escribe `canales.estado`, `dispositivos.enlace` / `.latido` / `.conexion` cuando el equipo reporta (`REP=CEN` / `REP=CAP` / `REP=SNS`) | cuando [motor/main.py](motor/main.py) deje de ser un esqueleto |
+| **El back office viejo** | Lee y escribe `perfiles.tipo`, `tecnicos.aprobacion` / `.visibilidad` y la tabla `usuarios` entera | sin fecha |
+| **La cookie `sesionToken`** | La tienen guardada todos los celulares, dura un año y `app/` la adopta | cuando caduque el parque instalado |
+| **El service worker `/serviceworker.js`** | Los celulares ya lo tienen registrado con scope `/` | idem |
+| **La cola `mensajes`** | El legacy la consume para el código de 6 dígitos (`autenticacion = 'T'`); en este monorepo **no hay worker que la lea** | cuando exista el worker |
+| **`control.reactor.com.ar`** | nginx lo redirige con 301 a `panel.` | al terminar la transición |
+
+### Las consecuencias que hay que respetar al escribir código
+
+- **EL ESQUEMA NO SE REDISEÑA.** Nombres, tipos y centinelas vienen del sistema
+  histórico y los lee la otra punta. Todo lo que este CLAUDE.md documenta más
+  abajo —`habilitado`, `perfiles.tipo`, los centinelas `0` y `'1500-01-01'`, las
+  columnas plurales de `usuarios`— sale de ahí.
+- **`perfiles.tipo` se escribe aunque el panel ya no la use para gatear**: el
+  legacy **sí** reparte permisos con ella. Poner `A` desde una invitación le abre
+  al invitado el back office viejo entero sin que nadie lo haya decidido — es el
+  argumento entero de la sección "Las dos invitaciones".
+- **El cifrado de `usuarios.contrasena` no se cambia.** Es el histórico de
+  Reactor (XOR sumativa + base64, clave `0123456789`), **reversible**, y lo
+  valida también el login del otro lado. Migrar a bcrypt exige reset masivo o
+  doble write. De ahí sale el tope de 36 caracteres (varchar(50) con base64).
+- **El `vto` del token legacy NO se valida** ([app/lib/auth.php](app/lib/auth.php)):
+  el legacy lo emitía a 15 minutos pero nunca lo chequeaba, así que exigirlo
+  invalidaría todas las sesiones vivas de los celulares.
+- **El mensaje que sale al aire es byte por byte el mismo** (`CMD=CEN|CNL=<n>`,
+  topic `$<identidad>`, QoS 0, guardado en `senales.topic` **sin** el `$`): los
+  equipos que hay en la calle no distinguen quién se lo mandó, y las filas que
+  escriben las apps nuevas tienen que leerse igual que las viejas.
+- **Una migración que renombra algo rompe la pantalla vieja que apunta ahí.**
+  Pasó con `instaladores` → `tecnicos`: hay que renombrar del otro lado o ese
+  módulo queda apuntando a una tabla que ya no existe.
+- **Las URLs publicadas no se cambian, se redirigen** (`/instaladores`,
+  `/ayuda/preguntas`, `control.`).
+- **Dos generaciones de firmware conviven**: [firmware/](firmware/) habla
+  `reactor/<uid>/config` con `uid` = MAC, y la flota instalada habla
+  `$<identidad>` + `CMD=`/`REP=`. No unificar uno sin plan para el otro.
+
+### Cómo se nombra
+
+En el código y en los CLAUDE.md, **"el legacy" a secas** con la ruta del archivo
+concreto entre paréntesis cuando importa
+(`reactor-app/panel/index.php`, `reactor-api/framework/subframework.php`). En
+PRODUCT.md, **no se nombra**.
+
 ## La bandera `habilitado`: 0 y 1, nada más
 
 Toda columna llamada `habilitado` —en cualquier tabla y para cualquier app del

@@ -180,7 +180,6 @@ $wwwVersion = wwwVersion();
                     </div>
                 </form>
                 <div class="chat-avisos">
-                    <span>No compartas datos personales.</span>
                     <a href="/whatsapp" target="_blank" rel="noopener">
                         <i class="fab fa-whatsapp" aria-hidden="true"></i> Hablar con una persona
                     </a>

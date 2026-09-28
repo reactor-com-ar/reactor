@@ -21,7 +21,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/sistema/cabeza.php';
 <!-- PAGE TITLE
         ================================================== -->
 <section class="top-position1 pt-0">
-    <div class="page-title-section bg-img cover-background theme-overlay-blue-dark" data-overlay-dark="75" data-background="/img/bg/bg-12.jpg">
+    <div class="page-title-section bg-img cover-background theme-overlay-blue-dark" data-overlay-dark="75" data-background="/img/bg/bg-portada.jpg">
         <div class="container">
             <div class="row">
                 <div class="col-lg-12">

@@ -169,7 +169,7 @@ raíz del repositorio:
 | `scripts/migrate.php`           | Aplica el esquema de la BD. Idempotente. Lo corre el deploy al final.  |
 
 **Flujo de deploy de cloud:**
-1. `scripts/deploy.sh` escribe `1.0.<timestamp>` en `cloud/version.txt`.
+1. `scripts/deploy.sh` escribe `1.0.<timestamp>` en `cloud/version.txt` — **sólo si `cloud/` cambió** respecto a lo publicado; si el deploy tocó otro docroot, el archivo se deja como estaba (ver el paso 3b del script). El número se estampa después del rsync, no antes.
 2. Tar de `cloud/` (excluyendo `.git`, `.vscode`, `node_modules`, `*.log`, `*.pem`, `*.key`) → SSH a `seattle.reactor.com.ar` → extrae en `/opt/app/reactor/cloud/`.
 3. `docker compose up -d --force-recreate` en el servidor. `--force-recreate` es obligatorio: Docker bind-montea `.env.production` por inodo, y al reemplazarlo hay que recrear el contenedor para que PHP lea el nuevo.
 4. `docker compose exec -T php-apache php /opt/app/reactor/scripts/migrate.php` aplica migraciones.

@@ -267,9 +267,10 @@ $cb = htmlspecialchars($cacheBust, ENT_QUOTES);
          iconos ya no aparecen un instante despues que el resto.
 
          VERSIONADA POR `filemtime` Y NO POR version.txt, como en cloud/: FA
-         cambia una vez por año y version.txt sube en CADA deploy. Con `$cb`,
-         cada deploy le cambiaria la URL y obligaria a todos los celulares a
-         rebajarse 500 KB de CSS mas las tipografias, para nada.
+         cambia una vez por año y version.txt sube en cada deploy que toque
+         app/. Con `$cb`, cualquier cambio del docroot le cambiaria la URL y
+         obligaria a todos los celulares a rebajarse 500 KB de CSS mas las
+         tipografias, para nada.
 
          Las hojas `sharp-*.min.css` que si carga cloud/ no van aca: declaran
          las familias Sharp y esta app no usa ni un icono de esas. Serian

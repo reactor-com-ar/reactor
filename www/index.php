@@ -40,7 +40,7 @@ $infoUuid = 'e5f9df8bicjsa18q';
 <div class="top-position1 z-index-1">
     <div class="common-banner">
         <div class="owl-carousel owl-theme w-100">
-            <div class="text-start item bg-img cover-background theme-overlay-blue-dark" data-overlay-dark="75" data-background="/img/bg/bg-12.jpg">
+            <div class="text-start item bg-img cover-background theme-overlay-blue-dark" data-overlay-dark="75" data-background="/img/bg/bg-inicio.jpg">
                 <div class="container h-100">
                     <div class="d-table h-100 w-100">
                         <div class="d-table-cell align-middle">

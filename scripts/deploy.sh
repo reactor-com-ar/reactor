@@ -59,21 +59,29 @@ esac
 echo "================================================"
 echo ""
 
-# ---- 1. version.txt en cloud/, panel/, app/ y www/ ----
+# ---- 1. version.txt: NO se estampa aca, se estampa en el paso 3b ----
 # El archivo es el cache-bust de los assets: cada docroot lo estampa como `?v=`
 # en el <link> del CSS y el <script> del JS. www/ tambien -- wwwVersion() en
 # www/lib/pagina.php, estampado por sistema/cabeza.php, sistema/pie.php y
-# lib/mensaje.php --, asi que si no se sube aca, un cambio de CSS del sitio
-# publico queda invisible detras de la copia que el navegador ya tiene.
+# lib/mensaje.php --, asi que si no se sube, un cambio de CSS del sitio publico
+# queda invisible detras de la copia que el navegador ya tiene.
 #
 # En www/ ademas arrastra el tema del legacy: esos archivos se servian con
 # `?rnd=478` FIJO, o sea que cualquier navegador que haya pasado por el sitio
 # viejo los tiene cacheados con esa URL exacta.
-echo "$VERSION" > "$BASE_LOCAL/cloud/version.txt"
-echo "$VERSION" > "$BASE_LOCAL/panel/version.txt"
-echo "$VERSION" > "$BASE_LOCAL/app/version.txt"
-echo "$VERSION" > "$BASE_LOCAL/www/version.txt"
-echo "  version.txt actualizado en cloud/, panel/, app/ y www/"
+#
+# PERO ES TAMBIEN LO QUE LEVANTA LA BARRA DE "ACTUALIZAR" DE LA PWA. El front de
+# app/ pollea `api/version.php` cada 60s y lo compara contra el valor con el que
+# se cargo la pagina (`<body data-version>`, app/index.php); si difieren, muestra
+# la barra. Estampar los cuatro archivos ACA -- antes de saber que cambio -- le
+# mostraba esa barra a todos los usuarios de la app por un deploy que solo tocaba
+# el sitio institucional, que es ruido puro: no hay nada nuevo que recargar.
+#
+# Por eso el numero se estampa DESPUES del rsync y SOLO en los docroots que
+# efectivamente cambiaron (paso 3b). El orden importa en los dos sentidos:
+# calcularlo antes no se puede (todavia no se sabe que cambio) y subirlo antes
+# tampoco conviene (el `?v=` nuevo apuntaria a assets que aun no estan arriba).
+echo "  version.txt: se decide despues del rsync, segun que docroot haya cambiado."
 echo ""
 
 # ---- 2. Verificar artefactos requeridos ----
@@ -142,12 +150,28 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no \
             if [ -d \"$STAGING/\$dir\" ]; then
                 # -i itemiza; filtramos a transferencias/borrados reales
                 # (las lineas que empiezan con '.' son solo atributos).
-                changed=\$(rsync -ai --delete \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\" \
+                #
+                # version.txt se EXCLUYE del sync -- y el --delete respeta los
+                # excluidos, asi que el del server sobrevive --: lo escribe el
+                # paso 3b recien cuando se sabe que cambio. Si viajara aca
+                # contaminaria su propia deteccion: el archivo que anuncia el
+                # cambio seria el unico cambio, y todo docroot figuraria
+                # modificado siempre. El '/' inicial lo ancla a la raiz del
+                # docroot (no matchea un assets/version.txt).
+                changed=\$(rsync -ai --delete --exclude='/version.txt' \
+                              \"$STAGING/\$dir/\" \"$BASE_REMOTE/\$dir/\" \
                           | grep -E '^(>|<|\*deleting)' || true)
-                # docker/ define la imagen (Dockerfile, ports.conf, vhosts.conf):
-                # si cambio, el contenedor corriendo quedo desactualizado.
-                if [ \"\$dir\" = docker ] && [ -n \"\$changed\" ]; then
-                    echo 'REACTOR_DOCKER_CHANGED'
+                # Quien cambio. docker/ ademas define la imagen (Dockerfile,
+                # ports.conf, vhosts.conf): si cambio, el contenedor corriendo
+                # quedo desactualizado.
+                if [ -n \"\$changed\" ]; then
+                    echo \"REACTOR_CAMBIO:\$dir\"
+                fi
+                # Y que version quedo publicada: el paso 3b la copia al working
+                # tree de los docroots que NO se bumpean, para que el repo diga
+                # lo mismo que el servidor.
+                if [ -f \"$BASE_REMOTE/\$dir/version.txt\" ]; then
+                    echo \"REACTOR_VERSION:\$dir:\$(tr -d '\r\n' < \"$BASE_REMOTE/\$dir/version.txt\")\"
                 fi
             fi
         done
@@ -198,6 +222,65 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no \
 echo "  OK"
 echo ""
 
+# ---- 3b. version.txt, solo en los docroots que cambiaron ----
+#
+# LA REGLA: un docroot se bumpea si y solo si su propio contenido cambio. De ahi
+# salen las dos propiedades que se necesitan a la vez:
+#
+#   - el cache-bust sigue siendo correcto por construccion: si un asset de app/
+#     cambio, app/ cambio, y el `?v=` sube. Al reves tambien -- si no cambio
+#     nada, no hay ningun archivo nuevo que rebajar, asi que no bumpear no puede
+#     dejar al navegador con una copia vieja: la copia vieja ES la actual.
+#   - la barra de "Actualizar" de la PWA aparece solo cuando hay algo nuevo en
+#     app/. Un deploy de www/ ya no la levanta.
+#
+# La deteccion es la del rsync del paso 3, o sea la diferencia real contra lo que
+# hay publicado, y no un `git diff` (el deploy sube el working tree, no un
+# commit). Si rsync duda, transfiere: el error posible es bumpear de mas -- una
+# barra sobrante --, no de menos -- un asset viejo pegado.
+DOCROOTS="cloud panel app www"
+
+# Lo que cambia fuera de los docroots pero los afecta a los cuatro: docker/ es la
+# imagen que los sirve, y env.php / .env.production son las constantes que lee el
+# PHP de todos (APP_KEY_*, DB_*, MQTT_*). Ahi se bumpea todo.
+TODOS=0
+if echo "$SYNC_OUT" | grep -q '^REACTOR_CAMBIO:docker$'; then TODOS=1; fi
+if echo "$SYNC_OUT" | grep -q '^REACTOR_ENV_'; then TODOS=1; fi
+
+BUMPEADOS=""
+for d in $DOCROOTS; do
+    if [ "$TODOS" = 1 ] || echo "$SYNC_OUT" | grep -q "^REACTOR_CAMBIO:$d\$"; then
+        echo "$VERSION" > "$BASE_LOCAL/$d/version.txt"
+        BUMPEADOS="$BUMPEADOS $d"
+    else
+        # Sin cambios: el working tree se alinea con lo que quedo publicado, para
+        # que el repo no arrastre un numero que el servidor no tiene.
+        remoto="$(echo "$SYNC_OUT" | sed -n "s/^REACTOR_VERSION:$d://p" | tail -n 1)"
+        if [ -n "$remoto" ]; then
+            echo "$remoto" > "$BASE_LOCAL/$d/version.txt"
+        fi
+    fi
+done
+
+if [ -n "$BUMPEADOS" ]; then
+    ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" "
+        set -e
+        for d in $BUMPEADOS; do
+            echo '$VERSION' > '$BASE_REMOTE/\$d/version.txt'
+        done
+    "
+    echo "  version.txt -> $VERSION  en:$BUMPEADOS"
+    for d in $DOCROOTS; do
+        case " $BUMPEADOS " in
+            *" $d "*) ;;
+            *) echo "  version.txt -> sin cambios en $d/, se deja como estaba" ;;
+        esac
+    done
+else
+    echo "  version.txt: ningun docroot cambio, no se bumpea ninguno."
+fi
+echo ""
+
 # ---- 4. Rebuild / recreate del contenedor (solo si se pidio) ----
 # Por defecto NO se toca el contenedor. La gran mayoria de los deploys son
 # cambios de codigo en cloud/ y panel/, y esas dos carpetas estan
@@ -234,7 +317,7 @@ case "$MODE" in
 
         # Avisos: cambios que el sync solo NO alcanza a activar.
         AVISOS=""
-        if echo "$SYNC_OUT" | grep -q '^REACTOR_DOCKER_CHANGED$'; then
+        if echo "$SYNC_OUT" | grep -q '^REACTOR_CAMBIO:docker$'; then
             AVISOS="$AVISOS
     - Cambio docker/ (imagen): correr 'bash deploy.sh --rebuild' para activarlo."
         fi

@@ -65,9 +65,12 @@ Alias de producción que resuelven al mismo vhost: `pwa.`, `newapp.` y `webapp.`
 apuntan a `app`; `reactor.com.ar` (apex) apunta a `www`. `control.` no se proxea:
 nginx lo redirige con 301 a `panel.`.
 
-Cada docroot tiene su `version.txt`, que el deploy estampa con `1.0.<timestamp>`
-y que se usa como cache-bust (`?v=…`) de todo el CSS y el JS. Tocar un asset sin
-subir `version.txt` deja al navegador sirviendo la copia vieja.
+Cada docroot tiene su `version.txt`, que se usa como cache-bust (`?v=…`) de todo
+el CSS y el JS. Tocar un asset sin subir `version.txt` deja al navegador
+sirviendo la copia vieja. Lo estampa el deploy con `1.0.<timestamp>`, y **sólo
+en los docroots que cambiaron**: el número es además lo que levanta la barra de
+"Actualizar" de la app, así que subirlo en los cuatro por un deploy de `www/`
+sería pedirle a la PWA que recargue algo que no cambió.
 
 ---
 
@@ -689,8 +692,23 @@ Linux, `ec2-user`) por rsync sobre SSH. Tres modos:
 | `--restart` | sube + `up -d --force-recreate` |
 | `--rebuild` | sube + reconstruye la imagen + recrea |
 
-Empieza estampando `1.0.<timestamp>` en los cuatro `version.txt`, y al final avisa
-si detectó un cambio que sí requiere `--restart` o `--rebuild`.
+Al final avisa si detectó un cambio que sí requiere `--restart` o `--rebuild`.
+
+**El `version.txt` se estampa después del rsync y sólo donde hubo cambios.** La
+diferencia la da el propio rsync (`-ai`, filtrado a transferencias y borrados
+reales), o sea la comparación contra lo que está publicado — no un `git diff`,
+porque el deploy sube el working tree y no un commit. Para que el archivo no
+contamine su propia detección, el rsync lo excluye (`--exclude='/version.txt'`,
+que el `--delete` respeta) y un segundo `ssh` lo escribe al final, ya sabiendo
+quién cambió. Tres consecuencias:
+
+- **El cache-bust sigue siendo correcto por construcción**: si un asset de `app/`
+  cambió, `app/` cambió y el `?v=` sube. Y si no cambió nada, no hay ningún
+  archivo nuevo que rebajar — la copia que el navegador tiene *es* la actual.
+- **`docker/`, `env.php` y `.env.production` bumpean los cuatro**: son la imagen
+  que los sirve y las constantes que lee el PHP de todos.
+- Si rsync duda, transfiere. El error posible es bumpear de más (una barra
+  sobrante), nunca de menos (un asset viejo pegado).
 
 **Cosas que el deploy no hace** y hay que saber:
 
@@ -704,7 +722,9 @@ si detectó un cambio que sí requiere `--restart` o `--rebuild`.
 
 **El banner de nueva versión** es lo que cierra el círculo: el front pollea
 `api/version.php` cada 60 s y lo compara con `document.body.dataset.version`; si
-difiere, muestra la barra con "Actualizar ahora".
+difiere, muestra la barra con "Actualizar ahora". Cada docroot lee **su propio**
+`version.txt`, así que con el bump selectivo la barra de `app/` aparece cuando
+cambió `app/` y no cuando cambió cualquier otra cosa del repo.
 
 ### Certificados y proxy
 

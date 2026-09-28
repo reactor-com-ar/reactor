@@ -29,6 +29,7 @@ declare(strict_types=1);
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/analytics.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/chat.php';
 
 $wwwVersion = wwwVersion();
 ?>
@@ -91,6 +92,13 @@ $wwwVersion = wwwVersion();
 
     <!-- custom css -->
     <link rel="stylesheet" href="/css/custom.css?v=<?= e($wwwVersion) ?>">
+
+    <?php if (chatActivo()): ?>
+        <!-- burbuja de chat con IA. Va en la cabeza y no junto al widget en el
+             pie: una hoja al final del body la aplica el navegador después de
+             pintar, así que el botón flotante aparecería un instante sin estilo. -->
+        <link rel="stylesheet" href="/css/chat.css?v=<?= e($wwwVersion) ?>">
+    <?php endif; ?>
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.0.0-beta2/css/all.min.css">
 

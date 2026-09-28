@@ -149,15 +149,21 @@ fijas: no hay nada en la base que diga cuál es cuál.
 - **El blog esconde las entradas con fecha futura y la ayuda no.** Una nota
   fechada adelante está programada; un tutorial con fecha rara sigue siendo útil.
 
-## Las tres salidas al exterior
+## Las cuatro salidas al exterior
 
-Ninguna vive en este repo y las tres fallan sin voltear la página:
+Ninguna vive en este repo y las cuatro fallan sin voltear la página:
 
 | salida | qué hace | dónde |
 |---|---|---|
 | CRM de Databox | contacto, registro de técnicos y suscripción al boletín | `lib/prospectos.php` |
 | media server | las imágenes de las entradas | `ENTRADAS_MEDIA` |
 | Google (GA4 + Ads) | medición | `lib/analytics.php` |
+| OpenAI | el chat con IA de la burbuja | `lib/chat.php` |
+
+- **OpenAI es la única que se cobra por request, y por eso es distinta.** Las
+  otras tres cuestan lo mismo se usen o no; ahí cada POST de un anónimo es plata.
+  Todo lo que la rodea —los cupos, el `Origin`, el tope de caracteres— sale de
+  eso y está en la sección del chat.
 
 - **El CRM es `POST /v4/datarocket/prospectos` con `DATABOX_APIKEY`** — la misma
   constante del .env que usa el correo. El legacy la leía de la tabla
@@ -176,6 +182,83 @@ Ninguna vive en este repo y las tres fallan sin voltear la página:
   `WWW_GOOGLE_ADS_ID` (`AW-17108947322`). `GA_MEASUREMENT_ID` a secas es
   `G-CJM86BQMB4`, la de la app end-user: mezclarlas arruina las dos series. Las
   tres están vacías en desarrollo.
+
+## La burbuja de chat con IA (28/09/2026)
+
+El botón flotante de la esquina **ya no es un enlace a WhatsApp**: abre un chat
+atendido por un modelo de OpenAI. Son cinco archivos —
+[lib/chat.php](lib/chat.php) (prompt, recuperación y llamada),
+[lib/conversaciones.php](lib/conversaciones.php) (las dos tablas),
+[chat/mensaje.php](chat/mensaje.php) (el endpoint), `js/chat.js` y `css/chat.css`—
+más el widget en [sistema/pie.php](sistema/pie.php).
+
+- **SIN `OPENAI_APIKEY` NO SE DIBUJA NADA.** `chatActivo()` gatea el `<link>` de
+  la cabeza, el widget del pie y el endpoint. Es cómo se apaga el chat sin
+  deployar, y es por qué en desarrollo la esquina está vacía: la constante va
+  **vacía a propósito** en `.env.development`, igual que las propiedades de
+  Google, porque cada mensaje de prueba se cobra en la cuenta real.
+- **CADA MENSAJE ES PLATA, Y ESO ORDENA TODO EL DISEÑO.** Este docroot no tiene
+  login: el endpoint lo puede llamar cualquiera de internet, y el escenario caro
+  no es el visitante curioso sino alguien usándolo de proxy gratis de GPT. Los
+  cuatro frenos, en el orden en que corren: tope de caracteres del mensaje, cupo
+  de la conversación, cupo por IP por hora y **cupo diario global**, que es el
+  único que sigue valiendo cuando el abusador rota IP. Los cuatro están en las
+  constantes de `lib/chat.php`. El quinto no está en el repo: el tope de gasto
+  mensual de la cuenta de OpenAI, que es el que vale si este código tiene un bug.
+- **El cupo de la conversación se cuenta con un `UPDATE` condicional**
+  (`SET mensajes = mensajes + 1 ... WHERE uuid = :uuid AND mensajes < :tope`),
+  que valida y cuenta en la misma sentencia. Es el mismo candado de
+  `enlaces_acceso`.`usos` y por el mismo motivo: con un `SELECT` previo, dos POST
+  simultáneos del último turno pasarían los dos.
+- **El historial NO viaja en el POST.** El navegador manda el `uuid` de la
+  conversación y el texto nuevo; la charla se rearma desde
+  `conversaciones_mensajes`. Si viajara, cualquiera podría reescribir lo que "ya
+  se dijo" —las reglas del sistema incluidas— y hacernos pagar el contexto que se
+  le antoje. El `sessionStorage` del front guarda una copia **sólo para volver a
+  pintarla** al cambiar de página.
+- **El chequeo de `Origin` no es el control de acceso** y está anotado así en el
+  endpoint: quien arma el POST a mano pone la cabecera que quiera. Sirve para que
+  otro sitio no embeba la burbuja y nos facture las consultas de sus visitantes.
+  Lo que frena el gasto son los cupos.
+- **Lo que el modelo sabe se arma en cada turno y sale del sitio, no del prompt.**
+  Los planes salen de `planes` + `articulos` vía [lib/planes.php](lib/planes.php)
+  —un precio escrito a mano en el prompt quedaría viejo el día que alguien lo
+  cambia en el back office, y el chat cotizaría distinto de `/precios/planes`— y
+  los artículos salen de `entradas`. Lo único fijo es qué es Reactor y la lista
+  de secciones, transcriptos de la portada y del menú.
+- **LA AYUDA SE LLEVA EL CUPO Y EL BLOG APORTA UNO SOLO.** El blog son notas de
+  difusión escritas para convencer: una respuesta de soporte armada con tres de
+  ellas suena igual de segura que una armada con la ayuda.
+- **La recuperación cruza los términos con O y rankea, y es la única desviación
+  deliberada del método de [lib/busqueda.php](lib/busqueda.php)**, que los cruza
+  con Y. Acá no hay ninguna lista que mire una persona: es la selección del
+  contexto del modelo, y los dos errores no cuestan lo mismo — un artículo de más
+  lo descarta el modelo, y cero artículos lo dejan sin con qué contestar. Con la
+  Y, "cómo configuro el wifi del dispositivo" **no trae nada**. Lo que reemplaza
+  a la Y es el umbral de cobertura de `chatUmbral()`: con uno o dos términos se
+  exigen todos (quien escribe "alarma comunitaria" nombra una cosa), de tres en
+  adelante alcanza con la mitad. **Que no entre ningún artículo es un resultado
+  válido**: el modelo contesta que no sabe y deriva, que es mejor que contestar
+  con aplomo desde contexto flojo.
+- **`lib/busqueda.php` es el método del proyecto y `entradasListar()` todavía no
+  lo usa**: el buscador público (`/search/results`) sigue buscando la frase
+  entera con un solo `LIKE`. Convertirlo hace que encuentre más, o sea que cambia
+  lo que ve el visitante, y va aparte.
+- **La respuesta del modelo se pinta con `createTextNode()`, nunca con
+  `innerHTML`.** Es la salida de algo a lo que cualquiera le puede pedir lo que
+  quiera: con `innerHTML` alcanzaría con convencerlo de escribir una etiqueta
+  para tener XSS en todas las páginas del sitio. Sólo se enlazan `http` y
+  `https` — un `javascript:` en un `href` es la otra mitad del mismo agujero.
+- **El chat no ve ninguna cuenta y el prompt se lo dice tres veces.** No hay
+  sesión en este docroot: no puede responder por dispositivos, señales, facturas
+  ni usuarios, y lo que corresponde ahí es derivar a `app.reactor.com.ar` o a
+  WhatsApp. El día que se quiera un chat que sí conozca a la persona, no es esta
+  UI: es otra, identificada.
+- **WhatsApp no se perdió.** Está en el pie del panel, en el footer y en el menú
+  de Soporte, y es a donde derivan todos los errores del endpoint (`derivar` en
+  la respuesta JSON prende el enlace).
+- **Se declaró en [privacidad.php](privacidad.php)**, que es donde ya está la
+  lista de proveedores: el dato sale del país y eso se dice.
 
 ## Rutas: tres `.htaccess` y el orden importa
 

@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 /**
- * Pie común: el footer, el botón flotante de WhatsApp y todos los `<script>`
- * del theme. Cierra el `main-wrapper` que abrió `sistema/cabeza.php`.
+ * Pie común: el footer, la burbuja flotante del chat y todos los `<script>` del
+ * theme. Cierra el `main-wrapper` que abrió `sistema/cabeza.php`.
  *
  * Port de `sistema/pie.php` del legacy. El orden de los scripts es el mismo y
  * NO se puede tocar a la ligera: jQuery va primero porque todo lo demás lo
@@ -20,6 +20,10 @@ declare(strict_types=1);
  *     no tiene. Los formularios de acá son POST normales y el CSS de Quform
  *     —que sí es lo que les da el aspecto— se sigue cargando en la cabeza.
  *   - Los enlaces a sitios externos llevan `rel="noopener"`.
+ *
+ * El botón flotante que había acá era un `<a>` a `wa.me` con su propio `<style>`
+ * embebido; lo reemplazó la burbuja del chat (28/09/2026). El acceso a WhatsApp
+ * sigue estando: en el pie del panel, en el footer y en el menú de Soporte.
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
@@ -130,25 +134,62 @@ $wwwVersion = wwwVersion();
 </div>
 <!-- fin main-wrapper -->
 
-<style>
-    .float-wa {
-        position: fixed;
-        width: 60px;
-        height: 60px;
-        bottom: 15px;
-        right: 15px;
-        background-color: #25d366;
-        color: #FFF;
-        border-radius: 50px;
-        text-align: center;
-        font-size: 30px;
-        z-index: 100;
-    }
-</style>
+<?php if (chatActivo()): ?>
+    <!-- BURBUJA DE CHAT CON IA
+    ==================================================
+    Ocupa el lugar del botón flotante de WhatsApp, que era un `<a>` a `wa.me` con
+    su `<style>` embebido acá —el único CSS del sitio fuera de `css/`—. WhatsApp
+    no se perdió: está en el pie del panel, que es donde sirve, cuando el
+    asistente no alcanza.
 
-<a href="https://wa.me/5491163099315?text=Hola%20Reactor" class="float-wa text-white" target="_blank" rel="noopener" aria-label="Escribinos por WhatsApp">
-    <i class="fab fa-whatsapp" style="margin-top: 15px;"></i>
-</a>
+    SIN `OPENAI_APIKEY` NO SE DIBUJA NADA. No es un detalle de implementación:
+    es cómo se apaga el chat sin deployar, y es lo que mantiene el sitio de
+    desarrollo sin gastar. Ojo con eso al probar, que la esquina queda vacía.
+
+    Todo el HTML va acá y no lo arma el JS porque el JS puede no llegar a
+    cargarse; así el botón existe desde el primer pintado. -->
+    <div class="chat-widget" id="chat-widget">
+
+        <button type="button" class="chat-burbuja" id="chat-burbuja" aria-label="Abrir el asistente de Reactor">
+            <i class="fa-solid fa-comment-dots" aria-hidden="true"></i>
+        </button>
+
+        <div class="chat-panel" id="chat-panel" role="dialog" aria-modal="false" aria-label="Asistente de Reactor" aria-hidden="true">
+
+            <div class="chat-cabecera">
+                <div>
+                    <h2>Asistente Reactor</h2>
+                    <!-- Que es un bot se dice acá arriba y no en letra chica:
+                         quien escribe tiene que saber con qué está hablando. -->
+                    <p>Respuestas generadas por inteligencia artificial</p>
+                </div>
+                <button type="button" class="chat-cerrar" id="chat-cerrar" aria-label="Cerrar el asistente">&times;</button>
+            </div>
+
+            <!-- `aria-live` para que un lector de pantalla anuncie la respuesta:
+                 llega sola, sin que la persona haya navegado a ningún lado. -->
+            <div class="chat-cuerpo" id="chat-cuerpo" aria-live="polite"></div>
+
+            <div class="chat-pie">
+                <form id="chat-form" autocomplete="off">
+                    <div class="chat-fila">
+                        <textarea class="chat-texto" id="chat-texto" rows="1" maxlength="<?= e((string) CHAT_MENSAJE_MAXIMO) ?>" placeholder="Escribí tu consulta…" aria-label="Tu consulta"></textarea>
+                        <button type="submit" class="chat-enviar" id="chat-enviar" aria-label="Enviar">
+                            <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </form>
+                <div class="chat-avisos">
+                    <span>No compartas datos personales.</span>
+                    <a href="/whatsapp" target="_blank" rel="noopener">
+                        <i class="fab fa-whatsapp" aria-hidden="true"></i> Hablar con una persona
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </div>
+<?php endif; ?>
 
 <!-- jQuery: va primero, todo lo que sigue depende de el -->
 <script src="/js/jquery.min.js?v=<?= e($wwwVersion) ?>"></script>
@@ -187,6 +228,12 @@ $wwwVersion = wwwVersion();
 <!-- main.js va ultimo: inicializa todos los plugins de arriba -->
 <script src="/js/main.js?v=<?= e($wwwVersion) ?>"></script>
 <script src="/js/custom.js?v=<?= e($wwwVersion) ?>"></script>
+
+<?php if (chatActivo()): ?>
+    <!-- La burbuja de chat. Va despues de todo pero NO depende de nada de
+         arriba: es vanilla y no usa jQuery ni los plugins del theme. -->
+    <script src="/js/chat.js?v=<?= e($wwwVersion) ?>"></script>
+<?php endif; ?>
 
 </body>
 

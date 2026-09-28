@@ -14321,19 +14321,33 @@
     // una tarjeta nueva, insertala en el lugar que le corresponda por título.
     // `icon` es el nombre del ícono FontAwesome (sin el prefijo `fa-solid`),
     // no un emoji: el emoji renderiza distinto en cada SO y no hereda el color.
+    //
+    // `soloDev: true` marca las herramientas que NO existen en producción: la
+    // tarjeta no se dibuja, no se esconde con CSS. La defensa real es el 403
+    // del endpoint; esto es para que la grilla no ofrezca lo que el server va
+    // a rechazar. El flag sale de `<body data-env>`, que lo pone index.php.
+    const esDesarrollo = (document.body?.dataset.env || '') === 'development';
+
     const toolsCatalog = [
+        { icon: 'fa-code-compare', title: 'Comparador DB',          desc: 'Compará la estructura (tablas, columnas, índices y FKs) de la base de desarrollo contra la de producción. Solo lectura en los dos lados.', action: abrirCompararDb, soloDev: true },
         { icon: 'fa-puzzle-piece', title: 'Editor de parámetros',   desc: 'Variables runtime (variable / valor) que el resto del sistema lee.', action: abrirEditorParametros },
         { icon: 'fa-database',     title: 'Explorador DB',           desc: 'Recorré las tablas de la base del entorno actual, ojeá su estructura y los últimos registros.', action: abrirExploradorDB },
         { icon: 'fa-folder-open',  title: 'Explorador S3',           desc: 'Navegá, subí, descargá y eliminá carpetas y archivos del bucket del entorno actual.', action: abrirExploradorS3 },
         { icon: 'fa-scroll',       title: 'Migrador DB',            desc: 'Aplicá las migraciones pendientes de cloud/sql/migrations/ contra la BD del entorno actual.', action: abrirMigraciones },
         { icon: 'fa-clock',        title: 'Programador de tareas',   desc: 'Administrá los procesos automáticos programados (tabla tareas) y revisá el historial + log en vivo de cada ejecución.', action: abrirTareas },
+        { icon: 'fa-arrows-rotate',title: 'Sincronizador de tablas', desc: 'Copiá una tabla entera entre desarrollo y producción preservando los IDs. Solo disponible en el panel de desarrollo.', action: abrirSincronizador, soloDev: true },
         { icon: 'fa-newspaper',    title: 'Visor de sucesos',       desc: 'Recorré el log de actividad (tabla sucesos_log) que los distintos módulos van registrando al trabajar.', action: abrirVisorSucesos },
     ];
 
     function renderTools(root) {
+        // El índice del `data-tool-idx` va contra la lista YA filtrada: con el
+        // catálogo crudo, en producción cada tarjeta abriría la herramienta
+        // siguiente a la suya.
+        const tools = toolsCatalog.filter(t => !t.soloDev || esDesarrollo);
+
         root.innerHTML = `
             <div class="tile-grid">
-                ${toolsCatalog.map((t, i) => `
+                ${tools.map((t, i) => `
                     <button type="button" class="tile-card" data-tool-idx="${i}">
                         <span class="tile-icon"><i class="fa-solid ${t.icon}"></i></span>
                         <span class="tile-title">${escape(t.title)}</span>
@@ -14345,7 +14359,7 @@
 
         root.querySelectorAll('.tile-card').forEach(btn => {
             btn.addEventListener('click', () => {
-                const tool = toolsCatalog[+btn.dataset.toolIdx];
+                const tool = tools[+btn.dataset.toolIdx];
                 if (typeof tool?.action === 'function') {
                     tool.action();
                 } else {
@@ -16756,6 +16770,518 @@
         if (_tareasBackdrop?.classList.contains('open'))     { cerrarTareas(); return; }
         if (_s3ExpBackdrop?.classList.contains('open'))      { cerrarExploradorS3(); return; }
         if (_dbExpBackdrop?.classList.contains('open'))      { cerrarExploradorDB(); return; }
+    });
+
+    /* ================================================================
+       Herramientas: Comparador DB
+       ================================================================
+       Lee el stream `text/plain` de `api/comparar_db` línea por línea y lo
+       pinta en vivo. El endpoint cierra siempre con una línea
+       `___END___ {json}`: ese marcador —y no el fin del body— es lo que dice
+       si la corrida terminó bien. No se usa api() porque esa helper consume
+       JSON y acá hace falta el ReadableStream crudo.
+
+       Diagnostica y nada más: no propone ALTER TABLE ni sincroniza esquemas.
+       Un drift se corrige con una migración explícita en el Migrador DB.     */
+
+    // Lock de corrida: impide disparar dos comparaciones a la vez y bloquea el
+    // cierre del modal mientras hay una en vuelo.
+    let compararDbEjecutando = false;
+
+    // Líneas crudas de la corrida actual, en el orden en que llegaron. Es lo
+    // que copia «Copiar log»: raspar el <pre> devolvería lo mismo, pero acá el
+    // texto ya está sin los <span> de color y sin el placeholder inicial.
+    let compararDbLineas = [];
+
+    let _compararDbBackdrop = null;
+
+    function abrirCompararDb() {
+        if (_compararDbBackdrop && document.body.contains(_compararDbBackdrop)) return;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.id = 'compararDbModalBackdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="comparardb-title" style="max-width:960px">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title" id="comparardb-title">
+                        <i class="fa-solid fa-code-compare" style="font-size:1.2rem"></i>
+                        <span>Comparador DB</span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del comparador">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" id="compararDbBtnEjecutar" data-act="run">
+                        <i class="fa-solid fa-code-compare"></i> Comparar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="copy">
+                        <i class="fa-solid fa-copy"></i> Copiar log
+                    </button>
+                </div>
+                <div class="modal-body" style="gap:8px">
+                    <div style="font-size:.85rem;color:var(--muted);line-height:1.5">
+                        Compara la estructura de la base de <strong>desarrollo</strong> con la de
+                        <strong>producción</strong>: tablas presentes en un solo lado, diferencias
+                        de columnas (tipo, nullable, default, extra), índices y foreign keys.
+                        La comparación es <strong>solo de lectura</strong> en los dos lados — no
+                        modifica ningún dato ni ejecuta DDL.
+                    </div>
+                    <pre id="compararDbLog" class="terminal-log terminal-log-diff">Listo para ejecutar. Hacé click en «Comparar»…</pre>
+                    <div id="compararDbStatus" class="run-status"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        _compararDbBackdrop  = backdrop;
+        compararDbEjecutando = false;
+        compararDbLineas     = [];
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrarCompararDb(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarCompararDb));
+        backdrop.querySelector('[data-act="run"]').addEventListener('click', ejecutarCompararDb);
+        backdrop.querySelector('[data-act="copy"]').addEventListener('click', copiarCompararDbLog);
+    }
+
+    function cerrarCompararDb() {
+        // Una corrida en vuelo no se abandona a la mitad: hay dos PDO abiertos,
+        // uno de ellos contra el RDS de producción.
+        if (compararDbEjecutando) { toast('Esperá a que termine la comparación', { error: true }); return; }
+        if (!_compararDbBackdrop) return;
+        const bd = _compararDbBackdrop;
+        bd.classList.remove('open');
+        setTimeout(() => bd.remove(), 200);
+        _compararDbBackdrop = null;
+    }
+
+    // Copia el log completo al portapapeles. Se puede usar a mitad de una
+    // corrida: copia lo que haya llegado hasta ese momento.
+    function copiarCompararDbLog() {
+        if (!compararDbLineas.length) { toast('Todavía no hay log para copiar', { error: true }); return; }
+        copyToClipboard(compararDbLineas.join('\n'));
+    }
+
+    // Escapa la línea y, si trae un prefijo de nivel, la envuelve en el span
+    // del color correspondiente. El escape va ANTES de buscar el prefijo: un
+    // nombre de tabla o columna con `<` no puede inyectar HTML en el <pre>.
+    function compararDbFormatearLinea(linea) {
+        const esc = escape(linea);
+        const m   = linea.match(/\[(OK|SKIP|WARN|FAIL)\]/);
+        if (!m) return esc;
+        const nivel = ({ OK: 'ok', SKIP: 'skip', WARN: 'warn', FAIL: 'fail' })[m[1]];
+        return `<span class="${nivel}">${esc}</span>`;
+    }
+
+    async function ejecutarCompararDb() {
+        if (compararDbEjecutando || !_compararDbBackdrop) return;
+        compararDbEjecutando = true;
+
+        const bd     = _compararDbBackdrop;
+        const btn    = bd.querySelector('#compararDbBtnEjecutar');
+        const log    = bd.querySelector('#compararDbLog');
+        const status = bd.querySelector('#compararDbStatus');
+        // Se guarda el HTML del botón, no su texto: lleva ícono y
+        // `textContent` lo borraría para siempre.
+        const btnHtml = btn ? btn.innerHTML : '';
+
+        if (btn) {
+            btn.disabled  = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Comparando…';
+        }
+        log.innerHTML      = '';
+        status.textContent = 'Conectando…';
+        status.className   = 'run-status info';
+
+        compararDbLineas = [];
+        let logHtml    = '';
+        let buffer     = '';
+        let endPayload = null;
+
+        const appendLinea = linea => {
+            if (linea.startsWith('___END___ ')) {
+                // El marcador no se pinta ni se copia: es protocolo, no log.
+                try { endPayload = JSON.parse(linea.slice('___END___ '.length)); }
+                catch (_) { endPayload = null; }
+                return;
+            }
+            compararDbLineas.push(linea);
+            logHtml += (logHtml ? '\n' : '') + compararDbFormatearLinea(linea);
+            log.innerHTML = logHtml;
+            log.scrollTop = log.scrollHeight;
+            if (linea.trim()) {
+                status.textContent = linea.replace(/^\s+/, '').slice(0, 140);
+                status.className   = 'run-status info';
+            }
+        };
+
+        try {
+            const res = await fetch('api/comparar_db', { method: 'POST', credentials: 'same-origin' });
+
+            if (!res.body || !res.body.getReader) {
+                // Navegador sin streaming: se lee todo junto y se pinta de una.
+                (await res.text()).split(/\r?\n/).forEach(appendLinea);
+            } else {
+                const reader  = res.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    // Un chunk de red no es una línea: puede traer media, o
+                    // tres y media.
+                    let nl;
+                    while ((nl = buffer.indexOf('\n')) >= 0) {
+                        appendLinea(buffer.slice(0, nl));
+                        buffer = buffer.slice(nl + 1);
+                    }
+                }
+                buffer += decoder.decode();
+                if (buffer.length) appendLinea(buffer);
+            }
+
+            if (!endPayload) {
+                status.textContent = '✗ Respuesta incompleta del servidor (no llegó el marcador de fin).';
+                status.className   = 'run-status err';
+                return;
+            }
+            if (endPayload.error) {
+                status.textContent = '✗ ' + endPayload.error;
+                status.className   = 'run-status err';
+                return;
+            }
+
+            const r = endPayload.resumen || {};
+            if (endPayload.ok) {
+                status.textContent = `✓ Las bases coinciden — ${r.iguales || 0} tablas idénticas.`;
+                status.className   = 'run-status ok';
+            } else {
+                const partes = [];
+                if (r.diferentes) partes.push(`${r.diferentes} con diferencias`);
+                if (r.solo_dev)   partes.push(`${r.solo_dev} solo en dev`);
+                if (r.solo_prod)  partes.push(`${r.solo_prod} solo en prod`);
+                status.textContent = '✗ Diferencias encontradas: ' + (partes.join(' · ') || 'revisá el log');
+                status.className   = 'run-status err';
+            }
+        } catch (e) {
+            // El error de red se suma al log como una línea [FAIL] más, para
+            // que «Copiar log» lo lleve junto con el resto de la corrida.
+            const msg = String((e && e.message) || e);
+            compararDbLineas.push('[FAIL] ' + msg);
+            logHtml += (logHtml ? '\n' : '') + `<span class="fail">[FAIL] ${escape(msg)}</span>`;
+            log.innerHTML = logHtml;
+            status.textContent = 'Error de conexión al endpoint de comparación.';
+            status.className   = 'run-status err';
+        } finally {
+            compararDbEjecutando = false;
+            if (btn) {
+                btn.disabled  = false;
+                btn.innerHTML = btnHtml;   // restaura rótulo + ícono originales
+            }
+        }
+    }
+
+    /* --- ESC para el comparador (respeta el lock de la corrida) --- */
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        if (_compararDbBackdrop?.classList.contains('open')) cerrarCompararDb();
+    });
+
+    /* ================================================================
+       Herramientas: Sincronizador de tablas
+       ================================================================
+       Copia una tabla entera de un entorno al otro PRESERVANDO LOS IDS
+       de origen, con la salida en vivo por SSE en una terminal embebida.
+
+       Endpoints:
+         GET api/sincronizador_tables?origen=dev|prod   -> JSON (entornos + tablas)
+         GET api/sincronizador_run?origen&destino&tabla -> text/event-stream
+
+       Los dos cortan con 403 si el panel no corre en desarrollo
+       (`asertarSoloDev()` en api/lib/sincronizador.php). El tile se dibuja
+       igual en prod: la defensa vive en el server, no en esconder el botón.
+
+       Un solo modal para todo — no hay listado, ni menú contextual, ni
+       segundo modal. Los dos selectores y la terminal son la herramienta.  */
+
+    let _sincBackdrop     = null;   // el modal abierto, o null
+    let _sincEnEjecucion  = false;  // lock: bloquea cerrar / re-ejecutar mientras corre
+    let _sincES           = null;   // EventSource activo
+    let _sincEntornos     = null;   // { dev: {host, database, ...}, prod: {...} }
+
+    // "Entorno (nombreDeBD)" y nada más — sin "RDS", "réplica" ni adornos.
+    function sincEtiqueta(amb) {
+        const base = amb === 'prod' ? 'Producción' : 'Desarrollo';
+        const db   = _sincEntornos?.[amb]?.database || '';
+        return db ? `${base} (${db})` : base;
+    }
+
+    async function abrirSincronizador() {
+        if (_sincBackdrop && document.body.contains(_sincBackdrop)) return;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="sinc-title">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title" id="sinc-title">
+                        <i class="fa-solid fa-arrows-rotate" style="font-size:1.2rem"></i>
+                        <span>Sincronizador de tablas</span>
+                        <span class="modal-subtitle" id="sincResumen"></span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" title="Cerrar" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del sincronizador">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" id="sincBtnEjecutar" disabled>
+                        <i class="fa-solid fa-arrows-rotate"></i> Sincronizar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sincOrigen">Origen</label>
+                            <select id="sincOrigen">
+                                <option value="">— Elegí origen —</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="sincDestino">Destino</label>
+                            <input type="text" id="sincDestino" readonly placeholder="Se completa automáticamente">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="sincTabla">Tabla</label>
+                        <select id="sincTabla" disabled>
+                            <option value="">— Elegí primero el origen —</option>
+                        </select>
+                        <div class="field-error" id="sincTablaError" style="display:none"></div>
+                    </div>
+                    <div>
+                        <label style="font-size:.8rem;font-weight:600;color:var(--muted);display:block;margin-bottom:6px">
+                            Log de ejecución
+                        </label>
+                        <pre class="terminal-log" id="sincLog"></pre>
+                    </div>
+                    <div style="font-size:.78rem;color:var(--muted);line-height:1.5">
+                        Copia la tabla completa del origen al destino
+                        <strong>preservando los IDs de origen</strong>.
+                        Si la tabla no existe en destino, se crea con el DDL del origen.
+                        Si existe, se le hace <code style="font-family:monospace">TRUNCATE</code>
+                        antes de insertar — <strong>los datos del destino se pierden</strong>.
+                        Esta herramienta <strong>solo funciona en el panel de desarrollo</strong>.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+        _sincBackdrop    = backdrop;
+        _sincEnEjecucion = false;
+
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) cerrarSincronizador(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', cerrarSincronizador));
+        backdrop.querySelector('#sincOrigen').addEventListener('change', sincOnCambioOrigen);
+        backdrop.querySelector('#sincTabla').addEventListener('change', sincActualizarBoton);
+        backdrop.querySelector('#sincBtnEjecutar').addEventListener('click', sincEjecutar);
+
+        sincLogReset('Elegí origen y tabla, y hacé click en «Sincronizar» para empezar.');
+
+        // Metadata de los dos entornos: sale de parsear los `.env`, sin abrir
+        // ninguna conexión. Es lo que le pone el nombre de la BD a cada opción.
+        try {
+            const data = await api('sincronizador_tables');
+            if (!_sincBackdrop) return;
+            _sincEntornos = data.entornos || null;
+            const sel = _sincBackdrop.querySelector('#sincOrigen');
+            sel.innerHTML = `<option value="">— Elegí origen —</option>`
+                + `<option value="dev">${escape(sincEtiqueta('dev'))}</option>`
+                + `<option value="prod">${escape(sincEtiqueta('prod'))}</option>`;
+        } catch (e) {
+            sincLogAppend('error', e.message || 'No se pudieron leer los entornos.');
+        }
+    }
+
+    function cerrarSincronizador() {
+        // Cerrar a mitad dejaría la tabla destino parcialmente copiada sin
+        // feedback en pantalla. Si el operador realmente quiere cortar, cierra
+        // la pestaña: el server lo detecta y termina.
+        if (_sincEnEjecucion) { toast('Esperá a que termine la sincronización', { error: true }); return; }
+        if (!_sincBackdrop) return;
+        const bd = _sincBackdrop;
+        bd.classList.remove('open');
+        setTimeout(() => bd.remove(), 200);
+        _sincBackdrop = null;
+        _sincEntornos = null;
+    }
+
+    function sincLogReset(msg) {
+        if (!_sincBackdrop) return;
+        _sincBackdrop.querySelector('#sincLog').textContent = '';
+        if (msg) sincLogAppend('info', msg);
+    }
+
+    // `textContent`, NUNCA innerHTML: las líneas vienen del server y pueden
+    // traer el mensaje crudo del motor SQL con `<` o comillas adentro.
+    function sincLogAppend(type, msg) {
+        if (!_sincBackdrop) return;
+        const pre = _sincBackdrop.querySelector('#sincLog');
+        if (!pre) return;
+        const prefijo = ({ success: '✓ ', warn: '⚠ ', error: '✗ ' })[type] || '';
+        const linea = document.createElement('div');
+        linea.className = 'term-' + (['info', 'success', 'warn', 'error'].includes(type) ? type : 'info');
+        linea.textContent = prefijo + (msg ?? '');
+        pre.appendChild(linea);
+        pre.scrollTop = pre.scrollHeight;
+    }
+
+    async function sincOnCambioOrigen() {
+        if (!_sincBackdrop) return;
+        const origen  = _sincBackdrop.querySelector('#sincOrigen').value;
+        const destino = _sincBackdrop.querySelector('#sincDestino');
+        const selTab  = _sincBackdrop.querySelector('#sincTabla');
+        const err     = _sincBackdrop.querySelector('#sincTablaError');
+        const resumen = _sincBackdrop.querySelector('#sincResumen');
+
+        err.style.display = 'none';
+        resumen.textContent = '';
+
+        if (!origen) {
+            destino.value  = '';
+            selTab.innerHTML = `<option value="">— Elegí primero el origen —</option>`;
+            selTab.disabled  = true;
+            sincActualizarBoton();
+            return;
+        }
+
+        // El destino es siempre el otro entorno: no hay tercera opción ni
+        // sincronización de un entorno contra sí mismo.
+        const otro = origen === 'dev' ? 'prod' : 'dev';
+        destino.value = sincEtiqueta(otro);
+
+        selTab.disabled  = true;
+        selTab.innerHTML = `<option value="">Cargando tablas…</option>`;
+        sincActualizarBoton();
+
+        try {
+            const data = await api('sincronizador_tables?origen=' + encodeURIComponent(origen));
+            if (!_sincBackdrop) return;
+            const tablas = data.tablas || [];
+            const info   = data.origen || {};
+            // El <option> lleva el nombre pelado: ninguna cantidad de filas.
+            // Contar las 129 tablas del catálogo — y la mitad contra la RDS de
+            // prod por internet — cuelga el combo decenas de segundos. El número
+            // de la tabla elegida aparece en el log al arrancar la corrida.
+            selTab.innerHTML = `<option value="">— Elegí la tabla —</option>`
+                + tablas.map(t => `<option value="${escape(t.nombre)}">${escape(t.nombre)}</option>`).join('');
+            selTab.disabled = tablas.length === 0;
+            resumen.textContent = `${info.host || '?'} · ${info.database || '?'} · ${tablas.length} tablas`;
+            if (!tablas.length) {
+                err.textContent = 'El origen no tiene tablas.';
+                err.style.display = '';
+            }
+        } catch (e) {
+            if (!_sincBackdrop) return;
+            selTab.innerHTML = `<option value="">— Sin tablas —</option>`;
+            selTab.disabled  = true;
+            err.textContent  = e.message || 'No se pudieron listar las tablas del origen.';
+            err.style.display = '';
+            sincLogAppend('error', err.textContent);
+        }
+        sincActualizarBoton();
+    }
+
+    function sincActualizarBoton() {
+        if (!_sincBackdrop) return;
+        const origen = _sincBackdrop.querySelector('#sincOrigen').value;
+        const tabla  = _sincBackdrop.querySelector('#sincTabla').value;
+        _sincBackdrop.querySelector('#sincBtnEjecutar').disabled =
+            _sincEnEjecucion || !origen || !tabla;
+    }
+
+    function sincBloquearControles(bloq) {
+        if (!_sincBackdrop) return;
+        ['#sincOrigen', '#sincTabla', '#sincBtnEjecutar'].forEach(sel => {
+            const el = _sincBackdrop.querySelector(sel);
+            if (el) el.disabled = bloq;
+        });
+        if (!bloq) sincActualizarBoton();
+    }
+
+    function sincEjecutar() {
+        if (!_sincBackdrop || _sincEnEjecucion) return;
+        const origen  = _sincBackdrop.querySelector('#sincOrigen').value;
+        const tabla   = _sincBackdrop.querySelector('#sincTabla').value;
+        if (!origen || !tabla) return;
+        const destino = origen === 'dev' ? 'prod' : 'dev';
+        const esProd  = destino === 'prod';
+
+        // Confirm reforzado cuando el destino es producción: es la única
+        // defensa entre el operador y una copia irreversible sobre prod.
+        // Se reusa el helper del Migrador DB, que ya varía label y severidad
+        // según entorno (confirmDialog hardcodea "Eliminar" y no sirve acá).
+        confirmarMigrador(
+            esProd ? 'Sincronizar a PRODUCCIÓN' : 'Sincronizar a desarrollo',
+            `Vas a copiar la tabla «${tabla}» desde ${sincEtiqueta(origen)} a ${sincEtiqueta(destino)} `
+            + `preservando los IDs. Si la tabla existe en destino, se vacía (TRUNCATE) antes de insertar. ¿Continuar?`,
+            esProd ? 'Copiar a prod' : 'Copiar a dev',
+            esProd,
+            () => sincCorrer(origen, destino, tabla)
+        );
+    }
+
+    function sincCorrer(origen, destino, tabla) {
+        if (!_sincBackdrop || _sincEnEjecucion) return;
+        _sincEnEjecucion = true;
+        sincBloquearControles(true);
+        sincLogReset(null);
+
+        const url = 'api/sincronizador_run'
+            + '?origen='  + encodeURIComponent(origen)
+            + '&destino=' + encodeURIComponent(destino)
+            + '&tabla='   + encodeURIComponent(tabla);
+
+        const es = new EventSource(url, { withCredentials: true });
+        _sincES = es;
+
+        // EventSource reconecta solo ante un error de red. Cerrarlo a mano en
+        // `done` y en `onerror` es lo que evita que vuelva a arrancar la
+        // corrida entera por su cuenta.
+        const finalizar = () => {
+            if (_sincES) {
+                try { _sincES.close(); } catch (_) { /* noop */ }
+                _sincES = null;
+            }
+            _sincEnEjecucion = false;
+            sincBloquearControles(false);
+        };
+
+        es.onmessage = ev => {
+            let obj;
+            try { obj = JSON.parse(ev.data); }
+            catch (_) { sincLogAppend('info', ev.data); return; }
+            if (obj.type === 'done') {
+                sincLogAppend(obj.ok === false ? 'error' : 'success', obj.msg || 'Fin.');
+                finalizar();
+                return;
+            }
+            sincLogAppend(obj.type || 'info', obj.msg || '');
+        };
+        es.onerror = () => {
+            if (!_sincES) return;   // ya cerramos nosotros tras `done`
+            sincLogAppend('error', 'Conexión con el servidor interrumpida.');
+            finalizar();
+        };
+    }
+
+    /* --- ESC para el sincronizador (respeta el lock de la corrida) --- */
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        if (_sincBackdrop?.classList.contains('open')) cerrarSincronizador();
     });
 
     /* ---------- Views: Stub ---------- */

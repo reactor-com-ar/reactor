@@ -1093,6 +1093,52 @@ CREATE TABLE `controles` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `conversaciones`
+--
+
+DROP TABLE IF EXISTS `conversaciones`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `conversaciones` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `uuid` char(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `iniciada` datetime NOT NULL,
+  `actividad` datetime NOT NULL,
+  `mensajes` int NOT NULL DEFAULT '0',
+  `origen` varchar(45) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `agente` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `pagina` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uq_conversaciones_uuid` (`uuid`),
+  KEY `ix_conversaciones_origen` (`origen`,`actividad`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `conversaciones_mensajes`
+--
+
+DROP TABLE IF EXISTS `conversaciones_mensajes`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `conversaciones_mensajes` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `conversacion` int NOT NULL,
+  `fecha` datetime NOT NULL,
+  `rol` enum('user','assistant') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `texto` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `modelo` varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `contexto` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `tokens_entrada` int DEFAULT NULL,
+  `tokens_salida` int DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `ix_conversaciones_mensajes_conversacion` (`conversacion`,`id`),
+  KEY `ix_conversaciones_mensajes_fecha` (`fecha`),
+  CONSTRAINT `fk_conversaciones_mensajes_conversacion` FOREIGN KEY (`conversacion`) REFERENCES `conversaciones` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `correos`
 --
 

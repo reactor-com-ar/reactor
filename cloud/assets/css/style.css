@@ -1828,3 +1828,73 @@ body.login-page { background: var(--bg); }
 /* El cuerpo del correo se muestra tal como se escribió: los saltos de línea son
  * parte del mensaje que salió, así que `pre-wrap` y no un párrafo reflowado. */
 .dif-cuerpo            { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+
+/* ---------- 38. Sincronizador de tablas (herramienta) ----------
+ * Log estilo terminal con streaming SSE. Es la segunda consola del panel y NO
+ * es la misma que `.terminal-live` del Programador de tareas (§33): aquella
+ * vuelca texto plano de un `.log` de disco en gris sobre `#0d1117`; ésta pinta
+ * cada línea según el `type` del evento — verde por defecto, rojo para lo que
+ * salió mal. Son dos semánticas distintas y por eso dos clases.
+ *
+ * Alto FIJO de 320px con scroll interno: el modal tiene arriba los selectores y
+ * abajo la nota, así que una terminal que crezca con las 3.600 líneas de
+ * progreso de una tabla grande empuja todo fuera del viewport.
+ */
+.terminal-log {
+    background: #0d0d0d;   /* no `black`: se despega apenas del gris del modal */
+    color: #86efac;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin: 0;
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', ui-monospace, monospace;
+    font-size: .82rem;
+    line-height: 1.55;
+    height: 320px;
+    overflow-y: auto;
+    /* Los dumps de excepción y los DDL son largos: envuelven en vez de reventar
+     * el ancho del modal con un scroll horizontal. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: var(--shadow);
+}
+/* Los cuatro `type` del stream. `display:block` porque cada línea es un <div>
+ * que el JS appendea con textContent (nunca innerHTML: el texto viene del
+ * server y puede traer el mensaje crudo del motor SQL). */
+.terminal-log .term-info    { color: #86efac; display: block; }
+.terminal-log .term-success { color: #4ade80; display: block; font-weight: 600; }
+.terminal-log .term-warn    { color: #f5a8a8; display: block; }
+.terminal-log .term-error   { color: #f87171; display: block; font-weight: 600; }
+
+/* ---------- 39. Comparador DB (herramienta) ----------
+ * Reusa la caja de `.terminal-log` (§38) y le cambia sólo lo que tiene que
+ * cambiar. El verde por defecto del sincronizador ahí no sirve: en un diff la
+ * enorme mayoría de las líneas son narrativas —títulos, contadores, "[1/129]
+ * tabla…"— y pintarlas de verde dice "todo bien" sobre un log que puede estar
+ * lleno de diferencias. Acá el neutro es gris y el color lo gana la línea que
+ * trae un prefijo.
+ *
+ * El alto también difiere y por el mismo motivo: el sincronizador tiene un
+ * alto fijo porque su modal lleva formulario arriba y nota abajo; el
+ * comparador es log y nada más, así que crece con el contenido hasta 52vh.
+ */
+.terminal-log-diff {
+    color: #cbd5e1;
+    height: auto;
+    min-height: 200px;
+    max-height: 52vh;
+}
+/* Los cuatro niveles del protocolo: [OK] verde · [WARN] ámbar · [FAIL] rojo ·
+ * [SKIP] gris. Van scopeados bajo `.terminal-log` a propósito: `.ok` / `.fail`
+ * sueltos son nombres demasiado genéricos para el CSS global. */
+.terminal-log .ok   { color: #22c55e; }
+.terminal-log .warn { color: #f59e0b; }
+.terminal-log .fail { color: #ef4444; }
+.terminal-log .skip { color: #94a3b8; }
+
+/* Línea de status al pie del modal: mientras corre muestra la última línea
+ * recibida (el spinner con contexto) y al terminar el resumen coloreado. */
+.run-status      { font-size: .85rem; color: var(--muted); word-break: break-word; }
+.run-status.info { color: var(--info); }
+.run-status.ok   { color: var(--success); }
+.run-status.err  { color: var(--danger); }

@@ -60,7 +60,15 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
     <link rel="stylesheet"
           href="assets/css/style.css?v=<?= htmlspecialchars($cacheBust) ?>">
 </head>
-<body data-version="<?= htmlspecialchars($cacheBust, ENT_QUOTES) ?>">
+<?php
+// `data-env` lo lee el JS para decidir qué herramientas existen. Hoy sólo lo
+// usa el Comparador DB, que es dev-only: su tarjeta NO se dibuja en producción
+// — no se esconde con CSS, directamente no está en el DOM. La defensa real
+// sigue siendo el 403 del endpoint; esto es para que la tarjeta no prometa
+// algo que el server va a rechazar.
+?>
+<body data-version="<?= htmlspecialchars($cacheBust, ENT_QUOTES) ?>"
+      data-env="<?= htmlspecialchars(strtolower((string) APP_ENV), ENT_QUOTES) ?>">
 
 <div class="version-banner" id="version-banner" role="status" hidden>
     <span class="version-banner-text">Hay una nueva versión disponible.</span>

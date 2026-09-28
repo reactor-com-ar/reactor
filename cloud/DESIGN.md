@@ -2070,6 +2070,66 @@ Utilidad de **Herramientas** que administra procesos automáticos programables. 
 
 Estos pasos se documentan también en el propio `cloud/jobs/crontab` y quedan pendientes del script de aprovisionar del server (no forman parte del deploy).
 
+## 33-bis. Herramientas: Sincronizador de tablas
+
+Utilidad de **Herramientas** (§27) que copia **una tabla entera** de un entorno al otro **preservando los IDs de origen**, con la salida en vivo por SSE en una terminal embebida. El tile es `fa-arrows-rotate` / **Sincronizador de tablas**.
+
+**Un solo modal** (`.modal-wide`, 760px) y nada más: no hay listado, ni menú contextual, ni segundo modal. Sigue el estándar de modales del proyecto (§21-bis) — `modal-header modal-header-primary`, `.modal-menubar` con `Cerrar` (ghost) + `Sincronizar` (primary, **disabled** hasta que haya origen y tabla), **sin `.modal-footer`**.
+
+El cuerpo son cuatro bloques en orden fijo: `form-row` con **Origen** (`<select>`) y **Destino** (`<input readonly>`, autopoblado con el entorno contrario); **Tabla** (`<select>`, deshabilitado hasta que haya origen); `<pre class="terminal-log">` con el log; y la nota al pie que explica la copia destructiva. El subtítulo del header muestra `host · database · N tablas` del origen elegido.
+
+**Etiquetas de entorno**: `"Entorno (nombreDeBD)"` — `Desarrollo (reactor_dev)` / `Producción (reactor)` — sin descripciones extra (nada de "RDS", "réplica", etc.). El nombre de la BD sale de parsear los dos `.env`, sin abrir ninguna conexión.
+
+**Endpoints** (`api/sincronizador_tables.php` JSON + `api/sincronizador_run.php` SSE), los dos detrás de `requireAuth()` y de `asertarSoloDev()`, apoyados en `api/lib/sincronizador.php`. Sin tabla en la base: la herramienta no guarda nada de sus corridas.
+
+**Reglas:**
+- **Solo corre en desarrollo, y lo decide el server.** `asertarSoloDev()` responde **403 JSON** antes de emitir un solo byte de stream. El motivo es que este proceso tiene a mano las credenciales de **los dos** entornos, y ese camino no puede existir en un panel expuesto a internet. El tile además lleva `soloDev: true` y no se dibuja en producción (mismo mecanismo que el Comparador DB, §33-ter) — **eso no es el control de acceso**, es no ofrecer un botón que sólo puede terminar en 403.
+- **Las credenciales cruzadas salen de los `.env` bind-monteados** (`docker-compose.yml` líneas 28-29 montan `.env.development` **y** `.env.production` read-only en `/var/www/`). `sincParseEnv()` es una copia del parser de `env.php` **sin sus efectos secundarios**: no toca `putenv()` / `$_ENV` ni define constantes, porque hacerlo le pisaría la conexión al panel que está corriendo.
+- **EL COMBO DE TABLAS LISTA, NO CUENTA.** Una sola query a `INFORMATION_SCHEMA.TABLES` pidiendo **sólo `TABLE_NAME`** y filtrando `TABLE_TYPE = 'BASE TABLE'` (las vistas no son sincronizables). Ninguna cantidad de filas en las etiquetas: ni `COUNT(*)` por tabla, ni `TABLE_ROWS`, ni `SHOW TABLE STATUS`. Con **129 tablas** —y la mitad de los round-trips contra la RDS de prod por internet— el primer paso de la herramienta tardaría decenas de segundos en dibujarse. El único `COUNT(*)` es el del `run`, sobre la tabla ya elegida y con la terminal mostrando en qué anda.
+- **Copia destructiva, siempre.** Si la tabla existe en destino se le hace `TRUNCATE` (no `DELETE`: reinicia el `AUTO_INCREMENT`, es más rápido y garantiza que los IDs del origen no colisionen); si no existe, se crea con el `SHOW CREATE TABLE` del origen. **No hay modo "append"** — esto no es un mergeador.
+- **El DDL se ejecuta literal.** Dev corre MySQL 8.0 y prod MariaDB 10.11: si el otro motor no acepta el `CREATE TABLE`, el error del driver se ve tal cual en la terminal. No se reescribe nada — adivinar equivalencias entre motores es como se corrompe un esquema en silencio.
+- **Lotes de 200 filas** con `FOREIGN_KEY_CHECKS = 0` + `UNIQUE_CHECKS = 0` durante la corrida, y cursor **no bufferado** en el `SELECT` del origen (`senales` tiene ~725K filas: bufferarlas voltea el proceso). Si un lote falla, se reintenta **fila por fila** para aislar la rota: cada error puntual es una línea roja y la corrida **sigue**.
+- **Las dos conexiones fijan `SET time_zone = '-03:00'`**, igual que `db()`. No es cosmético: una columna `TIMESTAMP` se lee convertida a la zona de la sesión y se escribe convertida de vuelta — con zonas distintas la tabla destino quedaría corrida unas horas sin que nada avise.
+- **Confirm reforzado cuando el destino es prod**: se reusa `confirmarMigrador()` (§29) con título `Sincronizar a PRODUCCIÓN`, copy con el nombre de la tabla, label `Copiar a prod` y `danger:true`.
+- **Cierre bloqueado durante la corrida**: el botón `Cerrar`, el click en el backdrop y ESC muestran el toast `Esperá a que termine la sincronización` en vez de cerrar. Los dos selectores y el botón quedan `disabled` hasta el evento `done`. Para cortar de verdad hay que cerrar la pestaña — el server lo detecta y termina, y la tabla queda parcial hasta el próximo `TRUNCATE`.
+- **Sin rollback transversal**: la copia no va en transacción (el `TRUNCATE` hace commit implícito). Si falla a mitad, el destino queda parcialmente copiado; el operador reintenta y el `TRUNCATE` siguiente lo limpia.
+- **`.terminal-log` es una clase nueva del CSS global** (§38 de `style.css`), no del módulo. **No es `.terminal-live`** del Programador de tareas (§33): aquella vuelca texto plano en gris sobre `#0d1117`; ésta pinta cada línea según el `type` del evento — verde por defecto, `success` verde brillante en negrita con `✓`, `warn` rojo suave con `⚠`, `error` rojo brillante en negrita con `✗`. Alto fijo 320px con scroll interno.
+- **Las líneas se appendean con `textContent`, nunca `innerHTML`**: vienen del server y pueden traer el mensaje crudo del motor SQL.
+- **El nombre de la tabla se valida en el server** con `^[A-Za-z0-9_]{1,64}$` antes de interpolarlo: va literal en `SHOW CREATE TABLE`, `TRUNCATE`, `INSERT INTO` y `ALTER TABLE`, donde no hay placeholders posibles.
+- **Nada de credenciales en las respuestas**: `sincEntornoInfo()` devuelve `host` y `database` y nunca `DB_USER` / `DB_PASS`.
+- **Origen y destino no pueden ser el mismo entorno** — el server corta con línea roja antes de tocar nada.
+
+## 33-ter. Herramientas: Comparador DB
+
+Utilidad de **Herramientas** (§27) que compara la **estructura** de la base de desarrollo contra la de producción y reporta las diferencias en vivo. Es **estrictamente de lectura** en los dos lados: se apoya entera en `information_schema`, no hace `SELECT` de datos, no ejecuta DDL y no escribe nada. El tile es `fa-code-compare` / **Comparador DB**.
+
+**Un solo modal** (max-width **960px**) siguiendo el estándar (§21-bis): header primario, `.modal-menubar` con `Cerrar` (ghost) + `Comparar` + `Copiar log`, **sin footer**. El cuerpo es una nota breve, un `<pre class="terminal-log terminal-log-diff">` con el log y una línea `.run-status` al pie que muestra la última línea recibida mientras corre y el resumen coloreado al terminar.
+
+**Un solo endpoint**, `POST api/comparar_db.php`, que devuelve `text/plain` en streaming — una línea por evento — y cierra **siempre** con `___END___ {json}`. No hay `GET list` ni `cancel`.
+
+**Reglas:**
+- **Dev-only en dos capas, las dos obligatorias.** El backend responde **403** con línea `[FAIL]` + `___END___` si `APP_ENV !== 'development'`. Y en el frontend la tarjeta **no se dibuja** en producción: `toolsCatalog` marca la herramienta con `soloDev: true` y `renderTools()` la filtra contra `<body data-env>`, que escribe `index.php`. **No es `display:none`** — la tarjeta no está en el DOM. La defensa real es el 403; el filtro es para que la grilla no ofrezca lo que el server va a rechazar.
+- **El `data-tool-idx` indexa la lista YA filtrada.** Con el catálogo crudo, en producción cada tarjeta abriría la herramienta siguiente a la suya.
+- **El auth es `authUser()`, no `requireAuth()`**, y no es un descuido: `requireAuth()` contesta JSON o un `Location` de redirect, y las dos cosas rompen el stream. El 401 sale por el mismo canal que todo lo demás. Va **antes** de tocar el `.env.production`: un no autenticado no provoca siquiera el `file()` sobre las credenciales del otro entorno.
+- **`bootstrap.php` se incluye con `CLOUD_API_PUBLIC`** — sólo por `db()`, que es la conexión al entorno propio que la herramienta reusa en vez de abrir la suya — y hay que **volver a apagar `display_errors`** después: bootstrap lo prende en desarrollo, que es justo donde corre esta herramienta, y un warning inline se colaría como una línea más del stream.
+- **`emit()` es la única salida y `emitFin()` el único final.** Ningún `echo` suelto (rompe el newline o el flush) y ningún `exit` sin `___END___` antes (el frontend queda esperando).
+- **Buffering apagado a mano**: `ob_end_flush()` en loop, `implicit_flush`, `zlib.output_compression=0`, `apache_setenv('no-gzip')` y `X-Accel-Buffering: no`.
+- **POST y no GET** a propósito: así ningún prefetch / preview del navegador dispara una comparación contra producción.
+- **Seis consultas de estructura, no cuatro por tabla.** El esquema entero de cada lado se trae de un barrido por área (columnas / índices / FKs) — con 129 tablas, una consulta por tabla son cientos de round-trips contra un RDS remoto que ya tarda ~1,5 s sólo en conectarse. Con el barrido la corrida completa tarda **3,4 s**.
+- **LOS DOS LADOS NO CORREN EL MISMO MOTOR, Y SIN NORMALIZAR EL REPORTE NO SE PUEDE LEER.** Dev es MySQL 8.0 y prod MariaDB 10.11; los dos describen el mismo esquema con textos distintos en `information_schema`. Medido sobre las 1.049 columnas comunes: **409 difieren sólo por el ancho de display de los enteros** (`int` en MySQL 8.0.19+ ↔ `int(11)` en MariaDB) y **864 sólo por cómo cada motor devuelve el default** (MariaDB lo da como *texto de expresión*: el default NULL vuelve como la cadena `NULL` de cuatro caracteres y un literal vuelve entrecomillado). Sin traducir eso el comparador reportaba **0 tablas idénticas de 120** y 3.140 líneas de log; con la normalización reporta **120 idénticas** en 278 líneas. Se normalizan tres cosas y nada más: ancho de display de enteros (sólo de los tipos enteros — en `varchar(255)` o `decimal(10,2)` el número sí es semántico), formato del `DEFAULT`, y el marcador `DEFAULT_GENERATED` que MySQL agrega al `EXTRA`. **Son representaciones, no semántica**: `varchar(50)` vs `varchar(100)`, `int` vs `bigint`, default `0` vs `1`, default NULL vs el literal `'NULL'` y `auto_increment` vs vacío siguen dando distinto.
+- **El desentrecomillado del default se aplica SÓLO del lado MariaDB.** En MySQL un default que de verdad valga `'foo'` con las comillas incluidas es un valor legítimo.
+- **Lo que se muestra es lo que se comparó**: el side-by-side imprime los valores ya normalizados, no los crudos. Si el log dijera una cosa y la comparación usara otra, el operador no podría auditar la decisión.
+- **Cuando los motores difieren, el log lo dice** en la cabecera. Que difieran es lo normal en este proyecto, no una anomalía — el aviso es para que nadie lea "idéntica" como "byte por byte igual".
+- **Cuatro prefijos y ninguno más**: `[OK]` verde · `[WARN]` ámbar · `[FAIL]` rojo · `[SKIP]` gris. El frontend detecta con `\[(OK|SKIP|WARN|FAIL)\]` y colorea la línea entera. Las líneas narrativas (títulos, contadores, `[i/N] tabla…`) van sin prefijo, en gris.
+- **El escape va ANTES de detectar el prefijo**: un nombre de tabla o columna con `<` no puede inyectar HTML en el `<pre>`.
+- **El marcador `___END___` no se pinta ni se copia** — es protocolo, no log. Si el stream termina sin él, el status pinta *"Respuesta incompleta del servidor"* en rojo: eso atrapa al reverse proxy que corta el stream y al `exit` prematuro del backend.
+- **Un chunk de red no es una línea.** El buffer acumula lo que entrega el `TextDecoder` y se corta por `\n`; nunca asumir que un `read()` trae líneas completas.
+- **Cierre bloqueado durante la corrida** (botón, backdrop y ESC): hay dos PDO abiertos, uno contra el RDS de producción. **Sin `AbortController`** — abortar un `fetch` a mitad de un `information_schema` deja conexiones colgadas hasta el `set_time_limit`.
+- **`Copiar log` se alimenta del array de líneas crudas**, no del texto del `<pre>` (que ya tiene los `<span>` de color encima). Sirve a mitad de corrida.
+- **Sin persistencia**: no crea tablas, no cachea el resultado entre corridas, cada apertura del modal parte del placeholder.
+- **Diagnostica y nada más.** No propone `ALTER TABLE`, no sincroniza esquemas, no genera migraciones. Un drift se corrige con un `.sql` explícito y versionado en el Migrador DB (§29).
+- **CSS**: reusa la caja de `.terminal-log` (§38) con la variante `.terminal-log-diff` (§39), que cambia sólo lo que tiene que cambiar — neutro gris en vez del verde del sincronizador (en un diff casi todas las líneas son narrativas y pintarlas de verde dice "todo bien" sobre un log lleno de diferencias) y alto elástico hasta `52vh` en vez del alto fijo.
+
 ## 34. Selector de ids (Roles y Controladores)
 
 Control de modal de Alta/Edición para elegir un subconjunto de un catálogo de decenas de opciones. Lo usan dos campos, en dos módulos, y los dos guardan el dato en una **tabla puente con FK**:

@@ -10,11 +10,15 @@ declare(strict_types=1);
  * Es una copia y no un include porque las cuatro apps no comparten docroot,
  * igual que pasa con `habilitado.php` o `permisos.php`.
  *
- * EL SITIO PÚBLICO ESCRIBE EN UNA SOLA TABLA: `tecnicos`, cuando alguien
- * completa el formulario de registro. Todo lo demás —entradas, categorías,
- * parámetros— lo carga el back office y acá sólo se lee. Vale tenerlo presente
- * al agregar una página: este docroot es el único al que le pega cualquiera de
- * internet sin estar logueado.
+ * EL SITIO PÚBLICO ESCRIBE EN TRES TABLAS Y NADA MÁS: `tecnicos`, cuando
+ * alguien completa el formulario de registro, y `conversaciones` /
+ * `conversaciones_mensajes`, con cada mensaje del chat. Todo lo demás —entradas,
+ * categorías, parámetros— lo carga el back office y acá sólo se lee.
+ *
+ * Vale tenerlo presente al agregar una página: este docroot es el único al que
+ * le pega cualquiera de internet sin estar logueado. Las dos del chat además se
+ * escriben SIN que nadie complete un formulario, y cada fila dispara una llamada
+ * paga a OpenAI — por eso tienen cupos, ver `lib/chat.php`.
  */
 
 require_once dirname(__DIR__, 2) . '/env.php';

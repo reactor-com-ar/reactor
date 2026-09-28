@@ -15677,7 +15677,7 @@
                 tr.addEventListener('click', () => dbExpAbrirTabla(tr.dataset.tabla));
             });
         }
-        info.innerHTML = `<span>${rows.length} tabla${rows.length === 1 ? '' : 's'}${q ? ` (filtradas de ${dbExpTablas.length})` : ''}</span>`;
+        info.innerHTML = `<span>${rows.length} tabla${rows.length === 1 ? '' : 's'}${terminos.length ? ` (filtradas de ${dbExpTablas.length})` : ''}</span>`;
     }
     function dbExpFiltrarTablas() {
         dbExpFiltro = (_dbExpBackdrop.querySelector('#dbExpSearch').value || '').trim();
@@ -15787,7 +15787,7 @@
         }
         const meta = _dbExpBackdrop.querySelector('#dbExpRecsMeta');
         let mt = `${filas.length}/${dbExpRegsTotal}`;
-        if (q && filas.length !== dbExpRegistros.length) mt += ` (filtrados de ${dbExpRegistros.length})`;
+        if (terminos.length && filas.length !== dbExpRegistros.length) mt += ` (filtrados de ${dbExpRegistros.length})`;
         if (!dbExpPkCols.length && dbExpRegistros.length > 0) mt += ' · solo lectura';
         meta.textContent = mt;
     }

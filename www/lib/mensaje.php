@@ -48,11 +48,22 @@ function wwwAviso(string $texto, string $destino = '/', string $titulo = 'Aviso'
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
 
+    <?php
+    // Font Awesome 6.5.1 Pro autohospedado, igual que en `sistema/cabeza.php`
+    // (esta pantalla no pasa por la cabecera común, así que lo repite). El
+    // cache-bust es el `filemtime` del propio CSS, no `version.txt`.
+    $faVer = @filemtime($_SERVER['DOCUMENT_ROOT'] . '/fontawesome/css/all.min.css') ?: $version;
+    ?>
+    <link rel="stylesheet" href="/fontawesome/css/all.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-solid.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-regular.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-light.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-thin.min.css?v=<?= e((string) $faVer) ?>">
+
     <link rel="stylesheet" href="/css/plugins.css?v=<?= e($version) ?>">
     <link rel="stylesheet" href="/quform/css/base.css?v=<?= e($version) ?>">
     <link rel="stylesheet" href="/css/styles-red.css?v=<?= e($version) ?>">
     <link rel="stylesheet" href="/css/custom.css?v=<?= e($version) ?>">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.0.0-beta2/css/all.min.css">
 </head>
 
 <body>

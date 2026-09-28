@@ -20,8 +20,14 @@
 /* == et-line icon font == */
 @import url("plugins/et-line.css");
 
-/* == fontawesome icon font == */
-@import url("plugins/fontawesome-all.min.css");
+/* == fontawesome ==
+   No va aca. El paquete Pro 6.5.1 autohospedado (/fontawesome/) lo enlazan
+   directo `sistema/cabeza.php` y `lib/mensaje.php`: los `@import` de este
+   archivo viajan sin `?v=`, y el cache-bust de FA es el `filemtime` de su
+   propio CSS. Lo que se importaba aca era la copia Free 6.0.0
+   (`plugins/fontawesome-all.min.css` + `fonts/fa-*`), eliminada el
+   28/09/2026 junto con el `<link>` al CDN de jsdelivr.
+   Ver /fontawesome/README.md. */
 
 /* == themify font == */
 @import url("plugins/themify-icons.css");

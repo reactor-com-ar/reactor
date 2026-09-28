@@ -25,6 +25,10 @@ declare(strict_types=1);
  *     formulario no devolvía nada. Ahora va a `/search/results`.
  *   - Los assets llevan `?v=` con el contenido de `version.txt` en vez del
  *     `?rnd=478` fijo, que nunca cambiaba y dejaba el CSS viejo cacheado.
+ *   - FontAwesome se cargaba DOS veces y ninguna era la buena: la copia Free
+ *     6.0.0 del theme (por `css/plugins.css`) y encima un `<link>` a
+ *     `cdn.jsdelivr.net` con la **beta** 6.0.0-beta2, que la pisaba. Ahora es
+ *     el paquete Pro 6.5.1 autohospedado de `/fontawesome/`, sin terceros.
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
@@ -78,6 +82,25 @@ $wwwVersion = wwwVersion();
     <meta name="msapplication-TileColor" content="#ffffff">
     <meta name="msapplication-TileImage" content="/favicon/ms-icon-144x144.png">
 
+    <?php
+    // Font Awesome 6.5.1 Pro autohospedado (/fontawesome/). `all.min.css` trae
+    // las familias Classic (solid/regular/light/thin), Duotone y Brands; las
+    // cuatro hojas `sharp-*` agregan los @font-face de la familia Sharp, que
+    // `all.min.css` mapea pero no declara.
+    //
+    // Va enlazado acá y NO como un `@import` de `css/plugins.css` —que es donde
+    // vivía la copia Free— por el cache-bust: los `@import` de ese archivo
+    // viajan sin `?v=`. El de FA es el `filemtime` del propio CSS, así que
+    // reemplazar el paquete lo refresca solo y un bump de `version.txt` no
+    // obliga a rebajar la fuente.
+    $faVer = @filemtime($_SERVER['DOCUMENT_ROOT'] . '/fontawesome/css/all.min.css') ?: $wwwVersion;
+    ?>
+    <link rel="stylesheet" href="/fontawesome/css/all.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-solid.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-regular.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-light.min.css?v=<?= e((string) $faVer) ?>">
+    <link rel="stylesheet" href="/fontawesome/css/sharp-thin.min.css?v=<?= e((string) $faVer) ?>">
+
     <!-- plugins -->
     <link rel="stylesheet" href="/css/plugins.css?v=<?= e($wwwVersion) ?>">
 
@@ -99,8 +122,6 @@ $wwwVersion = wwwVersion();
              pintar, así que el botón flotante aparecería un instante sin estilo. -->
         <link rel="stylesheet" href="/css/chat.css?v=<?= e($wwwVersion) ?>">
     <?php endif; ?>
-
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.0.0-beta2/css/all.min.css">
 
     <?php wwwAnalytics(); ?>
 

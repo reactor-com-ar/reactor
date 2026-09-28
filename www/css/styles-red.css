@@ -1570,7 +1570,7 @@ a:hover, a:active {
         font-weight: 700;
         vertical-align: middle;
         color: #f83f2a;
-        font-family: Font Awesome\ 5 Free;
+        font-family: "Font Awesome 6 Pro";
         padding: 0 10px 0 10px; }
       .breadcrumb ul li:last-child:after {
         content: none; }
@@ -4601,7 +4601,7 @@ a:hover, a:active {
   background-color: #f83f2a; }
   .testimonial4-carousel .testimonial-block .quote-icon:before {
     content: '\f10d';
-    font-family: Font Awesome\ 5 Free;
+    font-family: "Font Awesome 6 Pro";
     font-weight: 600;
     font-size: 14px; }
 .testimonial4-carousel .testimonial-rating {
@@ -4884,7 +4884,7 @@ a:hover, a:active {
     left: 0;
     top: -55px;
     right: 0;
-    font-family: Font Awesome\ 5 Free;
+    font-family: "Font Awesome 6 Pro";
     content: '\f10e';
     font-weight: 600;
     color: #eeeeee;
@@ -6619,7 +6619,7 @@ h2.resp-accordion.resp-tab-active {
     background: #f83f2a; }
   .widget-nav-menu ul li a:after {
     content: '\f30b';
-    font-family: Font Awesome\ 5 Free;
+    font-family: "Font Awesome 6 Pro";
     position: absolute;
     right: 20px;
     transition: width 0.5s linear;
@@ -8548,7 +8548,7 @@ pre[class*="language-"] {
     position: absolute;
     content: '\f061';
     font-weight: 700;
-    font-family: Font Awesome\ 5 Free;
+    font-family: "Font Awesome 6 Pro";
     display: block;
     color: #f83f2a;
     top: 60px;
@@ -8782,7 +8782,7 @@ footer {
       .footer-list-style2 li a:after {
         content: '\f105';
         font-weight: 700;
-        font-family: Font Awesome\ 5 Free;
+        font-family: "Font Awesome 6 Pro";
         color: #ffffff;
         position: absolute;
         right: 0;
@@ -8816,7 +8816,7 @@ footer {
       .footer-list-style3 li a:before {
         content: '\f105';
         font-weight: 700;
-        font-family: Font Awesome\ 5 Free;
+        font-family: "Font Awesome 6 Pro";
         color: #ffffff;
         padding-right: 8px;
         transition-duration: .3s; }

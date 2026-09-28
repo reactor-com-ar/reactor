@@ -301,6 +301,49 @@ Del legacy se copió sólo lo que alguna página pide: 15 MB en vez de los 250 M
 `img/shop`, `img/team`). Si falta una imagen, está en
 `reactor_legacy/reactor-www/img/`.
 
+### Font Awesome 6.5.1 Pro, y es el ÚNICO (28/09/2026)
+
+El paquete autohospedado vive en [fontawesome/](fontawesome/) — el mismo recorte
+que `panel/assets/fontawesome/` y `cloud/assets/fontawesome/`, de donde se copió.
+Lo enlazan [sistema/cabeza.php](sistema/cabeza.php) y
+[lib/mensaje.php](lib/mensaje.php), que son los dos únicos `<head>` del sitio.
+El detalle del paquete está en [fontawesome/README.md](fontawesome/README.md).
+
+- **Antes se cargaba DOS veces y ninguna era la buena**: la copia **Free 6.0.0**
+  del theme (`css/plugins/fontawesome-all.min.css`, importada desde
+  `css/plugins.css`, con sus cuatro fuentes en `fonts/fa-*`) y encima un `<link>`
+  a `cdn.jsdelivr.net` con `fontawesome-free@6.0.0-beta2` puesto **al final del
+  `<head>`**, o sea una **beta** de otra versión, servida por un tercero, que
+  además ganaba por orden. Las dos se eliminaron.
+- **Ir a Pro no cambia cómo se escriben las clases, cambia qué íconos existen.**
+  El theme mezcla las tres notaciones (`fa-solid fa-comment-dots`, `fas fa-search`,
+  `fa fa-home`) y las tres siguen resolviendo. Lo que en Free caía en cuadrado
+  vacío es el estilo **regular**, que ahí trae ~160 íconos: por eso
+  `far fa-file-pdf`, `far fa-envelope` y `far fa-paper-plane` —el catálogo y el
+  formulario de contacto— recién ahora renderizan.
+- **Se enlazan las cinco hojas** (`all.min.css` + las cuatro `sharp-*`) y eso no
+  cuesta los 4 MB de `webfonts/`: el browser pide cada `.woff2` recién cuando la
+  página dibuja un glifo de esa familia, así que hoy bajan tres de los once. Las
+  `sharp-*` van porque `all.min.css` **mapea** las clases `fa-sharp` pero no
+  declara sus `@font-face`.
+- **NO se importa desde `css/plugins.css`**, a diferencia de todos los demás
+  plugins del theme: los `@import` de ese archivo viajan sin `?v=`. El cache-bust
+  de FA es el **`filemtime` de `fontawesome/css/all.min.css`**, independiente de
+  `version.txt` — reemplazar el paquete lo refresca solo, y un bump de
+  `version.txt` no obliga a rebajar los ~350 KB de la fuente. Mismo criterio que
+  `panel/index.php`.
+- **Los pseudo-elementos del theme piden la familia por NOMBRE, no por clase**, y
+  pedían una que nunca estuvo declarada en este sitio: `Font Awesome\ 5 Free`.
+  Son siete adornos de `css/styles-red.css` —flechas del breadcrumb, comillas de
+  los testimonios, chevrones del footer— que venían saliendo en blanco con Free
+  6 **y también con la beta del CDN**, porque ninguna de las dos declara esa
+  familia. Ahora dicen `"Font Awesome 6 Pro"`. **Al tocar el theme, ojo con
+  esto**: un `content: '\f105'` no falla, simplemente no dibuja nada.
+- **No se copió `icons.json`** (~630 KB), que sí está en `panel/` y `cloud/`: es
+  el catálogo del "Explorador FA6" del módulo Herramientas y acá no hay módulo
+  que lo consuma. Este docroot además **no tiene login**: todo lo que se deje
+  adentro queda publicado.
+
 ## Qué NO se portó, y por qué
 
 - **Las fichas de los tres dispositivos** (`CE-B1COC`, `CE-D4CO`, `CEMA-M3NO`).

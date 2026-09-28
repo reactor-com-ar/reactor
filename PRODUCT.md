@@ -3,7 +3,7 @@
 Documento de producto: **qué es Reactor, quién lo usa y cómo se mueve un dato
 desde que alguien aprieta un botón en el celular hasta que un relé cambia de
 estado** — y al revés. No es un manual de estilo ni un plan de trabajo: describe
-el sistema tal como está hoy en este repositorio.
+el sistema tal como funciona hoy.
 
 Los detalles de implementación que no se deducen del código viven en los
 CLAUDE.md de cada app ([CLAUDE.md](CLAUDE.md), [panel/CLAUDE.md](panel/CLAUDE.md),
@@ -23,27 +23,18 @@ un consorcio, un barrio privado, un comercio. Dentro de un dominio hay
 dispositivos, usuarios y paneles de operación. Un usuario puede tener acceso a
 varios dominios y moverse entre ellos.
 
-En números de producción (medidos durante el desarrollo, ver los CLAUDE.md):
-~147 dominios, ~2.030 cuentas de usuario, ~2.060 perfiles habilitados, ~250
-dispositivos repartidos entre dos brokers MQTT, ~2,95 M de filas en `registros`
-y ~725 K señales vivas.
+En números de producción: ~147 dominios, ~2.030 cuentas de usuario, ~2.060
+perfiles habilitados, ~250 dispositivos repartidos entre dos brokers MQTT, ~2,95 M
+de filas en `registros` y ~725 K señales vivas.
 
-### El sistema legacy sigue vivo
+El sistema tiene cuatro caras, y cada una atiende a un público distinto:
 
-Este repo **no es un rewrite de cero**: convive con un sistema anterior
-(`reactor-app`, `reactor-api`, `reactor-panel`, `reactor-www`, fuera de este
-repositorio) que **comparte la misma base de datos**. Esa es la restricción de
-diseño más importante de todo el proyecto:
-
-- El esquema es histórico y no se rediseña: nombres, tipos y centinelas vienen
-  de ahí ([db/schema.sql](db/schema.sql) es la referencia única).
-- Las contraseñas usan el **cifrado reversible histórico** de Reactor, no bcrypt.
-- Columnas como `perfiles.tipo` se conservan porque **el legacy las lee y reparte
-  permisos con ellas**, aunque las apps nuevas no las usen para eso.
-- El **motor Python que escribe el estado de los canales sigue siendo el del
-  legacy** (`reactor-api/motor/inicio.py`): las apps nuevas sólo leen esa columna.
-- Cada migración que renombra algo tiene que considerar qué pantalla vieja queda
-  apuntando a la tabla que ya no existe (caso `instaladores` → `tecnicos`).
+| Cara | Para quién |
+|---|---|
+| **App** | el usuario final: los botones que operan los equipos |
+| **Panel** | el administrador del dominio: administra *su* dominio |
+| **Cloud** | los operadores de Reactor: administran la plataforma entera |
+| **Sitio público** | cualquiera: marca, planes, blog, ayuda, técnicos |
 
 ---
 
@@ -56,24 +47,23 @@ en desarrollo y en producción ([docker/vhosts.conf](docker/vhosts.conf),
 
 | Puerto | Carpeta | Producción | Qué es | Quién entra |
 |---|---|---|---|---|
-| 8086 | [cloud/](cloud/) | `cloud.reactor.com.ar` | **Back office de Reactor**: administra la plataforma entera | Operadores de Reactor (`controladores`) |
-| 8087 | [panel/](panel/) | `panel.reactor.com.ar` | **Back office del cliente**: administra *su* dominio | Administradores del dominio (`perfiles.tipo = 'A'`) |
-| 8115 | [app/](app/) | `app.reactor.com.ar` | **PWA del usuario final**: los botones que operan los equipos | Cualquier perfil habilitado |
-| 8134 | [www/](www/) | `www.reactor.com.ar` + apex | **Sitio público**: marca, planes, blog, ayuda, técnicos | Cualquiera, sin login |
+| 8086 | [cloud/](cloud/) | `cloud.reactor.com.ar` | Back office de Reactor | Operadores de Reactor (`controladores`) |
+| 8087 | [panel/](panel/) | `panel.reactor.com.ar` | Back office del cliente | Administradores del dominio (`perfiles.tipo = 'A'`) |
+| 8115 | [app/](app/) | `app.reactor.com.ar` | PWA del usuario final | Cualquier perfil habilitado |
+| 8134 | [www/](www/) | `www.reactor.com.ar` + apex | Sitio público | Cualquiera, sin login |
 | — | [api/](api/) | — | Reservado: futura API pública. Hoy es un stub con `.htaccess` y `supervisor.php` | — |
 | — | [robot/](robot/) | — | Reservado, mismo estado que `api/` | — |
 
-Más dos procesos que no son web:
+Más dos componentes que no son web:
 
 | Componente | Qué hace |
 |---|---|
-| [motor/](motor/) | Worker Python (`reactor-motor`) suscripto al broker MQTT. **Hoy es un esqueleto**: conecta, loguea y no persiste (ver §9) |
+| [motor/](motor/) | Worker Python (`reactor-motor`) suscripto al broker MQTT: escucha lo que reportan los equipos |
 | [firmware/](firmware/) | Sketches Arduino para ESP8266 y ESP32 — el software que corre adentro de los equipos |
 
 Alias de producción que resuelven al mismo vhost: `pwa.`, `newapp.` y `webapp.`
-apuntan a `app`; `reactor.com.ar` (apex) apunta a `www`. **`control.` no se
-proxea**: nginx lo redirige con 301 a `panel.` y existe sólo hasta que termine la
-transición desde el legacy.
+apuntan a `app`; `reactor.com.ar` (apex) apunta a `www`. `control.` no se proxea:
+nginx lo redirige con 301 a `panel.`.
 
 Cada docroot tiene su `version.txt`, que el deploy estampa con `1.0.<timestamp>`
 y que se usa como cache-bust (`?v=…`) de todo el CSS y el JS. Tocar un asset sin
@@ -111,8 +101,8 @@ dispositivos ──< senales     (qué se mandó y qué contestó el equipo)
   un único host que los alcance a todos.
 - **`canales`** — cada salida o entrada del equipo (un relé, un sensor).
   `canales.estado` es **la única fuente de verdad del tablero**, y la escribe el
-  motor Python cuando el equipo reporta. `modulos.tipo` separa actuador (`'A'`)
-  de sensor (`'S'`).
+  motor MQTT cuando el equipo reporta. `modulos.tipo` separa actuador (`'A'`) de
+  sensor (`'S'`).
 - **`paneles` → `controles` → `botones`** — la pantalla que ve el usuario. Un
   panel agrupa controles (uno por dispositivo, con nombre y color), y cada
   control tiene hasta 10 botones. `botones.accion` es `'1'` encender, `'0'`
@@ -140,13 +130,12 @@ y recién después filtra — sin eso una búsqueda vacía tarda segundos.
   Se lee con `esHabilitado()` y se escribe con `valorHabilitado()`; en SQL va el
   entero. Vale para toda columna con ese nombre, en todas las tablas y todas las
   apps.
-- **El `0` fue el centinela histórico de "sin asignar"**, no una referencia. Las
-  migraciones de FK tuvieron que convertirlo a `NULL` antes de poder declarar las
-  constraints.
+- **El `0` es un centinela de "sin asignar", no una referencia.** Las migraciones
+  de FK tuvieron que convertirlo a `NULL` antes de poder declarar las constraints.
 - Hay otros centinelas vivos: `adopciones.liberado = '1500-01-01'` significa
   "todavía en curso".
-- Todo es **InnoDB + utf8mb4_unicode_ci** desde 2026-08-14. Esa collation es lo
-  que hace que la búsqueda ignore acentos y mayúsculas sin que la query haga nada.
+- Todo es **InnoDB + utf8mb4_unicode_ci**. Esa collation es lo que hace que la
+  búsqueda ignore acentos y mayúsculas sin que la query haga nada.
 - Producción es MariaDB 10.11 sobre RDS (base `reactor`); desarrollo es MySQL 8.0
   (base `reactor_dev`, copia de producción).
 
@@ -174,7 +163,7 @@ Es el corazón del producto. Lo implementa [app/api/boton.php](app/api/boton.php
       │  {ok:true, accion:'1'}      │                            │                │
       │<────────────────────────────┤                            │                │
       │                             │                            │   REP=CEN      │
-      │                             │                     [motor Python] <────────┤
+      │                             │                     [motor MQTT] <──────────┤
       │                             │                            │                │
       │                             │              UPDATE canales.estado           │
       │  GET api/canales (sondeo)   │                            │                │
@@ -190,8 +179,7 @@ Es el corazón del producto. Lo implementa [app/api/boton.php](app/api/boton.php
    sin que la luz haya cambiado. El estado lo escribe el motor **recién cuando el
    equipo reporta que ejecutó**. El tablero dice la verdad o no dice nada.
 2. **La señal se registra DESPUÉS de publicar.** Si el broker no contesta, no
-   queda escrito que la orden salió — y el usuario ve el error (502), en vez del
-   `echo` dentro de un div oculto que hacía el legacy.
+   queda escrito que la orden salió, y el usuario ve el error (502).
 3. **El broker sale de `transceptores`, no del entorno.** Cada equipo dice a qué
    broker está conectado. La variable `MQTT_ORIGEN` permite redirigir todo al
    broker de las `MQTT_*` (`env`) — que es el **default en desarrollo**, porque la
@@ -202,7 +190,7 @@ Es el corazón del producto. Lo implementa [app/api/boton.php](app/api/boton.php
    Composer y sin extensiones. Lee el CONNACK — sin eso, unas credenciales mal
    puestas se verían como un envío exitoso.
 
-**El protocolo de los equipos** (heredado, byte por byte igual que el legacy):
+**El protocolo de los equipos:**
 
 | mensaje | sentido | significado |
 |---|---|---|
@@ -214,8 +202,7 @@ Es el corazón del producto. Lo implementa [app/api/boton.php](app/api/boton.php
 | `REP=SNS` / `REP=CAP` / `REP=CEN` | entrante | reportes periódicos de sensores |
 
 El topic es `$` + `dispositivos.identidad` al publicar, y se guarda **sin el `$`**
-en `senales.topic`, para que las filas de esta app se lean igual que las del
-legacy.
+en `senales.topic`.
 
 Por eso el gráfico "Uso por dispositivo" del panel cuenta **sólo `CMD=`**: el
 resto de la tabla es telemetría que llega sin que nadie toque el equipo. Y cuenta
@@ -245,21 +232,16 @@ leak en una no comprometa las sesiones de las otras.
   el otro. Pero `cloud` autentica contra `controladores` (los operadores de
   Reactor) y `panel` contra `usuarios` (los clientes), así que un token de cloud
   lleva `src: 'ctl'` y `authUser()` de cloud rechaza el que no lo traiga.
-- **`app` hereda la sesión del legacy.** La cookie `sesionToken` que ya tienen los
-  celulares (emitida por el sistema viejo, path `/`, un año de vida) se valida por
-  firma y se adopta: el día que `app.reactor.com.ar` apuntó acá, nadie tuvo que
-  volver a loguearse. **El `vto` no se valida** — el legacy nunca lo chequeaba, así
-  que exigirlo habría invalidado todos los tokens existentes.
 - **El login de `app` son dos pasos** porque hay dos modos de autenticación en la
   base: `'F'` fija (contraseña, ~2.050 cuentas) y `'T'` temporal (código de 6
   dígitos, ~29 cuentas). El primer paso identifica la cuenta y el segundo decide
-  la pantalla. **El camino `'T'` hoy no entrega el código**: el mensaje se encola
-  en `mensajes` y en este monorepo todavía no hay worker que consuma esa cola.
-- **El cifrado de contraseñas es el histórico de Reactor** (XOR sumativa contra
-  una clave rotada + base64, clave `0123456789`), no un hash. Es **reversible**, y
-  esa es la razón por la que el back office puede mostrar la contraseña vigente y
-  el legacy podía mandarla por mail. `usuarios.contrasena` es `varchar(50)`, lo
-  que impone el **máximo de 36 caracteres** en toda pantalla que la escriba.
+  la pantalla.
+- **La sesión de `app` dura un año y se renueva en cada visita.** Es una PWA
+  instalada en el celular: una sesión que se cierra sola sería una regresión de
+  producto.
+- **Las contraseñas usan un cifrado reversible**, no un hash. `usuarios.contrasena`
+  es `varchar(50)` y guarda el base64 del cifrado, lo que impone el **máximo de 36
+  caracteres** en toda pantalla que la escriba.
 
 **Los gates se resuelven contra la base en cada request, nunca contra un claim
 del JWT.** Revocar un acceso tiene efecto en el request siguiente y no al vencer
@@ -335,11 +317,10 @@ aceptación, emitida desde dos lados:
 | crea | **Operador** (`tipo = 'O'`) | **Operador** |
 | permisos | `operacion` 1 / `invitacion` 1 / `facturacion` 0 | ídem |
 
-**Una invitación da de alta un Operador, se emita donde se emita.** El argumento:
-`tipo` la lee el sistema legacy —que sí reparte permisos con ella—, así que poner
-`A` desde una invitación le abriría al invitado el back office viejo entero sin
-que nadie lo haya decidido. **Consecuencia: la invitación del panel ya no da
-acceso al panel.**
+**Una invitación da de alta un Operador, se emita donde se emita**, y por lo tanto
+**la invitación del panel no da acceso al panel**: quien la acepta opera la app.
+Ningún camino automático fabrica un Administrador — se otorga desde el alta de
+`cloud` o editando el perfil en Usuarios.
 
 Al aceptar hay tres casos:
 
@@ -381,8 +362,7 @@ Otros detalles que no se deducen del esquema:
 `panel/recuperar/` y `app/recuperar/` son el mismo circuito sobre la tabla
 `recuperaciones`: 32 bytes de CSPRNG por correo, de los que **en la base queda
 sólo el SHA-256**, 60 minutos de vigencia, cupo de 3 por cuenta y 10 por IP por
-hora. Reemplaza al legacy, que mandaba **la contraseña** en el cuerpo del mail
-(podía, porque el cifrado es reversible).
+hora.
 
 - **Cada una busca la cuenta con el criterio de su propio login** — `panel` por
   `usuario`/`correo`, `app` por `celular`/`correo`. Copiar el criterio haría que la
@@ -400,6 +380,10 @@ hora. Reemplaza al legacy, que mandaba **la contraseña** en el cuerpo del mail
 - **Cambiar la contraseña no cierra las sesiones abiertas**: el token es stateless.
 - **En `app` el correo muerde de verdad**: a la app se entra por celular, así que
   hay cuentas sin correo cargado y ésas no pueden recuperar.
+- **La de `app` abre la sesión al guardar** y la del panel manda al login. No es
+  una asimetría caprichosa: `app` corre en el host de su propia cookie, y la
+  credencial salió por correo a la casilla de la propia cuenta, así que quien la
+  tiene acaba de elegir la contraseña y entraría igual tipeándola.
 
 ### 7.3 Enlaces de acceso (los "enlaces mágicos")
 
@@ -447,8 +431,8 @@ hasta 10 botones.
   el color configurado. Tres estados con precedencia: deshabilitado > desconectado
   > online.
 - **El sondeo es uno solo para todo el panel** (`api/canales.php`), no uno por
-  control por segundo como el legacy — que en un panel de 6 controles eran 6
-  requests por segundo, cada uno con su arranque de PHP.
+  control: un panel de 6 controles sondeados por separado son 6 requests por
+  segundo, cada uno con su arranque de PHP y sus consultas.
 - **Si la situación del dominio es `'3'` (suspendido) no se dibuja ningún
   control.** Con `'2'` (limitado) se muestra la advertencia pero el servicio anda.
   Cualquier valor inesperado se comporta como normal: ante un dato raro conviene
@@ -467,12 +451,13 @@ hasta 10 botones.
 Ayuda) · Instalar. Los dos agrupadores del dominio no se dibujan si la cuenta no
 tiene ningún perfil habilitado.
 
-**El service worker** ([app/serviceworker.js](app/serviceworker.js)) vive en
-`/serviceworker.js` **y no se puede renombrar**: es la ruta que los celulares ya
-tienen registrada del legacy, cuyo worker era cache-first sobre todo el origen y
-sin vencimiento. La estrategia nueva: **red primero** para navegaciones y datos
-(`api/` no se cachea nunca — cachearlo sería mostrar un tablero mentiroso),
-**cache primero** para los estáticos versionados.
+**El service worker** ([app/serviceworker.js](app/serviceworker.js)) usa **red
+primero** para navegaciones y datos, **cache primero** para los estáticos
+versionados. `api/` **no se cachea nunca**: cachearlo sería mostrar un tablero
+mentiroso, una luz apagada que figura encendida. Los estáticos sí, porque viajan
+con `?v=<version.txt>` y cada deploy cambia la URL — cachearlos por URL exacta no
+puede servir nada viejo y saca de la ruta crítica los dos recursos que bloquean el
+render.
 
 **Dos banners**, porque en `display: standalone` no hay barra de direcciones ni
 pull-to-refresh y el usuario no tiene ningún gesto para recargar: el de nueva
@@ -500,10 +485,10 @@ registro de otro dominio pasando un id a mano.
   la edición es del perfil (tipo, permisos, paneles).
 - **Dispositivos**: el alta es **adoptar** un equipo y la baja es **liberarlo** — no
   hay borrado.
-- **El `Código` (el id) no se muestra en ningún módulo**: es la PK del sistema
-  histórico y no identifica nada que el cliente reconozca. Cada módulo tiene su
-  identificador legible (`uuid`, `usuario`, `telefono`, `numero`). Lo que sí se
-  conserva es *Ordenar por → Código*, que es el criterio de orden y no un dato.
+- **El `Código` (el id) no se muestra en ningún módulo**: es una PK interna y no
+  identifica nada que el cliente reconozca. Cada módulo tiene su identificador
+  legible (`uuid`, `usuario`, `telefono`, `numero`). Lo que sí se conserva es
+  *Ordenar por → Código*, que es el criterio de orden y no un dato.
 
 ### 8.3 `cloud/` — el back office de Reactor
 
@@ -549,7 +534,7 @@ cualquiera de internet, sin sesión y sin límite de intentos.
   la aprobación lo habilita, la visibilidad decide si sale en la vidriera. Filtrar
   por una sola publicaría gente que pidió no aparecer.
 
-**La burbuja de chat con IA** (28/09/2026) reemplazó el enlace a WhatsApp:
+**La burbuja de chat con IA:**
 
 - **Sin `OPENAI_APIKEY` no se dibuja nada** — es cómo se apaga sin deployar, y por
   qué en desarrollo la esquina está vacía.
@@ -575,17 +560,18 @@ cualquiera de internet, sin sesión y sin límite de intentos.
 
 ### El motor
 
-[motor/main.py](motor/main.py) (`reactor-motor`) es un worker Python con
-`paho-mqtt` + `PyMySQL` que se suscribe al broker y procesa lo que reportan los
-equipos. **Hoy está en estado esqueleto**: conecta, valida MySQL al arrancar,
-loguea cada mensaje por stdout y **no inserta en la base** — la persistencia está
-marcada con TODO.
+Un worker Python con `paho-mqtt` + `PyMySQL` suscripto al broker. Es el que cierra
+el circuito de la operación: cuando un equipo reporta (`REP=CEN` / `REP=CAP` /
+`REP=SNS`) escribe `canales.estado`, que es lo que después lee el tablero, y
+mantiene `dispositivos.enlace` / `.latido` / `.conexion`, que es lo que decide si
+un control se muestra en línea o en gris.
 
-> **El motor que está en producción es el del legacy** (`reactor-api/motor/inicio.py`),
-> que es el que escribe `canales.estado` cuando el equipo reporta y el que
-> mantiene `dispositivos.enlace` / `.latido` / `.conexion`. Las apps de este repo
-> **sólo leen** esas columnas. Migrar el motor es trabajo pendiente y es el punto
-> donde más se nota que el sistema todavía es mixto.
+**Las apps no escuchan el broker**: publican órdenes y leen esas columnas. Toda la
+recepción pasa por acá.
+
+[motor/main.py](motor/main.py) de este repo está en **estado esqueleto**: conecta,
+valida MySQL al arrancar, loguea cada mensaje por stdout y no persiste — la
+persistencia está marcada con TODO.
 
 ### El firmware
 
@@ -614,10 +600,9 @@ Ciclo de vida de cada arranque:
 Hasta 8 canales por dispositivo. **Todo el comportamiento es resiliente**: una
 caída de red o de broker no reinicia el chip, sólo dispara reintentos.
 
-> Nota: el firmware usa el schema `reactor/<uid>/config` y `uid` = MAC, mientras
-> que el circuito de operación en producción usa el topic `$<identidad>` y el
-> protocolo `CMD=`/`REP=`. Son dos generaciones conviviendo: el firmware de este
-> repo es la línea nueva, y la flota instalada habla el protocolo histórico.
+**El JSON entero es la unidad de sincronización** con el cloud: se publica y se
+recibe como un snapshot atómico, sin orquestar múltiples topics ni estados
+intermedios. Una sola escritura en flash = un solo punto de verdad consistente.
 
 ---
 
@@ -635,12 +620,8 @@ Ninguna vive en este repo, y todas fallan sin voltear la página.
 | **AWS S3** | el Explorador S3 de Herramientas | [cloud/api/lib/s3.php](cloud/api/lib/s3.php) |
 | **EMQX** | los brokers MQTT | `transceptores` |
 
-- **El correo viaja por el mismo canal SES que usaba el legacy** (mismos slugs,
-  misma plantilla, mismo remite) para que los mails salgan con la misma identidad
-  visual. El legacy mandaba las invitaciones por WhatsApp; los dos caminos
-  conviven sobre la misma tabla.
 - **El alta de invitación y el envío van en una transacción**: un enlace que nadie
-  recibió no le sirve a nadie.
+  recibió no le sirve a nadie y además consume cupo.
 - **OpenAI es la única que se cobra por request**, y por eso todo lo que la rodea
   (cupos, chequeo de `Origin`, tope de caracteres) sale de ahí.
 - **Si el CRM falla, lo que se hace depende de si hay respaldo local**: en el
@@ -674,10 +655,9 @@ producción), y publica todo lo del archivo como **constantes globales** además
 sobre el archivo. **Sin defaults**: lo que falte revienta con "undefined constant",
 que dice exactamente qué agregar.
 
-Claves publicadas: `APP_ENV`, `APP_KEY_CLOUD` / `_API` / `_APP` / `_PANEL` /
-`_WWW` / `_APP_LEGACY`, `DB_*`, `MQTT_*` + `MQTT_ORIGEN`, `EMQX_DASHBOARD_PASS`,
-`AWS_*`, `DATABOX_APIKEY`, `OPENAI_APIKEY` + `OPENAI_MODELO`, `GA_MEASUREMENT_ID`,
-`WWW_GA_MEASUREMENT_ID`, `WWW_GOOGLE_ADS_ID`.
+Claves publicadas: `APP_ENV`, una `APP_KEY_<APP>` por docroot, `DB_*`, `MQTT_*` +
+`MQTT_ORIGEN`, `EMQX_DASHBOARD_PASS`, `AWS_*`, `DATABOX_APIKEY`, `OPENAI_APIKEY` +
+`OPENAI_MODELO`, `GA_MEASUREMENT_ID`, `WWW_GA_MEASUREMENT_ID`, `WWW_GOOGLE_ADS_ID`.
 
 Los `.env.*` están en `.gitignore` y **nunca se commitean, ni se loguean, ni se
 imprimen**.
@@ -814,13 +794,12 @@ banner de versión.
 
 | Qué | Estado |
 |---|---|
-| **Motor MQTT propio** | esqueleto: conecta y loguea, no persiste. **El que corre en producción es el del legacy** |
-| **Login `autenticacion = 'T'`** | el código se encola en `mensajes` pero no hay worker que lo consuma: esas ~29 cuentas no pueden completar el login por ese camino |
+| **Motor MQTT de este repo** | esqueleto: conecta y loguea, no persiste |
+| **Login `autenticacion = 'T'`** | el código de 6 dígitos se encola en `mensajes` y no hay worker que lo consuma: esas ~29 cuentas no pueden completar el login por ese camino |
 | **Roles y permisos de `cloud`** | las tablas existen y se asignan, pero **ningún endpoint los mira**: entrar a cloud es todo o nada |
 | **`api/` y `robot/`** | docroots reservados, stubs vacíos |
-| **Módulo Alertas de `cloud`** | ruta registrada con `renderStub` |
+| **Módulo Alertas de `cloud`** | ruta registrada con un stub |
 | **Buscador público de `www`** | sigue con un solo `LIKE` de la frase entera; no usa el método del proyecto |
-| **`control.reactor.com.ar`** | redirect temporal de transición, se elimina cuando termine |
 | **Dominio sin Administrador** | *Camino al Puente Viejo* (#160) tiene 33 perfiles, los 33 Operador: nadie puede administrarlo salvo desde `cloud` |
 
 **Riesgos operativos conocidos:**
@@ -832,7 +811,5 @@ banner de versión.
 - **La base de desarrollo es copia de producción**, incluidos los `transceptores`.
   `MQTT_ORIGEN=env` es lo que impide que una prueba encienda la luz de un cliente.
 - **Las contraseñas usan cifrado reversible.** Quien lea la base las lee todas.
-  Migrar a bcrypt exige reset masivo o doble write, porque el legacy valida con el
-  mismo algoritmo.
 - **Borrar un usuario obliga a borrar antes todos sus perfiles** (`usuarios` y
   `perfiles` se referencian mutuamente y casi todo el esquema es `RESTRICT`).

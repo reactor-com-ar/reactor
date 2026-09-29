@@ -281,19 +281,38 @@ function appSesionCerrar(): void
 /**
  * Guarda el usuario elegido en el paso 1. Cookie firmada y de vida corta en
  * vez de sesión PHP nativa: el resto del monorepo tampoco usa `$_SESSION`.
+ *
+ * `$claveEmitida` es el unix time del último código de verificación mandado
+ * por correo, o 0 si todavía no se mandó ninguno. Lo escribe `sesion/clave.php`
+ * llamando de nuevo a esta función, y resuelve dos cosas de una:
+ *
+ *   - NO REENVIAR EN CADA CARGA DE LA PANTALLA. Antes cada GET de
+ *     `sesion/clave` generaba un código nuevo y encolaba un mensaje, así que un
+ *     refresh (o volver con el botón del navegador) invalidaba el código que la
+ *     persona estaba tipeando y mandaba otro correo. Con la marca acá, el
+ *     código se manda una vez por paso 1 y se repite sólo si lo piden con el
+ *     botón *Reenviar código*.
+ *   - LA VIGENCIA DEL CÓDIGO. Reemitir la cookie corre APP_LOGIN_TTL desde el
+ *     envío, y como `sesion/clave.php` rebota a `iniciar` sin cookie viva, el
+ *     código deja de servir con ella. No hace falta una columna de vencimiento.
+ *
+ * NO es el control de cupo. La cookie la borra cualquiera; el tope de correos
+ * por hora se cuenta contra la base (`claveCupo()` en `lib/clave.php`).
  */
-function appLoginPendienteAbrir(int $usuarioId, string $ingresado): void
+function appLoginPendienteAbrir(int $usuarioId, string $ingresado, int $claveEmitida = 0): void
 {
     $token = jwt_sign([
         'uid' => $usuarioId,
         'ing' => $ingresado,   // lo que tipeó el usuario, para repintarlo al volver
+        'clv' => $claveEmitida,
     ], APP_KEY_APP, APP_LOGIN_TTL);
 
     appCookie(APP_COOKIE_LOGIN, $token, time() + APP_LOGIN_TTL);
 }
 
 /**
- * Devuelve `['uid' => int, 'ing' => string]` del paso 1, o null si venció.
+ * Devuelve `['uid' => int, 'ing' => string, 'clv' => int]` del paso 1, o null
+ * si venció.
  */
 function appLoginPendiente(): ?array
 {
@@ -308,6 +327,9 @@ function appLoginPendiente(): ?array
     return [
         'uid' => (int) $payload['uid'],
         'ing' => (string) ($payload['ing'] ?? ''),
+        // Ausente en las cookies emitidas antes del 29/09/2026: 0 significa
+        // "todavía no se mandó ningún código", que es lo que corresponde.
+        'clv' => (int) ($payload['clv'] ?? 0),
     ];
 }
 

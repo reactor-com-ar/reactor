@@ -27,7 +27,7 @@ comparación acá.
 | **El back office viejo** | Lee y escribe `perfiles.tipo`, `tecnicos.aprobacion` / `.visibilidad` y la tabla `usuarios` entera | sin fecha |
 | **La cookie `sesionToken`** | La tienen guardada todos los celulares, dura un año y `app/` la adopta | cuando caduque el parque instalado |
 | **El service worker `/serviceworker.js`** | Los celulares ya lo tienen registrado con scope `/` | idem |
-| **La cola `mensajes`** | El legacy la consume para el código de 6 dígitos (`autenticacion = 'T'`); en este monorepo **no hay worker que la lea** | cuando exista el worker |
+| **La cola `mensajes`** | **Nadie la consume desde el 2024-06-22** — ni el legacy. `app/` ya no depende de ella (ver "El código de verificación") y sólo le escribe el rastro | — |
 | **`control.reactor.com.ar`** | nginx lo redirige con 301 a `panel.` | al terminar la transición |
 
 ### Las consecuencias que hay que respetar al escribir código
@@ -409,6 +409,61 @@ cambia es de qué login cuelga cada una:
 - **Cambiar la contraseña NO cierra las otras sesiones abiertas.** El token de
   `app` es stateless y dura un año; no hay nada en él que se pueda invalidar
   desde la base. Es la misma limitación que ya documenta el panel.
+
+## El código de verificación del login de `app`: sale por correo, no por la cola
+
+`usuarios.autenticacion` decide el paso 2 del login de la app: `'F'` (2053
+cuentas) pide contraseña y `'T'` (29) pide un **código de 6 dígitos** que se
+guarda en `usuarios.clave`. Hasta el 29/09/2026 `app/sesion/clave.php` replicaba
+al legacy y lo **encolaba** en `mensajes`; desde esa fecha lo manda
+`app/lib/clave.php` por el **microservicio de correo de Databox**, el mismo canal
+de las invitaciones y las dos recuperaciones.
+
+- **EL CÓDIGO NO LLEGABA.** No es una estimación: la última fila de `mensajes`
+  con `enviado` real es del **2024-06-22**, y las 6 posteriores quedaron con
+  `estado = '1'` y el centinela `'1500-01-01'`. El consumidor era `reactor-api` y
+  dejó de correr; en este monorepo nunca hubo worker. O sea que esas 29 cuentas
+  **no podían entrar a la app** y la pantalla prometía un mensaje que no salía.
+- **SIEMPRE AL CORREO DE LA CUENTA**, se haya tipeado el celular o el correo en
+  el paso 1. El legacy elegía el canal mirando si lo tipeado tenía `'@'` (`'C'`
+  correo / `'W'` WhatsApp) y **acá no hay cliente de WhatsApp**: mantener esa
+  rama sería seguir prometiendo un mensaje que no sale. Las 29 cuentas `'T'`
+  tienen correo cargado, así que el correo las cubre a todas. La pantalla muestra
+  el correo **enmascarado** (`l***@gmail.com`) porque a una cuenta `'T'` se entra
+  también por celular y si no la persona no sabe a qué casilla mirar — y
+  enmascarado y no completo porque esa pantalla la ve cualquiera que tipee el
+  celular o el correo de la cuenta.
+- **SE MANDA UNA VEZ POR PASO 1, no en cada carga de la pantalla.** Antes cada
+  GET generaba un código nuevo y encolaba otro mensaje: un refresh invalidaba el
+  código que la persona estaba tipeando. La marca de emisión vive en la **cookie
+  firmada del login pendiente** (claim `clv`), que es donde ya vive el `uid`; el
+  reenvío es un **POST** explícito (*Reenviar código*) y no un enlace, porque un
+  prefetch del navegador dispararía el correo solo.
+- **La vigencia del código es la de esa cookie** (`APP_LOGIN_TTL`, 10 minutos) y
+  no una columna nueva: sin cookie viva la pantalla rebota a `iniciar` antes de
+  mirar `usuarios.clave`, así que un código viejo no sirve para nada. Reemitirla
+  al mandar el código hace que la ventana arranque en el envío. Al validar bien,
+  `claveConsumir()` deja la columna en `NULL` — es lo que hace cierto el "sirve
+  una sola vez" del correo.
+- **El cupo va contra la base, nunca contra la cookie**: 5 envíos por cuenta por
+  hora contados sobre `mensajes` (`claveCupo()`). El código se emite **sin pedir
+  contraseña**, así que cualquiera que conozca el correo de una cuenta `'T'`
+  llega hasta esa pantalla; una cookie la borra un script y el tope se evaporaría.
+- **La fila en `mensajes` se sigue escribiendo** —es el libro del cupo y el
+  rastro que lista el back office viejo— pero **ya cerrada** (`enviado = NOW()`,
+  `estado = '2'`), que es la verdad y además evita que un worker, si algún día
+  existe, lo mande por segunda vez. **Y sin el código adentro**: esa tabla guarda
+  las filas para siempre y las del legacy tienen contraseñas en claro
+  (`"La contraseña de tu cuenta de Reactor es Wolf1214"`). Un secreto de un solo
+  uso no va a un log permanente.
+- **Si Databox rechaza el envío se revierte todo, el `UPDATE` de
+  `usuarios.clave` incluido**: pisar el código anterior —el que la persona quizá
+  sí tenga en la casilla— con uno que nadie recibió la dejaría afuera. Mismo
+  patrón que `recuperacionEmitir()`.
+- **PENDIENTE, y no lo resuelve este cambio: el POST no limita los intentos.**
+  Se puede probar código tras código contra `usuarios.clave` mientras viva la
+  cookie del paso 1. La ventana de 10 minutos y el cupo de reenvíos lo acotan,
+  pero el tope de intentos falta.
 
 ## `enlaces_acceso`: el cupo es `usos < usos_max`, no "un solo uso"
 

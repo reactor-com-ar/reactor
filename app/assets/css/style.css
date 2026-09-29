@@ -652,6 +652,20 @@ body.sesion-page {
     font-size: .9rem;
 }
 
+/* Confirmacion de que algo salio bien: hoy, el "Reenviar codigo" de
+ * sesion/clave.php. Misma caja que `.sesion-error` con un borde verde como
+ * unico distintivo —sobre el rojo institucional un verde pleno ensucia y el
+ * texto ya dice que paso—, igual que `.inv-nota-ok` mas abajo. */
+.sesion-nota {
+    background: rgba(0,0,0,.28);
+    border-left: 3px solid #7ddf9a;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 18px;
+    font-size: .9rem;
+    text-align: left;
+}
+
 .sesion-form { text-align: left; }
 
 .sesion-campo { position: relative; }

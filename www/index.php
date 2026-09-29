@@ -49,8 +49,8 @@ $infoUuid = 'e5f9df8bicjsa18q';
                                     <span class="text-primary display-22 display-sm-17 display-lg-12 text-animations" data-in-effect="fadeInRight">Plataforma de</span>
                                     <h1 class="text-white display-17 display-sm-12 display-md-10 display-lg-6 display-xl-3 font-weight-400">Control <span class="font-weight-600">IOT</span></h1>
                                 </div>
-                                <a href="/productos/dispositivos" class="butn mb-2 mb-sm-0">Ver Dispositivos</a>
-                                <a href="/productos/plataforma" class="butn white secondary-hover ms-1 ms-sm-3">Ver Plataforma</a>
+                                <a href="/productos/plataforma" class="butn mb-2 mb-sm-0">Ver Plataforma</a>
+                                <a href="/productos/dispositivos" class="butn white secondary-hover ms-1 ms-sm-3">Ver Dispositivos</a>
                             </div>
                         </div>
                     </div>

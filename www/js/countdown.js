@@ -25,7 +25,16 @@
 			var currentDate = Math.floor($.now() / 1000);
 			
 			if(eventDate <= currentDate) {
-				callback.call(this);
+				// El `callback` es OPCIONAL en la firma del plugin
+				// (`function(options, callback)`) pero aca se llamaba sin
+				// chequear: con una fecha ya pasada y sin callback -- que es
+				// como lo invoca `main.js` -- tiraba "Cannot read properties of
+				// undefined (reading 'call')" y se llevaba puesto el resto del
+				// handler `ready` de jQuery. La fecha del theme es de 2024, o
+				// sea que estaba pasada desde el dia uno.
+				if (typeof callback === 'function') {
+					callback.call(this);
+				}
 				clearInterval(interval);
 			}
 			

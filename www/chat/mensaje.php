@@ -96,6 +96,13 @@ $texto  = trim((string) ($entrada['texto'] ?? ''));
 $uuid   = trim((string) ($entrada['uuid'] ?? ''));
 $pagina = trim((string) ($entrada['pagina'] ?? ''));
 
+// La URL COMPLETA desde la que se escribió ESTE mensaje. Viaja en cada POST y
+// no una sola vez al abrir: el chat está en el pie de todas las páginas y la
+// conversación sobrevive a la navegación, así que alguien puede preguntar por
+// los planes en `/precios/planes` y tres mensajes después, parado en `/ayuda`,
+// preguntar otra cosa. `conversaciones`.`pagina` sólo sabe dónde empezó.
+$origen = conversacionOrigenValido((string) ($entrada['origen'] ?? ''));
+
 if ($texto === '') {
     chatError('Escribí tu consulta.', 400);
 }
@@ -129,22 +136,49 @@ try {
     $conversacion = conversacionTomarTurno($uuid, CHAT_TOPE_CONVERSACION);
 
     if ($conversacion === null) {
-        // Dos motivos distintos con dos respuestas distintas: un uuid que no
-        // existe es una conversación vieja que ya no está (o inventada) y se
-        // resuelve arrancando de nuevo; una sin cupo ya fue larga y lo que
-        // corresponde es pasarla a una persona.
-        $sinCupo = conversacionExiste($uuid);
+        // Dos motivos distintos con dos respuestas distintas.
+        if (conversacionExiste($uuid)) {
+            // Existe pero gastó su cupo: ya fue una charla larga y lo que
+            // corresponde es pasarla a una persona.
+            chatError(
+                'Esta conversación ya fue larga. Seguila por WhatsApp así te atendemos mejor.',
+                429,
+                true
+            );
+        }
 
-        chatError(
-            $sinCupo
-                ? 'Esta conversación ya fue larga. Seguila por WhatsApp así te atendemos mejor.'
-                : 'La conversación expiró. Recargá la página y escribinos de nuevo.',
-            429,
-            $sinCupo
-        );
+        // NO EXISTE. El caso real es que la borraron desde cloud —Comunicación →
+        // Conversaciones tiene baja— mientras la persona seguía con la burbuja
+        // abierta: su navegador conserva el uuid en `sessionStorage` y lo sigue
+        // mandando. Que un operador borre una fila por privacidad no puede
+        // dejar a alguien sin poder escribir.
+        //
+        // `reiniciar` ES UNA BANDERA PARA EL CLIENTE, no un texto para leer: el
+        // front olvida el uuid y reenvía el mismo mensaje, así que esto se
+        // resuelve sin que la persona se entere. El `error` queda por si el
+        // reintento también falla.
+        //
+        // Antes acá salía "La conversación expiró. Recargá la página", y era
+        // doblemente malo: recargar NO limpia `sessionStorage` —muere con la
+        // pestaña, no con la recarga—, así que el consejo no servía y cada
+        // mensaje siguiente volvía a fallar igual.
+        // VA CON 200 Y NO CON UN 4xx, que es la única respuesta de este archivo
+        // que no lleva código de error, y es a propósito: para quien escribió
+        // esto NO es un fallo — el front olvida el uuid, reenvía y le contestan.
+        // Con un 409 el navegador pinta un `POST … 409 (Conflict)` en rojo en la
+        // consola cada vez que alguien sigue escribiendo después de una baja, y
+        // eso se lee como un error del sitio cuando es la recuperación
+        // funcionando. El estado real lo lleva `ok: false` + `reiniciar`, que es
+        // lo que el cliente mira.
+        chatSalida([
+            'ok'        => false,
+            'reiniciar' => true,
+            'error'     => 'Se reinició la conversación. Volvé a escribir tu consulta.',
+            'derivar'   => false,
+        ]);
     }
 
-    conversacionMensajeAlta($conversacion['id'], 'user', $texto);
+    conversacionMensajeAlta($conversacion['id'], 'user', $texto, $origen);
 
     // El historial ya trae el mensaje que se acaba de guardar, así que la
     // pregunta viaja una sola vez.
@@ -180,6 +214,10 @@ try {
         $conversacion['id'],
         'assistant',
         $respuesta['texto'],
+        // `origen` va en NULL: la respuesta del modelo no se escribe desde
+        // ninguna página, y copiarle la URL del turno anterior sería inventar un
+        // dato que nadie produjo.
+        null,
         $respuesta['modelo'],
         implode(',', $uuidsContexto),
         $respuesta['tokens_entrada'],

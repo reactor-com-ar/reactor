@@ -175,6 +175,75 @@
        Abrir y cerrar.
        ---------------------------------------------------------------------- */
 
+    /* ----------------------------------------------------------------------
+       El teclado de Android.
+
+       EN PANTALLA CHICA EL PANEL OCUPA TODO (`height: 100%`, media query de
+       480px) Y ESO SE ROMPE AL ABRIR EL TECLADO. Chrome en Android achica el
+       viewport VISUAL pero no el de LAYOUT, asi que el `100%` sigue valiendo la
+       pantalla entera: la mitad de abajo del panel —el campo de texto incluido—
+       queda tapada por el teclado. El navegador entonces hace scroll para
+       mostrar el input enfocado y se lleva el encabezado fuera de vista, con un
+       hueco blanco en el medio. Es el sintoma que se ve en un celular real.
+
+       `window.visualViewport` es la unica pieza que SI refleja el teclado: su
+       `height` es lo que queda visible y su `offsetTop` cuanto se corrio. Atando
+       el panel a esos dos numeros, ocupa exactamente lo que se ve.
+
+       SE HACE POR JS Y NO CON `interactive-widget=resizes-content` en el
+       `<meta viewport>` porque esa etiqueta es del sitio ENTERO: cambiaria como
+       se comporta el teclado en el formulario de contacto y en el de tecnicos,
+       que hoy andan bien. Esto queda acotado al widget.
+
+       Sin `visualViewport` —navegadores viejos— no se toca nada y queda el
+       comportamiento de antes: el panel se ve mal con el teclado abierto, pero
+       se puede escribir igual.
+       ---------------------------------------------------------------------- */
+
+    /** true cuando el panel esta a pantalla completa (la media query del CSS). */
+    function esPantallaChica() {
+        return window.matchMedia('(max-width: 480px)').matches;
+    }
+
+    function ajustarAlTeclado(bajarAlFinal) {
+        var vv = window.visualViewport;
+        if (!vv) {
+            return;
+        }
+
+        // Con el panel cerrado o en pantalla grande se devuelven los estilos al
+        // CSS: el panel de escritorio son 370px flotando abajo a la derecha y no
+        // tiene nada que ver con el viewport.
+        if (!widget.classList.contains('abierto') || !esPantallaChica()) {
+            panel.style.top = '';
+            panel.style.bottom = '';
+            panel.style.height = '';
+            return;
+        }
+
+        panel.style.top    = vv.offsetTop + 'px';
+        panel.style.bottom = 'auto';
+        panel.style.height = vv.height + 'px';
+
+        if (bajarAlFinal) {
+            abajo();
+        }
+    }
+
+    if (window.visualViewport) {
+        // `resize` es el teclado abriendose o cerrandose: ahi ademas hay que
+        // bajar al ultimo mensaje, que es lo que la persona estaba mirando.
+        window.visualViewport.addEventListener('resize', function () {
+            ajustarAlTeclado(true);
+        });
+        // `scroll` es el viewport corriendose con el teclado ya abierto. Aca NO
+        // se baja al final: la persona puede estar subiendo a leer algo y
+        // moverle la lista en cada evento se la arranca de las manos.
+        window.visualViewport.addEventListener('scroll', function () {
+            ajustarAlTeclado(false);
+        });
+    }
+
     function abrir() {
         widget.classList.add('abierto');
         panel.setAttribute('aria-hidden', 'false');
@@ -190,6 +259,7 @@
             }
         }
 
+        ajustarAlTeclado(false);
         campo.focus();
         abajo();
     }
@@ -197,6 +267,10 @@
     function cerrarPanel() {
         widget.classList.remove('abierto');
         panel.setAttribute('aria-hidden', 'true');
+        // Se limpian los estilos inline: si quedaran puestos, al reabrir en
+        // horizontal o en una tablet el panel arrancaria con el alto del
+        // teclado de la vez anterior.
+        ajustarAlTeclado(false);
         burbuja.focus();
     }
 
@@ -215,6 +289,48 @@
 
         campo.value = '';
         campo.style.height = '';
+
+        enviarAlServidor(texto, false);
+    }
+
+    /**
+     * Olvida la conversación: el uuid y la copia local de lo que se mostró.
+     *
+     * Se usa cuando el servidor avisa que esa conversación ya no existe —la
+     * borraron desde el panel—. Lo que ya está pintado en pantalla NO se borra:
+     * sacarle a alguien de la vista lo que acaba de escribir es peor que dejar
+     * dos burbujas que el asistente ya no recuerda.
+     */
+    function olvidar() {
+        try {
+            window.sessionStorage.removeItem(CLAVE_UUID);
+            window.sessionStorage.removeItem(CLAVE_HIST);
+        } catch (e) {
+            /* sin memoria: no hay nada que olvidar. */
+        }
+    }
+
+    /**
+     * Manda un texto ya pintado en pantalla.
+     *
+     * NO SE LLAMA `enviar` Y NO SE PUEDE LLAMAR ASI: arriba hay
+     * `var enviar = document.getElementById('chat-enviar')`, el BOTON. La
+     * declaracion de una funcion se eleva, pero la asignacion del `var` corre
+     * despues y la pisa, asi que `enviar` termina siendo un `<button>` y
+     * `mandar()` revienta con "enviar is not a function" — en el navegador, no
+     * al chequear la sintaxis. Paso de verdad y dejo el chat mudo en produccion.
+     *
+     * `reintento` corta el bucle: el reenvío por `reiniciar` se hace UNA sola
+     * vez. Si el segundo intento también falla, se muestra el error en vez de
+     * volver a probar — un ciclo de reintentos contra un endpoint que rechaza
+     * es la forma de convertir un error en una tormenta de requests pagos.
+     */
+    function enviarAlServidor(texto, reintento) {
+        // Cuando el pedido se relanza, el que desbloquea es el reintento: si
+        // desbloqueara también este, el campo quedaría habilitado mientras hay
+        // una consulta en vuelo y se podrían encimar dos.
+        var relanzado = false;
+
         bloquear(true);
         puntitos(true);
 
@@ -227,7 +343,17 @@
             body: JSON.stringify({
                 uuid: leer(CLAVE_UUID) || '',
                 texto: texto,
-                pagina: window.location.pathname
+                // `pagina` es donde se ABRIO la conversacion y se guarda una
+                // sola vez; `origen` es donde esta la persona AHORA y viaja en
+                // cada mensaje. Son distintos en cuanto alguien navega sin
+                // cerrar la burbuja, que es el caso normal: el chat vive en el
+                // pie de todas las paginas y el uuid sobrevive en sessionStorage.
+                pagina: window.location.pathname,
+                // La URL COMPLETA, no el path: el host y la querystring son
+                // parte del contexto. Una consulta que llego desde una campana
+                // con `?utm_source=` dice de donde salio esa persona, y el path
+                // solo lo pierde. El servidor la valida antes de guardarla.
+                origen: window.location.href
             })
         }).then(function (respuesta) {
             // Los errores del endpoint vienen con codigo != 200 y con cuerpo
@@ -235,6 +361,27 @@
             return respuesta.json();
         }).then(function (datos) {
             puntitos(false);
+
+            // LA BANDERA VA ANTES QUE NADA, incluso antes de guardar el uuid: el
+            // servidor avisa que la conversacion que tenemos guardada ya no
+            // existe —la borraron desde el panel mientras la persona seguia con
+            // la burbuja abierta—. Se la olvida y se manda de nuevo: arranca una
+            // conversacion nueva y para quien escribio no paso nada.
+            //
+            // Sin esto la persona quedaba trabada PARA SIEMPRE: el uuid muerto
+            // seguia viajando en cada mensaje y todos fallaban igual. Recargar
+            // tampoco servia -- `sessionStorage` muere con la pestana, no con la
+            // recarga.
+            if (datos && datos.reiniciar && !reintento) {
+                olvidar();
+                // El mensaje ya estaba anotado en el historial que se acaba de
+                // borrar; se vuelve a anotar para que la copia local siga
+                // contando la misma charla que se ve en pantalla.
+                recordar('yo', texto);
+                relanzado = true;
+                enviarAlServidor(texto, true);
+                return;
+            }
 
             if (datos && datos.uuid) {
                 guardar(CLAVE_UUID, datos.uuid);
@@ -252,6 +399,9 @@
             puntitos(false);
             error('No pude contestarte ahora mismo.', true);
         }).then(function () {
+            if (relanzado) {
+                return;
+            }
             bloquear(false);
             campo.focus();
         });

@@ -1362,10 +1362,26 @@
         --------------------------------------*/
 
         // CountDown for coming soon page
-        $(".countdown").countdown({
-            date: "01 Dec 2024 00:01:00", //set your date and time. EX: 15 May 2014 12:00:00
-            format: "on"
-        });
+        //
+        // EL GUARD `.length` NO ES DEFENSIVO, ARREGLA UN BUG QUE ROMPIA TODO LO
+        // DE ABAJO. `$.fn.countdown` llama a `countdown_proc()` suelto y no
+        // dentro de `this.each()`, asi que corre aunque el selector no matchee
+        // nada -- y en este sitio no matchea nada: la pagina "coming soon" del
+        // theme no se porto, hay CERO elementos `.countdown`. Encima la fecha de
+        // abajo ya paso, asi que entraba en la rama `eventDate <= currentDate`
+        // que invoca `callback.call(this)` con un `callback` que nadie paso.
+        //
+        // El TypeError salia SIN ATRAPAR dentro del handler `ready` de jQuery,
+        // o sea que cortaba el resto de este archivo: Datetimepicker (16),
+        // Current Year (17), Isotop (18) y todo lo que sigue NUNCA se
+        // inicializaron en ninguna pagina del sitio. De ahi venia el
+        // `<span class="current-year">` vacio del pie que hoy llena PHP.
+        if ($(".countdown").length) {
+            $(".countdown").countdown({
+                date: "01 Dec 2024 00:01:00", //set your date and time. EX: 15 May 2014 12:00:00
+                format: "on"
+            });
+        }
 
         /*------------------------------------
             16. Datetimepicker

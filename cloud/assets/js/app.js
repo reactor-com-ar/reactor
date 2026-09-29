@@ -45,6 +45,7 @@
         talonarios:   { title: 'Talonarios',   render: renderTalonarios,   group: 'comercial' },
         notificaciones: { title: 'Notificaciones', render: renderNotificaciones, group: 'comunicacion' },
         difusion:       { title: 'Difusión',       render: renderDifusion,       group: 'comunicacion' },
+        conversaciones: { title: 'Conversaciones', render: renderConversaciones, group: 'comunicacion' },
         signals:   { title: 'Señales',              render: renderSignals,   group: 'registros'  },
         registros: { title: 'Historial de registros', render: renderRegistros, group: 'registros'  },
         alerts:    { title: 'Alertas',              render: renderStub,      group: 'registros'  },
@@ -652,6 +653,27 @@
 
        `onShow(nombre)` es opcional y corre en cada cambio: lo usa Consultar
        usuario para cargar la solapa Perfiles recién al abrirla. */
+    /* Ayuda de un campo del formulario: el signo de pregunta que va DENTRO del
+       `<label>`, pegado al rótulo, y el globito que se abre al pasar el mouse
+       (DESIGN.md §8.2).
+
+       Reemplaza a la `.form-nota` bajo el control cuando la aclaración es larga:
+       ahí el texto empuja hacia abajo su propia mitad del renglón y los dos
+       campos quedan desalineados.
+
+       No hay nada que cablear —el hover y el foco son CSS—, así que esto es sólo
+       el markup. `tabindex="0"` para que también se alcance con el teclado; sin
+       eso la ayuda no existe para quien no usa mouse.
+
+       `html` SE INYECTA TAL CUAL (lleva `<strong>`): el texto tiene que ser
+       literal del código y nunca un dato de la base. */
+    function ayudaDeCampo(html) {
+        return `<span class="field-help" tabindex="0" role="note">
+                    <i class="fa-regular fa-circle-question"></i>
+                    <span class="field-help-tip">${html}</span>
+                </span>`;
+    }
+
     function wireModalTabs(scope, onShow) {
         const tabs   = scope.querySelectorAll('.modal-tab');
         const panels = scope.querySelectorAll('.modal-tabpanel');
@@ -3108,7 +3130,7 @@
 
     function contratosDefaults() {
         return {
-            codigo: '', texto: '', cliente: '', dominio: '', plan: '', tipo: '',
+            codigo: '', texto: '', cliente: '', dominio: '', plan: '', planModo: '', tipo: '',
             estado: '', remitir: '', facturarDesde: '', facturarHasta: '',
             orden: 'id', dir: 'desc', limit: 100,
         };
@@ -3131,24 +3153,34 @@
 
             root.innerHTML = `
                 ${moduleHeader('Contratos', 'El acuerdo comercial de cada dominio: cliente, plan y las fechas del ciclo de facturación.')}
+                ${/* LAS CINCO TARJETAS SON LOS FILTROS RÁPIDOS, no un adorno:
+                     son exactamente las cinco entradas del menú `Listar` del
+                     back office viejo (Todos / Habilitados / Deshabilitados /
+                     Facturables / Remisibles) y el número que muestran ya es el
+                     de cada una. Tocarlas deja el listado en eso. Ver §12. */''}
                 <div class="stats-bar">
-                    <div class="stat-card">
+                    <div class="stat-card dash-link" data-atajo="total" role="button" tabindex="0"
+                         title="Ver todos los contratos">
                         <span class="stat-label">Total</span>
                         <span class="stat-value">${r.total}</span>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card dash-link" data-atajo="habilitados" role="button" tabindex="0"
+                         title="Ver sólo los habilitados">
                         <span class="stat-label">Habilitados</span>
                         <span class="stat-value green">${r.habilitados}</span>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card dash-link" data-atajo="deshabilitados" role="button" tabindex="0"
+                         title="Ver sólo los deshabilitados">
                         <span class="stat-label">Deshabilitados</span>
                         <span class="stat-value muted">${r.deshabilitados}</span>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card dash-link" data-atajo="facturables" role="button" tabindex="0"
+                         title="Habilitados con la fecha de facturar ya cumplida">
                         <span class="stat-label">Facturables</span>
                         <span class="stat-value orange">${r.facturables}</span>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card dash-link" data-atajo="remisibles" role="button" tabindex="0"
+                         title="Habilitados con el estado de cuenta pendiente de envío">
                         <span class="stat-label">Remisibles</span>
                         <span class="stat-value">${r.remisibles}</span>
                     </div>
@@ -3161,7 +3193,7 @@
                 <div class="table-card" id="con-table"></div>
             `;
 
-            wireContratosView(state, contratos);
+            wireContratosView(state, contratos, r.hoy);
         } catch (e) {
             root.innerHTML = errorBox(e.message);
         }
@@ -3178,12 +3210,32 @@
 
     // Tipo/Plan en una sola celda, como el listado del sistema histórico:
     // el tipo en negrita y el plan como glosa debajo.
+    //
+    // A la derecha del plan va el modo (`plan_modo`) como un solo ícono: el
+    // candado si el plan es `fijo` —queda el pactado aunque el dominio crezca— y
+    // el reciclado si es `dinamico`, o sea que sigue al consumo. Es un ícono y
+    // no una columna nueva porque es un atributo del plan, no otro dato: se lee
+    // pegado al nombre y no obliga a cruzar la fila.
+    //
+    // NO SE DIBUJA SI NO HAY PLAN. El modo es NOT NULL y todo contrato tiene
+    // uno, pero un candado al lado de "Sin plan" prometería que hay algo fijado.
+    //
+    // Los dos van en el mismo gris que el nombre del plan: lo que distingue un
+    // modo del otro es la FORMA del ícono, no el color.
+    function contratoPlanModoIcono(c) {
+        const dinamico = c.plan_modo === 'dinamico';
+        const icono    = dinamico ? 'fa-recycle' : 'fa-lock';
+        const texto    = c.plan_modo_texto || (dinamico ? 'Dinámico' : 'Fijo');
+        return ` <i class="fa-solid ${icono} plan-modo-icon"
+                    title="Plan ${escape(texto.toLowerCase())}" aria-label="Plan ${escape(texto.toLowerCase())}"></i>`;
+    }
+
     function contratoTipoPlanCelda(c) {
         const tipo = c.tipo
             ? `<strong>${escape(c.tipo_texto || c.tipo)}</strong>`
             : `<span class="muted">Sin tipo</span>`;
         const plan = c.plan
-            ? `<span class="muted">${escape(c.plan_nombre || ('#' + c.plan))}</span>`
+            ? `<span class="muted">${escape(c.plan_nombre || ('#' + c.plan))}</span>` + contratoPlanModoIcono(c)
             : `<span class="muted">Sin plan</span>`;
         return `${tipo}<br>${plan}`;
     }
@@ -3241,7 +3293,39 @@
         `;
     }
 
-    function wireContratosView(state, allContratos) {
+    /* Los cinco filtros rápidos de las stat cards, que son los cinco del menú
+       `Listar` del back office viejo (`reactor-admin/contratos/listar.php`).
+       Cada uno devuelve el ESTADO COMPLETO de la vista, partiendo de los
+       defaults: un atajo no se suma a lo que hubiera puesto, lo reemplaza.
+
+       Es la condición para que el atajo signifique algo: la tarjeta anuncia un
+       número —"Habilitados 28"— y tocarla tiene que mostrar esas 28 filas. Si
+       conservara el dominio o el texto que había en el buscador, el número y la
+       lista dirían cosas distintas y no habría forma de saber cuál manda.
+
+       CADA UNO SE ARMA CON FILTROS QUE EL MODAL DE FILTROS YA TIENE, y eso no es
+       casualidad: abrir Filtros después de tocar una tarjeta muestra por qué la
+       lista viene acotada, y `Limpiar` la desarma (DESIGN.md §21-bis.1). Por eso
+       `Facturables` no filtra por el booleano `c.facturable` que ya trae la fila,
+       aunque sería más corto: ese filtro no existe en el modal y la lista
+       quedaría recortada sin que nada lo explique.
+
+       EL CRITERIO ES EL DEL LEGACY salvo en un punto, y es deliberado.
+       `Facturables` allá es `listar?frd=<genesis>&frh=<hoy>&hab=1`, o sea
+       `facturar BETWEEN '1500-01-01' AND hoy`: como el centinela "sin fecha" ES
+       `1500-01-01`, ese rango se lleva puestos también los contratos que NO
+       tienen fecha de facturación. Acá no: el endpoint ya devolvió `null` en esa
+       columna y `facturarHasta` exige una fecha real. Un contrato sin fecha no
+       está vencido — no factura desde el año 1500, no factura. */
+    const ATAJOS_CONTRATOS = {
+        total:          ()    => ({}),
+        habilitados:    ()    => ({ estado: '1' }),
+        deshabilitados: ()    => ({ estado: '0' }),
+        facturables:    (hoy) => ({ estado: '1', facturarHasta: hoy }),
+        remisibles:     ()    => ({ estado: '1', remitir: '1' }),
+    };
+
+    function wireContratosView(state, allContratos, hoy) {
         const tableWrap = document.getElementById('con-table');
         const quick     = document.getElementById('con-quick');
         const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
@@ -3256,6 +3340,10 @@
                 if (state.cliente && String(c.cliente) !== state.cliente) return false;
                 if (state.dominio && String(c.dominio) !== state.dominio) return false;
                 if (state.plan    && String(c.plan)    !== state.plan)    return false;
+                // `plan_modo` es NOT NULL, así que no hay fila sin modo: el
+                // filtro vacío es "indistinto" y cualquier otro valor compara
+                // contra el ENUM tal cual lo sirve el endpoint.
+                if (state.planModo && c.plan_modo      !== state.planModo) return false;
                 if (state.tipo    && c.tipo            !== state.tipo)    return false;
                 if (state.remitir && c.remitir         !== state.remitir) return false;
                 if (state.estado  && String(c.habilitado) !== state.estado) return false;
@@ -3336,6 +3424,25 @@
         btnNew.addEventListener('click',  () => openContratoModal(null));
         wireRefresh('con', 'contratos', state);
 
+        // Las stat cards como filtros rápidos. Se pasa por `recargar()` y no por
+        // `applyAndRender()` porque el atajo también limpia el texto del
+        // buscador, que se resuelve en el servidor: sin volver a pedir, el
+        // listado seguiría acotado por una búsqueda que ya no está escrita.
+        document.querySelectorAll('.stats-bar [data-atajo]').forEach(card => {
+            const aplicar = () => {
+                const armar = ATAJOS_CONTRATOS[card.dataset.atajo];
+                if (!armar) return;
+                Object.assign(state, contratosDefaults(), armar(hoy));
+                quick.value = '';
+                recargar();
+            };
+            card.addEventListener('click', aplicar);
+            // `role="button"` promete que Enter y Espacio funcionan.
+            card.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); aplicar(); }
+            });
+        });
+
         // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
         // si el estado venía con una búsqueda puesta (Refrescar los conserva).
         if (state.texto) recargar(); else applyAndRender();
@@ -3376,6 +3483,8 @@
                                   t => ({ valor: t.valor, texto: t.texto }));
         const remOpts  = opciones(cat.remitir, state.remitir, 'Indistinto',
                                   t => ({ valor: t.valor, texto: t.texto }));
+        const modOpts  = opciones(cat.plan_modos || [], state.planModo, 'Indistinto',
+                                  m => ({ valor: m.valor, texto: m.texto }));
         const ordOpts  = ORDEN_CONTRATOS.map(o =>
             `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
         ).join('');
@@ -3407,6 +3516,10 @@
                     <select id="con-fm-plan">${plaOpts}</select>
                 </div>
                 <div class="form-group">
+                    <label for="con-fm-plan-modo">Modo del plan</label>
+                    <select id="con-fm-plan-modo">${modOpts}</select>
+                </div>
+                <div class="form-group">
                     <label for="con-fm-facturar-desde">Facturar desde</label>
                     <input type="date" id="con-fm-facturar-desde" value="${escape(state.facturarDesde)}">
                 </div>
@@ -3426,11 +3539,15 @@
                         <option value="0"${state.estado === '0' ? ' selected' : ''}>Deshabilitado</option>
                     </select>
                 </div>
+                ${/* Doce campos antes de Ordenar/Dirección: cuatro renglones de
+                     tres que cierran justos, así esos dos arrancan el suyo. Por
+                     eso ya no hace falta el `.form-group` vacío de relleno que
+                     había acá — con `Modo del plan` la cuenta cierra sola, y
+                     agregar o quitar un filtro obliga a rehacerla. */''}
                 <div class="form-group">
                     <label for="con-fm-limit">Límite</label>
                     <input type="number" id="con-fm-limit" min="1" max="1000" value="${state.limit}">
                 </div>
-                <div class="form-group"></div>
                 <div class="form-group">
                     <label for="con-fm-orden">Ordenar por</label>
                     <select id="con-fm-orden">${ordOpts}</select>
@@ -3455,6 +3572,7 @@
                 state.cliente       = modal.querySelector('#con-fm-cliente').value;
                 state.tipo          = modal.querySelector('#con-fm-tipo').value;
                 state.plan          = modal.querySelector('#con-fm-plan').value;
+                state.planModo      = modal.querySelector('#con-fm-plan-modo').value;
                 state.facturarDesde = modal.querySelector('#con-fm-facturar-desde').value;
                 state.facturarHasta = modal.querySelector('#con-fm-facturar-hasta').value;
                 state.remitir       = modal.querySelector('#con-fm-remitir').value;
@@ -3472,6 +3590,7 @@
                 modal.querySelector('#con-fm-cliente').value        = d.cliente;
                 modal.querySelector('#con-fm-tipo').value           = d.tipo;
                 modal.querySelector('#con-fm-plan').value           = d.plan;
+                modal.querySelector('#con-fm-plan-modo').value      = d.planModo;
                 modal.querySelector('#con-fm-facturar-desde').value = d.facturarDesde;
                 modal.querySelector('#con-fm-facturar-hasta').value = d.facturarHasta;
                 modal.querySelector('#con-fm-remitir').value        = d.remitir;
@@ -3519,56 +3638,86 @@
                     ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
                 </div>
                 <div class="modal-body">
-                    ${/* 22 tarjetas: 20 `half` + 2 `full` (§25 de DESIGN.md).
+                    ${/* Las mismas dos pestañas que el formulario (DESIGN.md
+                        §25): consultar y editar el mismo registro no se pueden
+                        ver como dos pantallas distintas, así que el corte es el
+                        mismo — `Facturación` arranca en el plan, y `Tolerancia`,
+                        `Facturable`, `Remitido`, `Comprobantes` y `Pagos` se
+                        quedan en `General` como seguimiento del contrato. */''}
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general" role="tab">
+                            <i class="fa-solid fa-circle-info"></i> General
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="facturacion" role="tab">
+                            <i class="fa-solid fa-file-invoice-dollar"></i> Facturación
+                        </button>
+                    </div>
+
+                    ${/* LA CUENTA DE TARJETAS SE HACE POR PESTAÑA, no sobre el
+                        total: cada `view-grid` es su propio flex. Once tarjetas
+                        acá — 10 `half` + 1 `full` — y doce en Facturación.
                         `.view-grid` es flex con `flex-grow`, así que una `half`
                         que quede sola en su renglón se estira al 100% y se lee
                         como un destaque deliberado cuando en realidad es el
                         sobrante de una cuenta impar. Por eso los `half` tienen
                         que ser PARES y cada `full` tiene que caer después de un
-                        renglón cerrado: `Identificador` en la ranura 3 (con
-                        Código y Dominio arriba) y `Plan` en la 6 (con Cliente y
-                        Tipo). Los dos son campos anchos de verdad — el nombre
-                        del plan trae su glosa y su id.
+                        renglón cerrado: `Identificador` en la ranura 3, con
+                        Código y Dominio arriba. Es un campo ancho de verdad.
                         Agregar o quitar un campo obliga a rehacer esta cuenta. */''}
-                    ${viewGrid([
-                        viewCardHalf('Código',         `<code>#${c.id}</code>`),
-                        viewCardHalf('Dominio',        refValue(c.dominio, c.dominio_nombre)),
-                        viewCardFull('Identificador',  c.uuid
-                            ? `<code>${escape(c.uuid)}</code>`
-                            : `<span class="muted">Sin identificador</span>`),
-                        viewCardHalf('Cliente',        refValue(c.cliente, c.cliente_nombre)),
-                        viewCardHalf('Tipo',           c.tipo
-                            ? `<span class="badge badge-info">${escape(c.tipo_texto || c.tipo)}</span>`
-                            : `<span class="muted">Sin tipo</span>`),
-                        viewCardFull('Plan',           c.plan
-                            ? `${escape(c.plan_nombre || '')} <code>#${c.plan}</code>${
-                                c.plan_descripcion ? ` <span class="muted">· ${escape(c.plan_descripcion)}</span>` : ''}`
-                            : `<span class="muted">Sin plan</span>`),
-                        viewCardHalf('Abono',          abono),
-                        viewCardHalf('Promo',          c.promo == null
-                            ? `<span class="muted">Sin promoción</span>`
-                            : `${escape(c.promo_texto || c.promo)}${aplicaPromo ? '' : ' <span class="muted">· fuera de vigencia</span>'}`),
-                        viewCardHalf('Vigencia promo', c.desde || c.hasta
-                            ? `${contratoFecha(c.desde)} <span class="muted">a</span> ${contratoFecha(c.hasta)}`
-                            : `<span class="muted">Sin vigencia</span>`),
-                        viewCardHalf('Habilitado',     contratoEstadoBadge(c.habilitado)),
-                        viewCardHalf('Registro',       contratoFechaHora(c.registro)),
-                        viewCardHalf('Firma',          contratoFechaHora(c.firma)),
-                        viewCardHalf('Alta',           contratoFecha(c.alta)),
-                        viewCardHalf('Baja',           contratoFecha(c.baja)),
-                        viewCardHalf('Facturado',      contratoFecha(c.facturado)),
-                        viewCardHalf('Facturar',       contratoFecha(c.facturar)),
-                        viewCardHalf('Tolerancia',     contratoFecha(c.tolerancia)),
-                        viewCardHalf('Facturable',     c.facturable
-                            ? `<span class="badge badge-warn">Sí</span>`
-                            : `<span class="badge badge-info">No</span>`),
-                        viewCardHalf('Remitir',        c.remitir === ''
-                            ? `<span class="muted">—</span>`
-                            : `<span class="badge ${c.remitir === '1' ? 'badge-warn' : 'badge-info'}">${escape(c.remitir_texto || c.remitir)}</span>`),
-                        viewCardHalf('Remitido',       contratoFechaHora(c.remitido)),
-                        viewCardHalf('Comprobantes',   `<span class="badge badge-info">${c.comprobantes_count}</span>`),
-                        viewCardHalf('Pagos',          `<span class="badge badge-info">${c.pagos_count}</span>`),
-                    ])}
+                    <div class="modal-tabpanel" data-panel="general">
+                        ${viewGrid([
+                            viewCardHalf('Código',         `<code>#${c.id}</code>`),
+                            viewCardHalf('Dominio',        refValue(c.dominio, c.dominio_nombre)),
+                            viewCardFull('Identificador',  c.uuid
+                                ? `<code>${escape(c.uuid)}</code>`
+                                : `<span class="muted">Sin identificador</span>`),
+                            viewCardHalf('Cliente',        refValue(c.cliente, c.cliente_nombre)),
+                            viewCardHalf('Tipo',           c.tipo
+                                ? `<span class="badge badge-info">${escape(c.tipo_texto || c.tipo)}</span>`
+                                : `<span class="muted">Sin tipo</span>`),
+                            viewCardHalf('Habilitado',     contratoEstadoBadge(c.habilitado)),
+                            viewCardHalf('Tolerancia',     contratoFecha(c.tolerancia)),
+                            viewCardHalf('Facturable',     c.facturable
+                                ? `<span class="badge badge-warn">Sí</span>`
+                                : `<span class="badge badge-info">No</span>`),
+                            viewCardHalf('Remitido',       contratoFechaHora(c.remitido)),
+                            viewCardHalf('Comprobantes',   `<span class="badge badge-info">${c.comprobantes_count}</span>`),
+                            viewCardHalf('Pagos',          `<span class="badge badge-info">${c.pagos_count}</span>`),
+                        ])}
+                    </div>
+
+                    ${/* Doce tarjetas, todas `half`: seis renglones que cierran.
+                        `Plan` era `full` cuando estaba solo —el nombre trae su
+                        glosa y su id—, pero `Modo del plan` es el adjetivo de ese
+                        mismo plan y se lee al lado, no tres renglones abajo. El
+                        nombre largo no se pierde: `.view-card-value` envuelve por
+                        palabra (`word-break: break-word`), no trunca. */''}
+                    <div class="modal-tabpanel" data-panel="facturacion" hidden>
+                        ${viewGrid([
+                            viewCardHalf('Plan',           c.plan
+                                ? `${escape(c.plan_nombre || '')} <code>#${c.plan}</code>${
+                                    c.plan_descripcion ? ` <span class="muted">· ${escape(c.plan_descripcion)}</span>` : ''}`
+                                : `<span class="muted">Sin plan</span>`),
+                            viewCardHalf('Modo del plan',  `<span class="badge ${c.plan_modo === 'dinamico' ? 'badge-warn' : 'badge-info'}">${
+                                escape(c.plan_modo_texto || c.plan_modo || 'Fijo')}</span>`),
+                            viewCardHalf('Abono',          abono),
+                            viewCardHalf('Promo',          c.promo == null
+                                ? `<span class="muted">Sin promoción</span>`
+                                : `${escape(c.promo_texto || c.promo)}${aplicaPromo ? '' : ' <span class="muted">· fuera de vigencia</span>'}`),
+                            viewCardHalf('Vigencia promo', c.desde || c.hasta
+                                ? `${contratoFecha(c.desde)} <span class="muted">a</span> ${contratoFecha(c.hasta)}`
+                                : `<span class="muted">Sin vigencia</span>`),
+                            viewCardHalf('Registro',       contratoFechaHora(c.registro)),
+                            viewCardHalf('Firma',          contratoFechaHora(c.firma)),
+                            viewCardHalf('Alta',           contratoFecha(c.alta)),
+                            viewCardHalf('Baja',           contratoFecha(c.baja)),
+                            viewCardHalf('Facturado',      contratoFecha(c.facturado)),
+                            viewCardHalf('Facturar',       contratoFecha(c.facturar)),
+                            viewCardHalf('Remitir',        c.remitir === ''
+                                ? `<span class="muted">—</span>`
+                                : `<span class="badge ${c.remitir === '1' ? 'badge-warn' : 'badge-info'}">${escape(c.remitir_texto || c.remitir)}</span>`),
+                        ])}
+                    </div>
                 </div>
             </div>
         `;
@@ -3581,6 +3730,10 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        // Las dos pestañas ya vienen con sus tarjetas dibujadas: no hay relación
+        // que cargar aparte, así que no va `onShow`.
+        wireModalTabs(backdrop);
 
         wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
             const items = [
@@ -3636,6 +3789,51 @@
                                    p => ({ valor: String(p.id), texto: contratoPlanLabel(p) }));
         const tipOpts = selectOpts(cat.tipos, c?.tipo, 'Sin tipo',
                                    t => ({ valor: t.valor, texto: t.texto }));
+        // `promo` ya no es de sólo lectura: sale de la tabla `promociones`, cuyo
+        // id ES el porcentaje de descuento (ver api/contratos.php). "Sin
+        // promoción" es la opción vacía, que el endpoint guarda como NULL.
+        const proOpts = selectOpts(cat.promos || [], c?.promo, 'Sin promoción',
+                                   p => ({ valor: String(p.id), texto: (p.nombre || ('#' + p.id)) + (p.habilitado === 1 ? '' : ' (deshabilitada)') }));
+
+        // `plan_modo` es NOT NULL con default `fijo`: no lleva opción vacía y en
+        // el alta arranca donde están hoy las 50 filas.
+        const modoActual = isEdit ? (c.plan_modo || 'fijo') : 'fijo';
+        const modOpts = (cat.plan_modos || [{ valor: 'dinamico', texto: 'Dinámico' }, { valor: 'fijo', texto: 'Fijo' }])
+            .map(m => `<option value="${escape(m.valor)}"${m.valor === modoActual ? ' selected' : ''}>${escape(m.texto)}</option>`)
+            .join('');
+
+        // EN EDICIÓN, DOMINIO Y CLIENTE SON DE SÓLO LECTURA: se muestran en un
+        // input y no en un select. De quién es el contrato no se cambia desde
+        // acá — mover un contrato de dominio le cambia el titular a la
+        // facturación ya emitida, que cuelga del contrato por FK. En el alta
+        // siguen siendo selects: ahí hay que elegirlos, y elegir el dominio
+        // precarga el cliente.
+        const campoSoloLectura = (campo, rotulo, valor) => `
+            <div class="form-group">
+                <label for="con-${campo}-nombre">${escape(rotulo)}</label>
+                <input type="text" id="con-${campo}-nombre" readonly value="${escape(valor)}">
+            </div>`;
+
+        // El nombre sale de la fila —que ya lo trae resuelto por el JOIN— y el
+        // catálogo es el respaldo por si viniera vacío.
+        const nombreDelCatalogo = (items, id, vacio) => {
+            const it = (items || []).find(x => String(x.id) === String(id ?? ''));
+            return it ? (it.nombre || ('#' + it.id)) : vacio;
+        };
+        const domCampo = isEdit
+            ? campoSoloLectura('dominio', 'Dominio',
+                c.dominio_nombre || nombreDelCatalogo(cat.dominios, c.dominio, 'Sin dominio'))
+            : `<div class="form-group">
+                   <label for="con-dominio">Dominio</label>
+                   <select id="con-dominio">${domOpts}</select>
+               </div>`;
+        const cliCampo = isEdit
+            ? campoSoloLectura('cliente', 'Cliente',
+                c.cliente_nombre || nombreDelCatalogo(cat.clientes, c.cliente, 'Sin cliente'))
+            : `<div class="form-group">
+                   <label for="con-cliente">Cliente</label>
+                   <select id="con-cliente">${cliOpts}</select>
+               </div>`;
 
         // `remitir` y `habilitado` son banderas de dos valores: no llevan
         // opción vacía. En el alta arrancan como el `nuevo()` del sistema
@@ -3663,137 +3861,164 @@
                     </button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-section">
-                        <div class="form-section-title">Identificación</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-dominio">Dominio</label>
-                                <select id="con-dominio">${domOpts}</select>
-                            </div>
-                            <div class="form-group">
-                                <label for="con-cliente">Cliente</label>
-                                <select id="con-cliente">${cliOpts}</select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-uuid">Identificador</label>
-                                <input type="text" id="con-uuid" maxlength="8" inputmode="numeric"
-                                       value="${escape(c?.uuid ?? '')}"
-                                       placeholder="${isEdit ? '8 dígitos' : 'Se genera solo si lo dejás vacío'}">
-                                <div class="field-error" id="con-uuid-err" style="display:none"></div>
-                            </div>
-                            <div class="form-group">
-                                <label for="con-habilitado">Habilitado</label>
-                                <select id="con-habilitado">
-                                    <option value="1"${habActual === '1' ? ' selected' : ''}>Habilitado</option>
-                                    <option value="0"${habActual === '0' ? ' selected' : ''}>Deshabilitado</option>
-                                </select>
-                            </div>
-                        </div>
+                    ${/* Dos pestañas (DESIGN.md §25), con el mismo corte que
+                         Consultar: `General` es de quién es el contrato y
+                         `Facturación` arranca en el plan y se lleva todo lo que
+                         sigue. `Tolerancia` y `Remitido` se quedan en General
+                         aunque cuelguen del ciclo de facturación: son el
+                         seguimiento del contrato, no su condición comercial. */''}
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general" role="tab">
+                            <i class="fa-solid fa-circle-info"></i> General
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="facturacion" role="tab">
+                            <i class="fa-solid fa-file-invoice-dollar"></i> Facturación
+                        </button>
                     </div>
 
-                    <div class="form-section">
-                        <div class="form-section-title">Servicio</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-tipo">Tipo</label>
-                                <select id="con-tipo">${tipOpts}</select>
+                    <div class="modal-tabpanel" data-panel="general">
+                        <div class="form-section">
+                            <div class="form-section-title">Identificación</div>
+                            <div class="form-row">
+                                ${domCampo}
+                                ${cliCampo}
                             </div>
-                            <div class="form-group">
-                                <label for="con-plan">Plan</label>
-                                <select id="con-plan">${plaOpts}</select>
-                            </div>
-                        </div>
-                        ${/* `promo` es de SOLO LECTURA a propósito: el esquema
-                             la declara FK contra `articulos` y el sistema
-                             histórico la factura como porcentaje, y ninguno de
-                             los once valores del combo existe como artículo.
-                             Se muestra para que la ficha esté completa; el
-                             endpoint no la escribe. Ver api/contratos.php. */''}
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-promo">Promo</label>
-                                <input type="text" id="con-promo" readonly
-                                       value="${escape(c?.promo == null ? 'Sin promoción' : (c.promo_texto || c.promo))}">
-                                <div class="form-nota">
-                                    Sólo lectura: la columna está declarada como referencia a
-                                    <code>articulos</code> pero el sistema histórico la factura como
-                                    porcentaje de descuento. Hasta que se defina cuál de las dos es,
-                                    el ABM no la escribe.
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-uuid">Identificador</label>
+                                    <input type="text" id="con-uuid" maxlength="8" inputmode="numeric"
+                                           value="${escape(c?.uuid ?? '')}"
+                                           placeholder="${isEdit ? '8 dígitos' : 'Se genera solo si lo dejás vacío'}">
+                                    <div class="field-error" id="con-uuid-err" style="display:none"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-habilitado">Habilitado</label>
+                                    <select id="con-habilitado">
+                                        <option value="1"${habActual === '1' ? ' selected' : ''}>Habilitado</option>
+                                        <option value="0"${habActual === '0' ? ' selected' : ''}>Deshabilitado</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="form-group">
-                                <label for="con-desde">Promo vigente desde</label>
-                                <input type="date" id="con-desde" value="${escape(c?.desde ?? '')}">
-                                <div class="field-error" id="con-desde-err" style="display:none"></div>
-                            </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-hasta">Promo vigente hasta</label>
-                                <input type="date" id="con-hasta" value="${escape(c?.hasta ?? '')}">
-                            </div>
-                            <div class="form-group"></div>
-                        </div>
-                    </div>
 
-                    <div class="form-section">
-                        <div class="form-section-title">Vida del contrato</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-registro">Registro</label>
-                                <input type="datetime-local" id="con-registro" value="${escape(toInputFechaHora(c?.registro))}">
-                            </div>
-                            <div class="form-group">
-                                <label for="con-firma">Firma</label>
-                                <input type="datetime-local" id="con-firma" value="${escape(toInputFechaHora(c?.firma))}">
+                        <div class="form-section">
+                            <div class="form-section-title">Servicio</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-tipo">Tipo</label>
+                                    <select id="con-tipo">${tipOpts}</select>
+                                </div>
+                                <div class="form-group"></div>
                             </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-alta">Alta</label>
-                                <input type="date" id="con-alta" value="${escape(c?.alta ?? '')}">
-                            </div>
-                            <div class="form-group">
-                                <label for="con-baja">Baja</label>
-                                <input type="date" id="con-baja" value="${escape(c?.baja ?? '')}">
-                                <div class="field-error" id="con-baja-err" style="display:none"></div>
+
+                        <div class="form-section">
+                            <div class="form-section-title">Seguimiento</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-tolerancia">Tolerancia</label>
+                                    <input type="date" id="con-tolerancia" value="${escape(c?.tolerancia ?? '')}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-remitido">Remitido</label>
+                                    <input type="datetime-local" id="con-remitido" value="${escape(toInputFechaHora(c?.remitido))}">
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="form-section">
-                        <div class="form-section-title">Facturación</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-facturado">Facturado</label>
-                                <input type="date" id="con-facturado" value="${escape(c?.facturado ?? '')}">
+                    <div class="modal-tabpanel" data-panel="facturacion" hidden>
+                        <div class="form-section">
+                            <div class="form-section-title">Plan y promoción</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-plan">Plan</label>
+                                    <select id="con-plan">${plaOpts}</select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-plan-modo">
+                                        Modo del plan
+                                        ${ayudaDeCampo('<strong>Fijo</strong>: queda el plan pactado aunque el dominio crezca. <strong>Dinámico</strong>: el plan sigue al consumo del dominio.')}
+                                    </label>
+                                    <select id="con-plan-modo">${modOpts}</select>
+                                </div>
                             </div>
+                            ${/* Promoción va a TODO EL ANCHO y por eso sale del
+                                 `.form-row`, que es un grid de dos columnas
+                                 fijas: un hijo solo ocuparía nada más que la
+                                 primera. Suelto dentro de la sección —que es
+                                 flex column con el mismo gap— ocupa el 100 %. */''}
                             <div class="form-group">
-                                <label for="con-facturar">Facturar</label>
-                                <input type="date" id="con-facturar" value="${escape(c?.facturar ?? '')}">
+                                <label for="con-promo">
+                                    Promoción
+                                    ${ayudaDeCampo('El descuento se aplica al abono del plan, y sólo dentro de la vigencia de abajo.')}
+                                </label>
+                                <select id="con-promo">${proOpts}</select>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-desde">Promo vigente desde</label>
+                                    <input type="date" id="con-desde" value="${escape(c?.desde ?? '')}">
+                                    <div class="field-error" id="con-desde-err" style="display:none"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-hasta">Promo vigente hasta</label>
+                                    <input type="date" id="con-hasta" value="${escape(c?.hasta ?? '')}">
+                                </div>
                             </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-tolerancia">Tolerancia</label>
-                                <input type="date" id="con-tolerancia" value="${escape(c?.tolerancia ?? '')}">
+
+                        <div class="form-section">
+                            <div class="form-section-title">Vida del contrato</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-registro">Registro</label>
+                                    <input type="datetime-local" id="con-registro" value="${escape(toInputFechaHora(c?.registro))}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-firma">Firma</label>
+                                    <input type="datetime-local" id="con-firma" value="${escape(toInputFechaHora(c?.firma))}">
+                                </div>
                             </div>
-                            <div class="form-group"></div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-alta">Alta</label>
+                                    <input type="date" id="con-alta" value="${escape(c?.alta ?? '')}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-baja">Baja</label>
+                                    <input type="date" id="con-baja" value="${escape(c?.baja ?? '')}">
+                                    <div class="field-error" id="con-baja-err" style="display:none"></div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="con-remitir">Remitir estado de cuenta</label>
-                                <select id="con-remitir">${remOpts}</select>
+
+                        <div class="form-section">
+                            <div class="form-section-title">Facturación</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-facturado">Facturado</label>
+                                    <input type="date" id="con-facturado" value="${escape(c?.facturado ?? '')}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="con-facturar">Facturar</label>
+                                    <input type="date" id="con-facturar" value="${escape(c?.facturar ?? '')}">
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="con-remitido">Remitido</label>
-                                <input type="datetime-local" id="con-remitido" value="${escape(toInputFechaHora(c?.remitido))}">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="con-remitir">Remitir estado de cuenta</label>
+                                    <select id="con-remitir">${remOpts}</select>
+                                </div>
+                                <div class="form-group"></div>
                             </div>
                         </div>
                     </div>
 
+                    ${/* La nota de los centinelas va FUERA de las dos pestañas:
+                         habla de todas las fechas del formulario y hay fechas en
+                         las dos (Tolerancia y Remitido en General, el resto en
+                         Facturación). Repetirla en cada panel sería ruido. */''}
                     <div class="form-nota">
                         Las fechas que se dejan vacías se guardan con el "sin fecha" del sistema
                         histórico (<code>1500-01-01</code>, y <code>2500-01-01</code> en Baja), que es
@@ -3812,6 +4037,14 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
+        // `mostrarPestana` se guarda porque el Guardar la necesita: los tres
+        // campos que se validan están repartidos entre las dos solapas
+        // (Identificador en General; la vigencia de la promo y el alta/baja en
+        // Facturación), así que hay que traer al operador a la que falló antes
+        // de enfocar — marcar el error en un panel `hidden` se lee como un
+        // Guardar que no responde (DESIGN.md §25).
+        const mostrarPestana = wireModalTabs(backdrop);
+
         const val     = id => backdrop.querySelector('#con-' + id).value.trim();
         const saveBtn = backdrop.querySelector('[data-act="save"]');
         const uuidEl  = backdrop.querySelector('#con-uuid');
@@ -3823,13 +4056,17 @@
         const bajaEl  = backdrop.querySelector('#con-baja');
         const bajaErr = backdrop.querySelector('#con-baja-err');
 
-        backdrop.querySelector('#con-dominio').focus();
+        // El primer campo editable, que no es el mismo en los dos modos: en
+        // edición Dominio y Cliente son de sólo lectura, así que arranca en el
+        // Identificador.
+        backdrop.querySelector(isEdit ? '#con-uuid' : '#con-dominio').focus();
 
         // El dominio ya tiene cliente: elegirlo precarga el cliente cuando el
         // campo está vacío, igual que el alta desde un dominio del sistema
         // histórico. No lo pisa si ya hay uno elegido — un contrato puede
         // facturarse a un cliente distinto del titular del dominio.
-        backdrop.querySelector('#con-dominio').addEventListener('change', e => {
+        // Sólo existe en el alta: en edición los dos son inputs de sólo lectura.
+        if (!isEdit) backdrop.querySelector('#con-dominio').addEventListener('change', e => {
             const dom = cat.dominios.find(d => String(d.id) === e.target.value);
             const cliSel = backdrop.querySelector('#con-cliente');
             if (dom && dom.cliente && !cliSel.value) cliSel.value = String(dom.cliente);
@@ -3839,11 +4076,13 @@
             [uuidErr, desdeErr, bajaErr].forEach(el => { el.style.display = 'none'; });
             [uuidEl, desdeEl, bajaEl].forEach(el => el.classList.remove('input-invalid'));
 
-            const marcar = (el, err, msg) => {
+            // Devuelve el campo junto con la pestaña en la que vive: sin eso el
+            // `focus()` caería sobre un panel oculto.
+            const marcar = (el, err, msg, panel) => {
                 err.textContent = msg;
                 err.style.display = 'block';
                 el.classList.add('input-invalid');
-                return el;
+                return { el, panel };
             };
 
             const uuid = val('uuid');
@@ -3853,33 +4092,41 @@
             // el formato lo valida igual el backend, pero avisar acá evita el
             // viaje. En el alta puede ir vacío — se genera del lado del server.
             if (uuid !== '' && !/^[0-9]{8}$/.test(uuid)) {
-                firstInvalid = marcar(uuidEl, uuidErr, 'El identificador debe tener exactamente 8 dígitos');
+                firstInvalid = marcar(uuidEl, uuidErr, 'El identificador debe tener exactamente 8 dígitos', 'general');
             } else if (isEdit && uuid === '') {
-                firstInvalid = marcar(uuidEl, uuidErr, 'El identificador es obligatorio');
+                firstInvalid = marcar(uuidEl, uuidErr, 'El identificador es obligatorio', 'general');
             }
 
             const desde = val('desde');
             const hasta = val('hasta');
             if (desde && hasta && desde > hasta) {
-                firstInvalid = firstInvalid || marcar(desdeEl, desdeErr, 'La vigencia "desde" no puede ser posterior a "hasta"');
+                firstInvalid = firstInvalid || marcar(desdeEl, desdeErr, 'La vigencia "desde" no puede ser posterior a "hasta"', 'facturacion');
             }
 
             const alta = val('alta');
             const baja = val('baja');
             if (alta && baja && baja < alta) {
-                firstInvalid = firstInvalid || marcar(bajaEl, bajaErr, 'La baja no puede ser anterior al alta');
+                firstInvalid = firstInvalid || marcar(bajaEl, bajaErr, 'La baja no puede ser anterior al alta', 'facturacion');
             }
 
-            if (firstInvalid) { firstInvalid.focus(); return; }
+            if (firstInvalid) {
+                mostrarPestana(firstInvalid.panel);
+                firstInvalid.el.focus();
+                return;
+            }
 
-            // `promo` no viaja: el endpoint no la escribe (ver el comentario del
-            // campo de arriba). El resto son las 17 columnas editables.
+            // Las 19 columnas editables. En edición Dominio y Cliente no se
+            // leen del formulario —son inputs de sólo lectura con el nombre— y
+            // viajan con el id que ya tenía la fila: el endpoint reescribe las
+            // dos columnas en el UPDATE, así que omitirlas las borraría.
             const payload = {
                 uuid,
-                dominio:    val('dominio'),
-                cliente:    val('cliente'),
+                dominio:    isEdit ? String(c.dominio ?? '') : val('dominio'),
+                cliente:    isEdit ? String(c.cliente ?? '') : val('cliente'),
                 tipo:       val('tipo'),
                 plan:       val('plan'),
+                plan_modo:  val('plan-modo'),
+                promo:      val('promo'),
                 desde,
                 hasta,
                 registro:   val('registro'),
@@ -4641,9 +4888,12 @@
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal modal-wide" role="dialog" aria-modal="true">
+            <div class="modal modal-xwide" role="dialog" aria-modal="true">
                 <div class="modal-header modal-header-primary">
-                    <div class="modal-title">Consultar comprobante</div>
+                    <div class="modal-title">
+                        <i class="fa-solid fa-file-invoice"></i>
+                        Comprobante <span class="modal-subtitle">#${id}</span>
+                    </div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-menubar" role="toolbar" aria-label="Acciones del comprobante">
@@ -4678,10 +4928,19 @@
             pintarFicha();
         }
 
+        // Pestaña abierta, recordada ENTRE REPINTADOS. La ficha se redibuja
+        // entera tras cada cambio de renglón, y los botones de renglón viven en
+        // la pestaña Cuerpo: sin esto, agregar un renglón devolvería al operador
+        // a General y tendría que volver a Cuerpo para cargar el siguiente.
+        let pestana = 'general';
+
         function pintarFicha() {
             const c = detalle.comprobante;
             backdrop.querySelector('#cpb-ficha').innerHTML = comprobanteFichaHtml(detalle);
+            wireModalTabs(backdrop, n => { pestana = n; })(pestana);
             wireFichaRenglones(backdrop, c, repintar);
+            backdrop.querySelector('[data-cae-res]')
+                ?.addEventListener('click', () => openCaeResModal(c.caeres));
             cablearMenus(c);
         }
 
@@ -4740,74 +4999,190 @@
         pintarFicha();
     }
 
-    // Cuerpo de la ficha: las tarjetas de la cabecera, la grilla de renglones
-    // con sus totales y la de pagos.
+    /* Una línea "Etiqueta: valor" de un `.ficha-panel` (DESIGN.md §25-quater).
+       El vacío se dice con la misma glosa en cursiva que usan las tarjetas de
+       §25: una etiqueta sin nada al lado no distingue "no tiene" de "no cargó".
+       `valor` entra como TEXTO y lo escapa la función; quien necesite HTML
+       (un badge, un enlace) arma la línea a mano. */
+    function fichaLinea(rotulo, valor) {
+        const vacio = valor == null || valor === '';
+        return `<div class="ficha-linea">
+            <span class="ficha-linea-rot">${escape(rotulo)}:</span>
+            ${vacio ? `<span class="muted">Sin dato</span>` : escape(valor)}
+        </div>`;
+    }
+
+    function fichaPanel(rotulo, lineas) {
+        return `<div class="ficha-panel-col">
+            <div class="ficha-panel-label">${escape(rotulo)}</div>
+            <div class="ficha-panel">${lineas.join('')}</div>
+        </div>`;
+    }
+
+    /* Cuerpo de la ficha, en formato comprobante (DESIGN.md §25-quater):
+       encabezado con la identidad del documento y su total, y el resto repartido
+       en cuatro pestañas —General (fiscal + cliente), Cuerpo (los renglones con
+       sus totales), Detalles (el resto de los campos) y Pagos—.
+
+       Por qué no es la grilla de tarjetas de §25 como el resto de los Consultar:
+       un comprobante pasa los veinte campos, y con veinte tarjetas iguales las
+       tres cosas que se miran primero —qué documento es, cuánto dice y si está
+       autorizado— quedan al mismo nivel que la cotización del dólar. */
     function comprobanteFichaHtml(detalle) {
         const c = detalle.comprobante;
 
-        const oVacio = (v, glosa) => v ? escape(v) : `<span class="muted">${escape(glosa)}</span>`;
-        const fecha  = v => v ? escape(formatDateOnly(v)) : `<span class="muted">—</span>`;
+        const fecha = v => v ? formatDateOnly(v) : '';
+        // Versión en texto plano de `refValue()`, para las líneas del panel:
+        // ahí el id no puede ir en `<code>` porque `fichaLinea()` escapa todo.
+        const ref = (id, nombre) => id == null ? '' : (nombre ? `${nombre} #${id}` : `#${id}`);
 
-        // El CAE sólo existe en los talonarios fiscales; en los demás las dos
-        // tarjetas serían siempre "—" y sólo agregarían ruido. Es la misma
+        // El CAE sólo existe en los talonarios fiscales; en los demás las tres
+        // líneas serían siempre "Sin dato" y sólo agregarían ruido. Es la misma
         // condición que usa el consultar del sistema viejo.
         const esFiscal = c.fiscal === '1';
-        const cae = !esFiscal ? [] : [
-            viewCardHalf('CAE Nro', oVacio(c.caenro, 'Sin CAE')),
-            viewCardHalf('CAE Vto', oVacio(c.caevto, 'Sin vencimiento')),
-        ];
 
-        /* Las tarjetas: los `half` tienen que ser PARES y cada `full` tiene que
-           caer después de un renglón cerrado (§25 de DESIGN.md), o la tarjeta
-           suelta se estira y se lee como un destaque que nadie decidió. El
-           bloque de CAE suma DOS `half`, así que la paridad se mantiene esté o
-           no esté. Agregar o quitar un campo obliga a rehacer la cuenta. */
-        const tarjetas = [
-            viewCardHalf('Código',            `<code>#${c.id}</code>`),
-            viewCardHalf('Estado',            comprobanteEstadoBadge(c)),
-            viewCardFull('Talonario',         c.talonario
-                ? `${escape(c.talonario_nombre || '')} <code>#${c.talonario}</code>`
-                : `<span class="muted">Sin talonario</span>`),
-            viewCardHalf('Tipo',              c.tipo_completo
-                ? `<span class="badge badge-info">${escape(c.tipo_completo)}</span>`
-                : `<span class="muted">—</span>`),
-            viewCardHalf('Número',            c.numero
-                ? `<code>${escape(c.numero)}</code>`
-                : `<span class="muted">Sin numerar (se asigna al autorizar)</span>`),
-            viewCardHalf('Empresa',           refValue(c.empresa, c.empresa_nombre)),
-            viewCardHalf('Comprobante fiscal',
-                `<span class="badge ${esFiscal ? 'badge-warn' : 'badge-info'}">${escape(c.fiscal_texto || (esFiscal ? 'Sí' : 'No'))}</span>`),
-            ...cae,
-            viewCardHalf('Emisión',           fecha(c.emision)),
-            viewCardHalf('Vencimiento',       fecha(c.vencimiento)),
-            viewCardFull('Identificador',     c.uuid
-                ? `<code>${escape(c.uuid)}</code>`
-                : `<span class="muted">Sin identificador</span>`),
-            viewCardHalf('Cliente',           refValue(c.cliente, c.cliente_nombre)),
-            viewCardHalf('Contrato',          refValue(c.contrato, '')),
-            viewCardFull('Razón social',      oVacio(c.razon, 'Sin razón social')),
-            viewCardHalf('Condición fiscal',  oVacio(c.condicion_texto || c.condicion, 'Sin condición')),
-            viewCardHalf('CUIT',              oVacio(c.cuit, 'Sin CUIT')),
-            viewCardFull('Domicilio',         oVacio(c.domicilio, 'Sin domicilio')),
-            viewCardHalf('Correo',            oVacio(c.correo, 'Sin correo')),
-            viewCardHalf('Celular',           oVacio(c.celular, 'Sin celular')),
-            viewCardHalf('Medio de pago',     refValue(c.medio, c.medio_nombre)),
-            viewCardHalf('Cotización USD/ARS', c.cotizacion ? escape(moneda(c.cotizacion)) : `<span class="muted">—</span>`),
-        ];
+        const pagos = detalle.pagos || [];
 
         return `
-            ${viewGrid(tarjetas)}
-            ${comprobanteRenglonesHtml(detalle)}
-            ${comprobantePagosHtml(detalle)}
-            ${viewGrid([
-                viewCardFull('Observaciones', c.observaciones
-                    ? escape(c.observaciones).replace(/\n/g, '<br>')
-                    : `<span class="muted">Sin observaciones</span>`),
-                viewCardFull('Comentarios', c.comentarios
-                    ? escape(c.comentarios).replace(/\n/g, '<br>')
-                    : `<span class="muted">Sin comentarios</span>`),
-            ])}
+            <div class="ficha-hero">
+                <div>
+                    <div class="ficha-hero-talonario">${escape(
+                        c.talonario_nombre || (c.talonario ? `Talonario #${c.talonario}` : 'Sin talonario'))}</div>
+                    <div class="ficha-hero-doc">
+                        <span class="ficha-hero-tipo">${escape(c.tipo_completo || '—')}</span>
+                        <span class="ficha-hero-nro">${c.numero
+                            ? escape(c.numero)
+                            : 'sin numerar'}</span>
+                    </div>
+                    <div class="ficha-hero-meta">#${c.id} · UUID <code>${escape(c.uuid || '—')}</code></div>
+                    <div class="ficha-hero-total-block">
+                        <div class="ficha-hero-total-label">Total</div>
+                        <div class="ficha-hero-total">${escape(moneda(c.total || 0))}</div>
+                    </div>
+                </div>
+                <div class="ficha-hero-side">
+                    <div>${comprobanteEstadoBadge(c)}</div>
+                    <div class="ficha-hero-fechas">
+                        <div><span class="muted">Emisión:</span> ${escape(fecha(c.emision) || '—')}</div>
+                        <div><span class="muted">Vencimiento:</span> ${escape(fecha(c.vencimiento) || '—')}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-tabs" role="tablist">
+                <button type="button" class="modal-tab active" data-tab="general" role="tab">
+                    <i class="fa-solid fa-circle-info"></i> General
+                </button>
+                <button type="button" class="modal-tab" data-tab="cuerpo" role="tab">
+                    <i class="fa-solid fa-list"></i> Cuerpo
+                </button>
+                <button type="button" class="modal-tab" data-tab="detalles" role="tab">
+                    <i class="fa-solid fa-note-sticky"></i> Detalles
+                </button>
+                <button type="button" class="modal-tab" data-tab="pagos" role="tab">
+                    <i class="fa-solid fa-hand-holding-dollar"></i> Pagos
+                    ${pagos.length ? `<span class="badge badge-info">${pagos.length}</span>` : ''}
+                </button>
+            </div>
+
+            <div class="modal-tabpanel" data-panel="general">
+                <div class="ficha-panel-grid">
+                    ${fichaPanel('Datos fiscales', [
+                        fichaLinea('Talonario', ref(c.talonario, c.talonario_nombre)),
+                        fichaLinea('Empresa',   ref(c.empresa,   c.empresa_nombre)),
+                        fichaLinea('Tipo',      c.tipo_completo),
+                        fichaLinea('Número',    c.numero),
+                        `<div class="ficha-linea">
+                            <span class="ficha-linea-rot">Comprobante fiscal:</span>
+                            <span class="badge ${esFiscal ? 'badge-warn' : 'badge-info'}">${
+                                escape(c.fiscal_texto || (esFiscal ? 'Sí' : 'No'))}</span>
+                        </div>`,
+                        ...(esFiscal ? [
+                            fichaLinea('CAE Número',     c.caenro),
+                            fichaLinea('CAE Vencimiento', c.caevto),
+                            comprobanteCaeResLinea(c.caeres),
+                        ] : []),
+                    ])}
+                    ${fichaPanel('Cliente', [
+                        fichaLinea('Razón social',  c.razon),
+                        fichaLinea('Domicilio',     c.domicilio),
+                        fichaLinea('Correo',        c.correo),
+                        fichaLinea('Celular',       c.celular),
+                        fichaLinea('CUIT',          c.cuit),
+                        fichaLinea('Condición IVA', c.condicion_texto || c.condicion),
+                    ])}
+                </div>
+            </div>
+
+            <div class="modal-tabpanel" data-panel="cuerpo" hidden>
+                ${comprobanteRenglonesHtml(detalle)}
+            </div>
+
+            <div class="modal-tabpanel" data-panel="detalles" hidden>
+                ${viewGrid([
+                    viewCardHalf('Cliente',            refValue(c.cliente, c.cliente_nombre)),
+                    viewCardHalf('Contrato',           refValue(c.contrato, '')),
+                    viewCardHalf('Medio de pago',      refValue(c.medio, c.medio_nombre)),
+                    viewCardHalf('Cotización USD/ARS', c.cotizacion
+                        ? escape(moneda(c.cotizacion))
+                        : `<span class="muted">—</span>`),
+                    viewCardFull('Comentarios', c.comentarios
+                        ? escape(c.comentarios).replace(/\n/g, '<br>')
+                        : `<span class="muted">Sin comentarios</span>`),
+                ])}
+            </div>
+
+            <div class="modal-tabpanel" data-panel="pagos" hidden>
+                ${comprobantePagosHtml(detalle)}
+            </div>
         `;
+    }
+
+    /* La respuesta de AFIP es un bloque largo —el XML del rechazo cuando falla—
+       y adentro de una línea de panel taparía todo lo demás. Se esconde detrás
+       de un "Ver" que abre un overlay propio, montado FUERA del backdrop de la
+       ficha para no destruirla. */
+    function comprobanteCaeResLinea(caeres) {
+        if (!caeres) return fichaLinea('CAE respuesta', '');
+        return `<div class="ficha-linea">
+            <span class="ficha-linea-rot">CAE respuesta:</span>
+            <a href="javascript:void(0)" data-cae-res
+               style="color:var(--primary);text-decoration:underline;cursor:pointer">Ver</a>
+        </div>`;
+    }
+
+    function openCaeResModal(texto) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Respuesta CAE</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de la respuesta">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="copy">
+                        <i class="fa-regular fa-copy"></i> Copiar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <textarea class="json-editor" readonly>${escape(texto)}</textarea>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+        backdrop.querySelector('[data-act="copy"]').addEventListener('click', () => copyToClipboard(texto));
     }
 
     function comprobanteRenglonesHtml(detalle) {
@@ -4834,6 +5209,10 @@
                     </td>` : ''}
                 </tr>`).join('');
 
+        /* Los totales salen de la tabla y van a la caja de la derecha, que es
+           donde se busca un total en cualquier factura. Las Observaciones van
+           al lado y no en Detalles: son el texto que se IMPRIME en el
+           comprobante, así que se leen junto a los renglones. */
         return `
             <div class="ficha-bloque">
                 <div class="ficha-bloque-head">
@@ -4857,39 +5236,55 @@
                         </tr>
                     </thead>
                     <tbody>${filas}</tbody>
-                    <tfoot>
-                        <tr><td colspan="${ed ? 6 : 5}" class="td-num">Subtotal</td>
-                            <td class="td-num">${escape(moneda(c.subtotal || 0))}</td></tr>
-                        <tr><td colspan="${ed ? 6 : 5}" class="td-num">IVA</td>
-                            <td class="td-num">${escape(moneda(c.iva || 0))}</td></tr>
-                        <tr><td colspan="${ed ? 6 : 5}" class="td-num"><strong>Total</strong></td>
-                            <td class="td-num"><strong>${escape(moneda(c.total || 0))}</strong></td></tr>
-                    </tfoot>
                 </table>
-                <div class="form-nota">
-                    Los tres totales los recalcula el servidor desde los renglones cada vez que uno
-                    cambia — no se escriben a mano. El IVA se <em>desagrega</em> del monto (los
-                    renglones van con IVA incluido), que es como los tiene calculados el sistema
-                    histórico.
+            </div>
+
+            <div class="ficha-cierre">
+                <div class="form-group">
+                    <label for="cpb-observaciones-ro">Observaciones</label>
+                    <textarea id="cpb-observaciones-ro" readonly rows="5"
+                              placeholder="Sin observaciones">${escape(c.observaciones || '')}</textarea>
                 </div>
+                <div class="ficha-totales">
+                    <div class="ficha-total-linea">
+                        <span class="muted">Subtotal</span>
+                        <span class="val">${escape(moneda(c.subtotal || 0))}</span>
+                    </div>
+                    <div class="ficha-total-linea">
+                        <span class="muted">IVA</span>
+                        <span class="val">${escape(moneda(c.iva || 0))}</span>
+                    </div>
+                    <div class="ficha-total-linea final">
+                        <span>Total</span>
+                        <span class="val">${escape(moneda(c.total || 0))}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-nota">
+                Los tres totales los recalcula el servidor desde los renglones cada vez que uno
+                cambia — no se escriben a mano. El IVA se <em>desagrega</em> del monto (los
+                renglones van con IVA incluido), que es como los tiene calculados el sistema
+                histórico.
             </div>
         `;
     }
 
     function comprobantePagosHtml(detalle) {
         const ps = detalle.pagos || [];
-        if (!ps.length) return '';
 
-        const filas = ps.map(p => `
-            <tr>
-                <td><span class="td-id">#${p.id}</span></td>
-                <td>${p.fecha ? escape(formatDate(p.fecha)) : '<span class="muted">—</span>'}</td>
-                <td>${p.medio_nombre ? escape(p.medio_nombre) : '<span class="muted">—</span>'}</td>
-                <td>${p.operacion ? escape(p.operacion) : '<span class="muted">—</span>'}</td>
-                <td class="td-num">${p.monto == null ? '—' : escape(moneda(p.monto))}</td>
-                <td><span class="badge ${p.estado === '2' ? 'badge-success' : p.estado === '0' ? 'badge-danger' : 'badge-warn'}">${
-                    escape(p.estado_texto || p.estado || '—')}</span></td>
-            </tr>`).join('');
+        const filas = !ps.length
+            ? `<tr><td colspan="6" class="muted" style="text-align:center">Sin pagos registrados.</td></tr>`
+            : ps.map(p => `
+                <tr>
+                    <td><span class="td-id">#${p.id}</span></td>
+                    <td>${p.fecha ? escape(formatDate(p.fecha)) : '<span class="muted">—</span>'}</td>
+                    <td>${p.medio_nombre ? escape(p.medio_nombre) : '<span class="muted">—</span>'}</td>
+                    <td>${p.operacion ? escape(p.operacion) : '<span class="muted">—</span>'}</td>
+                    <td class="td-num">${p.monto == null ? '—' : escape(moneda(p.monto))}</td>
+                    <td><span class="badge ${p.estado === '2' ? 'badge-success' : p.estado === '0' ? 'badge-danger' : 'badge-warn'}">${
+                        escape(p.estado_texto || p.estado || '—')}</span></td>
+                </tr>`).join('');
 
         return `
             <div class="ficha-bloque">
@@ -4904,6 +5299,11 @@
                     </thead>
                     <tbody>${filas}</tbody>
                 </table>
+            </div>
+            <div class="form-nota">
+                Los pagos se registran desde <strong>Acciones → Registrar pago</strong>, y sólo
+                mientras el comprobante esté Pendiente. Un pago imputado no cambia el total del
+                comprobante: lo cancela.
             </div>
         `;
     }
@@ -5209,9 +5609,12 @@
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
-            <div class="modal modal-wide" role="dialog" aria-modal="true">
+            <div class="modal modal-xwide" role="dialog" aria-modal="true">
                 <div class="modal-header modal-header-primary">
-                    <div class="modal-title">Editar comprobante</div>
+                    <div class="modal-title">
+                        <i class="fa-solid fa-file-invoice"></i>
+                        Editar comprobante <span class="modal-subtitle">#${c.id}</span>
+                    </div>
                     <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
                 </div>
                 <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
@@ -5223,81 +5626,104 @@
                     </button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-section">
-                        <div class="form-section-title">Cliente</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="cpb-cliente">Cliente (ID)</label>
-                                <input type="number" id="cpb-cliente" min="1"
-                                       value="${escape(String(c.cliente ?? ''))}" placeholder="Opcional">
-                                ${c.cliente_nombre ? `<div class="form-nota">${escape(c.cliente_nombre)}</div>` : ''}
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general" role="tab">
+                            <i class="fa-solid fa-circle-info"></i> General
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="detalles" role="tab">
+                            <i class="fa-solid fa-note-sticky"></i> Detalles
+                        </button>
+                    </div>
+
+                    <div class="modal-tabpanel" data-panel="general">
+                        <div class="form-section">
+                            <div class="form-section-title">Comprobante</div>
+                            <div class="form-row form-row-3">
+                                <div class="form-group">
+                                    <label for="cpb-emision">Emisión</label>
+                                    <input type="date" id="cpb-emision" value="${escape(c.emision ?? '')}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpb-vencimiento">Vencimiento</label>
+                                    <input type="date" id="cpb-vencimiento" value="${escape(c.vencimiento ?? '')}">
+                                    <div class="field-error" id="cpb-vencimiento-err" style="display:none"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpb-cotizacion">Cotización USD/ARS</label>
+                                    <input type="text" id="cpb-cotizacion" inputmode="decimal"
+                                           value="${escape(String(c.cotizacion ?? 0))}">
+                                    <div class="field-error" id="cpb-cotizacion-err" style="display:none"></div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="cpb-condicion">Condición fiscal</label>
-                                <select id="cpb-condicion">${condOpts}</select>
+                            <div class="form-nota">
+                                El talonario, el número, el CAE, los totales y el estado no se editan acá:
+                                el número lo asigna <strong>Autorizar</strong>, los totales salen de los
+                                renglones y el CAE viene de AFIP.
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="cpb-razon">Razón social</label>
-                            <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}">
-                            <div class="field-error" id="cpb-razon-err" style="display:none"></div>
-                            <div class="form-nota">Sin razón social el comprobante no se puede autorizar.</div>
-                        </div>
-                        <div class="form-group">
-                            <label for="cpb-domicilio">Domicilio</label>
-                            <input type="text" id="cpb-domicilio" maxlength="250" value="${escape(c.domicilio ?? '')}">
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="cpb-cuit">CUIT</label>
-                                <input type="text" id="cpb-cuit" maxlength="50" value="${escape(c.cuit ?? '')}">
+
+                        <div class="form-section">
+                            <div class="form-section-title">Cliente</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cpb-cliente">Cliente (ID)</label>
+                                    <input type="number" id="cpb-cliente" min="1"
+                                           value="${escape(String(c.cliente ?? ''))}" placeholder="Opcional">
+                                    ${c.cliente_nombre ? `<div class="form-nota">${escape(c.cliente_nombre)}</div>` : ''}
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpb-condicion">Condición fiscal</label>
+                                    <select id="cpb-condicion">${condOpts}</select>
+                                </div>
                             </div>
                             <div class="form-group">
-                                <label for="cpb-celular">Celular</label>
-                                <input type="text" id="cpb-celular" maxlength="100" value="${escape(c.celular ?? '')}">
+                                <label for="cpb-razon">Razón social</label>
+                                <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}">
+                                <div class="field-error" id="cpb-razon-err" style="display:none"></div>
+                                <div class="form-nota">Sin razón social el comprobante no se puede autorizar.</div>
                             </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="cpb-correo">Correo</label>
-                            <input type="email" id="cpb-correo" maxlength="100" value="${escape(c.correo ?? '')}">
-                            <div class="field-error" id="cpb-correo-err" style="display:none"></div>
-                            <div class="form-nota">Es a donde va el comprobante cuando se envía por correo.</div>
+                            <div class="form-group">
+                                <label for="cpb-domicilio">Domicilio</label>
+                                <input type="text" id="cpb-domicilio" maxlength="250" value="${escape(c.domicilio ?? '')}">
+                            </div>
+                            <div class="form-row form-row-3">
+                                <div class="form-group">
+                                    <label for="cpb-cuit">CUIT</label>
+                                    <input type="text" id="cpb-cuit" maxlength="50" value="${escape(c.cuit ?? '')}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpb-celular">Celular</label>
+                                    <input type="text" id="cpb-celular" maxlength="100" value="${escape(c.celular ?? '')}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpb-correo">Correo</label>
+                                    <input type="email" id="cpb-correo" maxlength="100" value="${escape(c.correo ?? '')}">
+                                    <div class="field-error" id="cpb-correo-err" style="display:none"></div>
+                                </div>
+                            </div>
+                            <div class="form-nota">
+                                El correo es a donde va el comprobante cuando se envía por correo.
+                            </div>
                         </div>
                     </div>
 
-                    <div class="form-section">
-                        <div class="form-section-title">Fechas y notas</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="cpb-emision">Emisión</label>
-                                <input type="date" id="cpb-emision" value="${escape(c.emision ?? '')}">
-                            </div>
-                            <div class="form-group">
-                                <label for="cpb-vencimiento">Vencimiento</label>
-                                <input type="date" id="cpb-vencimiento" value="${escape(c.vencimiento ?? '')}">
-                                <div class="field-error" id="cpb-vencimiento-err" style="display:none"></div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="cpb-cotizacion">Cotización USD/ARS</label>
-                            <input type="text" id="cpb-cotizacion" inputmode="decimal"
-                                   value="${escape(String(c.cotizacion ?? 0))}">
-                            <div class="field-error" id="cpb-cotizacion-err" style="display:none"></div>
-                        </div>
+                    <div class="modal-tabpanel" data-panel="detalles" hidden>
                         <div class="form-group">
                             <label for="cpb-observaciones">Observaciones</label>
-                            <textarea id="cpb-observaciones" rows="3" maxlength="2000">${escape(c.observaciones ?? '')}</textarea>
+                            <textarea id="cpb-observaciones" rows="6" maxlength="2000">${escape(c.observaciones ?? '')}</textarea>
+                            <div class="form-nota">Se imprimen en el comprobante, debajo de los renglones.</div>
                         </div>
                         <div class="form-group">
                             <label for="cpb-comentarios">Comentarios</label>
-                            <textarea id="cpb-comentarios" rows="3" maxlength="2000">${escape(c.comentarios ?? '')}</textarea>
+                            <textarea id="cpb-comentarios" rows="6" maxlength="2000">${escape(c.comentarios ?? '')}</textarea>
+                            <div class="form-nota">Son internos: no salen impresos ni se envían al cliente.</div>
                         </div>
                     </div>
 
                     <div class="form-nota">
-                        El talonario, el número, el CAE, los totales y el estado no se editan acá:
-                        el número lo asigna <strong>Autorizar</strong>, los totales salen de los
-                        renglones y el CAE viene de AFIP.
+                        Los renglones no se cargan acá: se agregan y se editan desde la pestaña
+                        <strong>Cuerpo</strong> de la ficha, uno por uno, porque cada cambio
+                        recalcula los totales en el servidor.
                     </div>
                 </div>
             </div>
@@ -5311,6 +5737,11 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        // Los cuatro campos que valida el Guardar viven en General; si el
+        // operador está parado en Detalles el error se marcaría en un campo
+        // invisible y el modal parecería no responder.
+        const mostrarPestana = wireModalTabs(backdrop);
 
         const el  = id => backdrop.querySelector('#cpb-' + id);
         const val = id => el(id).value.trim();
@@ -5343,7 +5774,7 @@
             if (cot !== '' && (!Number.isFinite(parseFloat(cot)) || parseFloat(cot) < 0)) {
                 bad = bad || marcar('cotizacion', 'Tiene que ser un número de 0 o más');
             }
-            if (bad) { bad.focus(); return; }
+            if (bad) { mostrarPestana('general'); bad.focus(); return; }
 
             btn.disabled = true;
             try {
@@ -11718,6 +12149,608 @@
         backdrop.querySelector('[data-act="copiar"]').addEventListener('click', () => {
             copyToClipboard(n.mensaje || '');
         });
+    }
+
+    /* ---------- Views: Conversaciones ----------
+     * Las charlas del chat con IA de la burbuja de `www.reactor.com.ar`. Dos
+     * tablas: `conversaciones` y `conversaciones_mensajes`.
+     *
+     * CONSULTA Y BAJA, SIN ALTA NI EDICIÓN. Las filas las escribe un visitante
+     * anónimo conversando: un alta fabricaría una charla que nunca pasó y una
+     * edición reescribiría lo que alguien dijo. La baja SÍ está, y es el motivo
+     * por el que el módulo existe además de para leer — son las únicas tablas
+     * del sistema que acumulan texto libre, IP y navegador de gente que nunca se
+     * registró, o sea datos personales bajo la 25.326, y tiene que haber forma
+     * de borrar una conversación puntual sin entrar a la base a mano.
+     *
+     * LO QUE SE VE ES LO QUE SE DIJO, no con qué contestó. El prompt de sistema
+     * —el documento del experto de Datarocket, los planes, los artículos— se
+     * arma de nuevo en cada turno y no se guarda; lo único que queda de él es la
+     * columna `contexto`, con los `uuid` de las entradas que se le pasaron, y
+     * por eso la ficha los muestra debajo de cada respuesta.
+     */
+
+    const ORDEN_CONVERSACIONES = [
+        { value: 'id',        label: 'Código',            key: 'id'        },
+        { value: 'iniciada',  label: 'Inicio',            key: 'iniciada'  },
+        { value: 'actividad', label: 'Última actividad',  key: 'actividad' },
+        { value: 'mensajes',  label: 'Turnos',            key: 'mensajes'  },
+    ];
+
+    function conversacionesDefaults() {
+        return {
+            codigo: '', texto: '', desde: '', hasta: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    /* El costo del mes, para el KPI.
+     *
+     * `< USD 0,01` Y NO `USD 0,00`: con el modelo chico que usa el chat, mil
+     * mensajes salen menos de un centavo, así que un `toFixed(2)` pelado deja el
+     * indicador en cero para siempre y se lee como "esto no está midiendo nada".
+     * Que el gasto sea despreciable es justamente el dato — pero hay que decirlo
+     * de una forma que no parezca un bug. */
+    function conversacionesCosto(usd) {
+        if (!usd)         return 'USD 0';
+        if (usd < 0.01)   return '< USD 0,01';
+        return 'USD ' + usd.toFixed(2).replace('.', ',');
+    }
+
+    async function renderConversaciones(root) {
+        try {
+            const state = tomarEstadoVista('conversaciones', conversacionesDefaults());
+
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.desde) qs.set('desde', state.desde);
+            if (state.hasta) qs.set('hasta', state.hasta);
+
+            const data = await api('conversaciones?' + qs.toString());
+            const r    = data.resumen;
+
+            root.innerHTML = `
+                ${moduleHeader('Conversaciones', 'Las charlas que los visitantes del sitio tuvieron con el asistente de Reactor, con lo que preguntaron y lo que el asistente les contestó.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Conversaciones</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Mensajes</span>
+                        <span class="stat-value">${r.mensajes}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Hoy</span>
+                        <span class="stat-value green">${r.hoy}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Costo estimado · 30 días</span>
+                        <span class="stat-value orange">${conversacionesCosto(r.costo_mes)}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'conv',
+                    quickPlaceholder: 'Buscar en los mensajes, la página o el origen…',
+                    newLabel:         null,
+                })}
+                <div class="table-card" id="conv-table"></div>
+            `;
+
+            wireConversacionesView(state, data.conversaciones);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    /* Cada cuánto se vuelve a pedir la conversación mientras la solapa está
+     * abierta. Tres segundos es lo que pidió la pantalla y alcanza: una charla
+     * real tiene un mensaje cada varios segundos, y el request es una lectura de
+     * dos tablas chicas. */
+    const CONV_REFRESCO_MS = 3000;
+
+    /* Los tokens de toda la conversación. Suma las dos puntas de cada respuesta;
+     * los mensajes de la persona no tienen (no se cobran por separado). */
+    function conversacionTokens(dialogo) {
+        return String(dialogo.reduce((t, m) => t + (m.tokens_entrada || 0) + (m.tokens_salida || 0), 0));
+    }
+
+    /* El modelo con el que se contestó, para la solapa General.
+     *
+     * Sale de la ÚLTIMA respuesta y no de la primera: dentro de una conversación
+     * no cambia, salvo que alguien toque `OPENAI_MODELO` en el medio — y en ese
+     * caso el que vale es el último, que es el que sigue contestando. */
+    function conversacionModelo(dialogo) {
+        const ultima = [...dialogo].reverse().find(m => m.rol === 'assistant' && m.modelo);
+        return ultima ? `<code>${escape(ultima.modelo)}</code>` : '<span class="muted">—</span>';
+    }
+
+    /* Recorta un texto para que entre en una celda, con puntos suspensivos.
+       Corta en el último espacio para no partir una palabra al medio — un
+       "¿cuánto sale el pl…" se lee peor que un "¿cuánto sale el…". */
+    function recortar(texto, largo) {
+        const t = String(texto ?? '').trim();
+        if (t.length <= largo) return t;
+        const corte = t.slice(0, largo);
+        const sp    = corte.lastIndexOf(' ');
+        return (sp > largo * 0.6 ? corte.slice(0, sp) : corte) + '…';
+    }
+
+    /* La columna `Consulta` es la razón de ser del listado: sin la primera
+       pregunta a la vista, cada fila son dos fechas y una IP y hay que abrir la
+       ficha de todas para saber de qué hablaban. */
+    function conversacionesTableBody(conversaciones) {
+        if (!conversaciones.length) {
+            return `<div class="table-empty">No hay conversaciones que coincidan con los filtros.</div>`;
+        }
+
+        const rows = conversaciones.map(c => `
+            <tr class="row-clickable" data-id="${c.id}">
+                <td><span class="td-id">#${c.id}</span></td>
+                <td><span class="td-id">${escape(formatDate(c.iniciada))}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(recortar(c.consulta, 90) || '—')}</div>
+                    ${c.pagina ? `<div class="td-id">${escape(c.pagina)}</div>` : ''}
+                </td>
+                <td><span class="badge badge-info">${c.mensajes}</span></td>
+                <td><span class="td-id">${c.total}</span></td>
+                <td><span class="td-id">${escape(c.origen || '—')}</span></td>
+                <td><span class="td-id">${escape(formatDate(c.actividad))}</span></td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Inicio</th>
+                        <th>Consulta</th>
+                        <th>Turnos</th>
+                        <th>Mensajes</th>
+                        <th>Origen</th>
+                        <th>Última actividad</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireConversacionesView(state, allConversaciones) {
+        const tableWrap = document.getElementById('conv-table');
+        const quick     = document.getElementById('conv-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('conv-filters');
+
+        let conversaciones = allConversaciones;
+
+        function applyAndRender() {
+            const codigo = parseInt(state.codigo, 10);
+
+            const filtered = conversaciones.filter(c => {
+                if (Number.isFinite(codigo) && c.id !== codigo) return false;
+                // `iniciada` viene como 'YYYY-MM-DD HH:MM:SS' y los <input type=date>
+                // como 'YYYY-MM-DD': comparar el prefijo alcanza.
+                if (state.desde || state.hasta) {
+                    const dia = String(c.iniciada ?? '').slice(0, 10);
+                    if (!dia) return false;
+                    if (state.desde && dia < state.desde) return false;
+                    if (state.hasta && dia > state.hasta) return false;
+                }
+                return true;
+            });
+
+            const ordenKey = (ORDEN_CONVERSACIONES.find(o => o.value === state.orden) || { key: 'id' }).key;
+            filtered.sort((a, b) => {
+                const va = a[ordenKey] ?? '';
+                const vb = b[ordenKey] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = conversacionesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function conversacionesQuery(q) {
+            const qs = new URLSearchParams();
+            qs.set('limit', String(state.limit));
+            if (state.desde) qs.set('desde', state.desde);
+            if (state.hasta) qs.set('hasta', state.hasta);
+            if (q)           qs.set('q',     q);
+            return qs.toString();
+        }
+
+        function rowMenuFor(c) {
+            return standardRowMenuItems({
+                view: true, onView: () => openConversacionViewModal(c.id),
+                extra: [{
+                    act: 'copiar-uuid', label: 'Copiar identificador', icon: 'fa-copy',
+                    onSelect: () => copyToClipboard(c.uuid || ''),
+                }],
+                delete: true, onDelete: () => confirmDeleteConversacion(c),
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const c  = conversaciones.find(x => x.id === id);
+                if (!c) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(c), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> acción por defecto: Consultar.
+                tr.addEventListener('click', () => openConversacionViewModal(c.id));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('conversaciones?' + conversacionesQuery(q)).then(d => d.conversaciones),
+            alLlegar: filas => { conversaciones = filas; applyAndRender(); },
+        });
+
+        btnFilt.addEventListener('click', () =>
+            openConversacionesFiltersModal(state, ({ refetch }) => {
+                if (refetch) recargar();
+                else         applyAndRender();
+            })
+        );
+        wireRefresh('conv', 'conversaciones', state);
+
+        if (state.texto) recargar(); else applyAndRender();
+    }
+
+    function openConversacionesFiltersModal(state, onApply) {
+        const ordOpts = ORDEN_CONVERSACIONES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="conv-fm-codigo">Código</label>
+                    <input type="number" id="conv-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="conv-fm-texto">Buscar (mensajes / página / origen)</label>
+                    <input type="search" id="conv-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="conv-fm-desde">Desde</label>
+                    <input type="date" id="conv-fm-desde" value="${escape(state.desde)}">
+                </div>
+                <div class="form-group">
+                    <label for="conv-fm-hasta">Hasta</label>
+                    <input type="date" id="conv-fm-hasta" value="${escape(state.hasta)}">
+                </div>
+                <div class="form-group">
+                    <label for="conv-fm-limit">Límite</label>
+                    <input type="number" id="conv-fm-limit" min="1" max="2000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="conv-fm-orden">Ordenar por</label>
+                    <select id="conv-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="conv-fm-dir">Dirección</label>
+                    <select id="conv-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                const prevDesde = state.desde;
+                const prevHasta = state.hasta;
+                const prevLimit = state.limit;
+
+                state.codigo = modal.querySelector('#conv-fm-codigo').value.trim();
+                state.texto  = modal.querySelector('#conv-fm-texto').value.trim();
+                state.desde  = modal.querySelector('#conv-fm-desde').value;
+                state.hasta  = modal.querySelector('#conv-fm-hasta').value;
+                state.orden  = modal.querySelector('#conv-fm-orden').value;
+                state.dir    = modal.querySelector('#conv-fm-dir').value;
+                state.limit  = readLimit(modal.querySelector('#conv-fm-limit'), 100);
+
+                // Las fechas y el límite viajan al backend; el resto recorta el
+                // set ya descargado.
+                const needsRefetch = state.desde !== prevDesde
+                                  || state.hasta !== prevHasta
+                                  || state.limit !== prevLimit;
+                onApply({ refetch: needsRefetch });
+            },
+            onClear(modal) {
+                const d = conversacionesDefaults();
+                modal.querySelector('#conv-fm-codigo').value = d.codigo;
+                modal.querySelector('#conv-fm-texto').value  = d.texto;
+                modal.querySelector('#conv-fm-desde').value  = d.desde;
+                modal.querySelector('#conv-fm-hasta').value  = d.hasta;
+                modal.querySelector('#conv-fm-orden').value  = d.orden;
+                modal.querySelector('#conv-fm-dir').value    = d.dir;
+                modal.querySelector('#conv-fm-limit').value  = String(d.limit);
+            },
+        });
+    }
+
+    /* Consultar conversación: las ocho columnas de `conversaciones` —cuatro
+       renglones que cierran de a dos— más `Identificador` y `Navegador` en
+       tarjeta ancha, y debajo el diálogo completo.
+
+       EL DIÁLOGO SE PIDE AL ABRIR y no viene con el listado: son hasta 50
+       mensajes por conversación y traerlos para las 100 filas de la ventana
+       serían miles de textos que nadie va a leer. */
+    async function openConversacionViewModal(id) {
+        let c;
+        try {
+            c = (await api('conversaciones?id=' + id)).conversacion;
+        } catch (e) {
+            toast(e.message, 'error');
+            return;
+        }
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">
+                        Consultar conversación
+                        <span class="modal-subtitle">#${c.id} · <code>${escape(c.uuid || '')}</code></span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones de la conversación">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-menu="acciones">
+                        <i class="fa-solid fa-bolt"></i> Acciones
+                        <i class="fa-solid fa-caret-down menubar-caret"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general" role="tab">General</button>
+                        <button type="button" class="modal-tab" data-tab="dialogo" role="tab">
+                            Conversación
+                            <span class="badge badge-info">${c.dialogo.length}</span>
+                        </button>
+                    </div>
+                    <div class="modal-tabpanel" data-panel="general">
+                        ${viewGrid([
+                            viewCardHalf('Código',           `<code>#${c.id}</code>`),
+                            viewCardHalf('Inicio',           escape(formatDate(c.iniciada))),
+                            viewCardHalf('Última actividad', escape(formatDate(c.actividad))),
+                            viewCardHalf('Turnos de la persona', `<span class="badge badge-info">${c.mensajes}</span>`),
+                            // Estas dos y el badge de la solapa los reescribe el
+                            // autorefresco: si no, mirar una conversación en
+                            // vivo deja `Mensajes 4` al lado de un badge que
+                            // dice 8, que se lee como un error de la pantalla.
+                            viewCardHalf('Mensajes',         `<span data-role="conv-total">${c.dialogo.length}</span>`),
+                            viewCardHalf('Tokens',           `<span data-role="conv-tokens">${conversacionTokens(c.dialogo)}</span>`),
+                            // Modelo y tokens estaban abajo de cada respuesta y
+                            // se movieron acá: en el diálogo tapaban lo que se
+                            // viene a leer. El modelo es el de la última
+                            // respuesta — dentro de una misma conversación no
+                            // cambia, salvo que se toque `OPENAI_MODELO` en el
+                            // medio, y en ese caso el que vale es el último.
+                            viewCardHalf('Modelo',           conversacionModelo(c.dialogo)),
+                            // "IP de origen" y no "Origen" a secas: cada mensaje
+                            // tiene su propia columna `origen` con la URL, y dos
+                            // rótulos iguales para dos cosas distintas en la
+                            // misma ficha se leen mal.
+                            viewCardHalf('IP de origen',     c.origen ? `<code>${escape(c.origen)}</code>` : '<span class="muted">—</span>'),
+                            viewCardFull('Página de apertura', c.pagina ? `<code>${escape(c.pagina)}</code>` : '<span class="muted">—</span>'),
+                            viewCardFull('Identificador',    `<code>${escape(c.uuid || '—')}</code>`),
+                            viewCardFull('Navegador',        c.agente ? escape(c.agente) : '<span class="muted">—</span>'),
+                        ])}
+                    </div>
+                    <div class="modal-tabpanel" data-panel="dialogo" hidden>
+                        <div class="conv-vivo">
+                            <span class="conv-vivo-punto"></span>
+                            En vivo · se actualiza cada ${CONV_REFRESCO_MS / 1000} segundos
+                        </div>
+                        <div class="conv-dialogo">${conversacionDialogoHtml(c.dialogo)}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        /* ---- Autorefresco de la solapa Conversación ----
+         *
+         * La charla puede estar pasando AHORA: alguien en el sitio escribiendo
+         * mientras del otro lado se la mira. Mientras la solapa esté a la vista
+         * se vuelve a pedir la ficha cada 3 segundos y, si hay mensajes nuevos,
+         * se repinta y se baja al final.
+         *
+         * SÓLO SE REPINTA SI HAY ALGO NUEVO, comparando el id del último
+         * mensaje. Repintar cada 3 segundos pase lo que pase tiene dos efectos
+         * feos y los dos se notan enseguida: el `scrollTop` al final le arranca
+         * la lectura de las manos a quien subió a leer algo, y el DOM
+         * reemplazado le corta cualquier selección de texto que estuviera
+         * haciendo. Sin mensajes nuevos no se toca nada.
+         *
+         * SÓLO CORRE CON LA SOLAPA ABIERTA. En `General` no hay nada que
+         * refrescar, y seguir pidiendo sería una consulta cada 3 segundos por
+         * cada modal que alguien se haya olvidado abierto. */
+        let refresco  = null;
+        let ultimoMsg = c.dialogo.length ? c.dialogo[c.dialogo.length - 1].id : 0;
+
+        const alFinal = () => {
+            const caja = backdrop.querySelector('.conv-dialogo');
+            if (caja) caja.scrollTop = caja.scrollHeight;
+        };
+
+        const detener = () => {
+            if (refresco) { clearInterval(refresco); refresco = null; }
+        };
+
+        async function refrescarDialogo() {
+            // El modal ya se cerró y el intervalo sobrevivió: se corta solo.
+            if (!document.body.contains(backdrop)) { detener(); return; }
+
+            let nueva;
+            try {
+                nueva = (await api('conversaciones?id=' + id)).conversacion;
+            } catch (e) {
+                // Sesión vencida, red caída o la conversación borrada desde otra
+                // pestaña. Se deja de insistir: reintentar cada 3 segundos
+                // contra un endpoint que falla sólo llena el log del servidor.
+                detener();
+                return;
+            }
+
+            const ultimo = nueva.dialogo.length ? nueva.dialogo[nueva.dialogo.length - 1].id : 0;
+            if (ultimo === ultimoMsg) return;
+
+            ultimoMsg = ultimo;
+            c = nueva;
+
+            backdrop.querySelector('.conv-dialogo').innerHTML = conversacionDialogoHtml(c.dialogo);
+            // El badge de la solapa y las dos tarjetas de General, para que los
+            // números no se contradigan entre pestañas.
+            backdrop.querySelector('[data-tab="dialogo"] .badge').textContent = c.dialogo.length;
+            backdrop.querySelector('[data-role="conv-total"]').textContent    = c.dialogo.length;
+            backdrop.querySelector('[data-role="conv-tokens"]').textContent   = conversacionTokens(c.dialogo);
+            alFinal();
+        }
+
+        const close = () => {
+            detener();
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        // Las dos solapas se dibujan completas de entrada, sin lazy-load: el
+        // diálogo ya vino en el mismo request que abrió el modal (son hasta 50
+        // mensajes), así que no hay nada que diferir.
+        //
+        // El `onShow` prende y apaga el autorefresco, y baja al final al entrar:
+        // `wireModalTabs()` saca el `hidden` ANTES de llamarlo, así que acá el
+        // `scrollHeight` ya vale (oculto sería 0 y el scroll no haría nada).
+        const mostrarTab = wireModalTabs(backdrop, nombre => {
+            if (nombre === 'dialogo') {
+                alFinal();
+                if (!refresco) refresco = setInterval(refrescarDialogo, CONV_REFRESCO_MS);
+            } else {
+                detener();
+            }
+        });
+        mostrarTab('general');
+
+        // El desplegable usa el menú contextual flotante y no un dropdown
+        // absoluto: el `.modal` lleva `overflow: hidden` y lo recortaría.
+        wireMenubarMenu(backdrop, 'acciones', () => [
+            {
+                act: 'copiar', label: 'Copiar conversación', icon: 'fa-copy',
+                onSelect: () => copyToClipboard(conversacionTextoPlano(c)),
+            },
+            {
+                act: 'copiar-uuid', label: 'Copiar identificador', icon: 'fa-fingerprint',
+                onSelect: () => copyToClipboard(c.uuid || ''),
+            },
+            { divider: true },
+            {
+                act: 'eliminar', label: 'Eliminar', icon: 'fa-trash', danger: true,
+                onSelect: () => { close(); confirmDeleteConversacion(c); },
+            },
+        ]);
+    }
+
+    /* El diálogo, en burbujas. La persona a la izquierda y el asistente a la
+       derecha, al revés que en la burbuja del sitio: acá el que lee es un
+       operador y lo que viene a buscar es QUÉ le preguntaron.
+
+       Cada burbuja lleva ADENTRO el rótulo de quién habla y la hora. El rótulo
+       no es redundante con el lado: es lo único que distingue a las dos cuando
+       la pantalla se imprime, se captura o se lee con un lector de pantalla,
+       donde "está a la derecha" no significa nada.
+
+       DEBAJO DE LO QUE ESCRIBIÓ LA PERSONA VA LA URL COMPLETA desde la que lo
+       escribió (`conversaciones_mensajes`.`origen`). No es un adorno: el chat
+       vive en el pie de todas las páginas y la conversación sobrevive a la
+       navegación, así que una misma charla puede empezar en `/precios/planes` y
+       seguir en `/ayuda` — y saber desde dónde preguntó cada cosa es la mitad de
+       entender qué estaba buscando. `conversaciones`.`pagina` sólo dice dónde
+       empezó.
+
+       EL DIÁLOGO MUESTRA LA CHARLA Y NADA MÁS. Debajo de las respuestas hubo
+       primero una línea con modelo y tokens, y después los `uuid` de los
+       artículos que se le pasaron al modelo; las dos se sacaron por lo mismo:
+       son datos de auditoría y competían con lo que se viene a leer, que es qué
+       se preguntó y qué se contestó. El modelo y los tokens están en la solapa
+       General. Los artículos se siguen guardando en
+       `conversaciones_mensajes`.`contexto` —el endpoint los sigue devolviendo—,
+       sólo que no se pintan: el día que haga falta reconstruir de dónde salió
+       una respuesta, el dato está. */
+    function conversacionDialogoHtml(dialogo) {
+        if (!dialogo.length) {
+            return `<div class="table-empty">Esta conversación no tiene mensajes.</div>`;
+        }
+
+        return dialogo.map(m => {
+            const esPersona = m.rol === 'user';
+
+            return `
+                <div class="conv-msg ${esPersona ? 'persona' : 'asistente'}">
+                    <div class="conv-msg-head">
+                        <span class="conv-msg-rol">${esPersona ? 'Usuario' : 'Asistente'}</span>
+                        <span class="conv-msg-hora">${escape(formatDate(m.fecha))}</span>
+                    </div>
+                    <div class="conv-msg-texto">${escape(m.texto || '')}</div>
+                    ${esPersona && m.origen
+                        ? `<div class="conv-msg-origen" title="${escape(m.origen)}">${escape(m.origen)}</div>`
+                        : ''}
+                </div>
+            `;
+        }).join('');
+    }
+
+    /* La conversación como texto, para pegarla en un ticket o en un correo. */
+    function conversacionTextoPlano(c) {
+        return c.dialogo
+            .map(m => (m.rol === 'user' ? 'Visitante' : 'Asistente') + ': ' + (m.texto || ''))
+            .join('\n\n');
+    }
+
+    /* La baja arrastra los mensajes por la FK `ON DELETE CASCADE`, así que la
+       confirmación dice cuántos son: es el desglose del impacto que pide
+       `ABM.md`, y acá entra en una frase porque no hay nada que se conserve. */
+    function confirmDeleteConversacion(c) {
+        const mensajes = c.total ?? (c.dialogo ? c.dialogo.length : 0);
+
+        confirmDialog(
+            'Eliminar conversación',
+            `¿Eliminar la conversación #${c.id} y sus ${mensajes} mensaje(s)? `
+            + 'Se borra lo que la persona escribió y lo que el asistente le contestó. '
+            + 'Esta acción no se puede deshacer.',
+            async () => {
+                try {
+                    await api('conversaciones?id=' + c.id, { method: 'DELETE' });
+                    toast('Conversación eliminada');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, 'error');
+                }
+            }
+        );
     }
 
     /* ---------- Views: Difusión ----------

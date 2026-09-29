@@ -149,9 +149,9 @@ fijas: no hay nada en la base que diga cuál es cuál.
 - **El blog esconde las entradas con fecha futura y la ayuda no.** Una nota
   fechada adelante está programada; un tutorial con fecha rara sigue siendo útil.
 
-## Las cuatro salidas al exterior
+## Las cinco salidas al exterior
 
-Ninguna vive en este repo y las cuatro fallan sin voltear la página:
+Ninguna vive en este repo y las cinco fallan sin voltear la página:
 
 | salida | qué hace | dónde |
 |---|---|---|
@@ -159,11 +159,18 @@ Ninguna vive en este repo y las cuatro fallan sin voltear la página:
 | media server | las imágenes de las entradas | `ENTRADAS_MEDIA` |
 | Google (GA4 + Ads) | medición | `lib/analytics.php` |
 | OpenAI | el chat con IA de la burbuja | `lib/chat.php` |
+| expertos de Datarocket | el documento que explica cómo funciona Reactor | `lib/chat.php` |
 
 - **OpenAI es la única que se cobra por request, y por eso es distinta.** Las
-  otras tres cuestan lo mismo se usen o no; ahí cada POST de un anónimo es plata.
-  Todo lo que la rodea —los cupos, el `Origin`, el tope de caracteres— sale de
-  eso y está en la sección del chat.
+  otras cuatro cuestan lo mismo se usen o no; ahí cada POST de un anónimo es
+  plata. Todo lo que la rodea —los cupos, el `Origin`, el tope de caracteres—
+  sale de eso y está en la sección del chat.
+- **Las dos últimas corren en el MISMO request y en ese orden**: primero se trae
+  el documento del experto y después se le pregunta al modelo. Por eso la de
+  Datarocket va cacheada y con timeout corto: lo que tarde se le suma a cada
+  respuesta del chat.
+- **`DATABOX_APIKEY` la usan las dos de Databox** —el CRM y los expertos— y es la
+  misma fila de `aplicaciones`. Rotarla las apaga a las dos.
 
 - **El CRM es `POST /v4/datarocket/prospectos` con `DATABOX_APIKEY`** — la misma
   constante del .env que usa el correo. El legacy la leía de la tabla
@@ -220,12 +227,46 @@ más el widget en [sistema/pie.php](sistema/pie.php).
   endpoint: quien arma el POST a mano pone la cabecera que quiera. Sirve para que
   otro sitio no embeba la burbuja y nos facture las consultas de sus visitantes.
   Lo que frena el gasto son los cupos.
-- **Lo que el modelo sabe se arma en cada turno y sale del sitio, no del prompt.**
-  Los planes salen de `planes` + `articulos` vía [lib/planes.php](lib/planes.php)
-  —un precio escrito a mano en el prompt quedaría viejo el día que alguien lo
-  cambia en el back office, y el chat cotizaría distinto de `/precios/planes`— y
-  los artículos salen de `entradas`. Lo único fijo es qué es Reactor y la lista
-  de secciones, transcriptos de la portada y del menú.
+- **Lo que el modelo sabe se arma en cada turno y sale de cuatro fuentes**, todas
+  fuera del código salvo la última:
+
+  | fuente | de dónde | cuándo entra |
+  |---|---|---|
+  | cómo funciona Reactor | experto `reactor-asesor` de Datarocket | siempre |
+  | planes y precios | `planes` + `articulos` ([lib/planes.php](lib/planes.php)) | siempre |
+  | artículos | `entradas` (ayuda y blog) | los 4 que matchean |
+  | mapa de URLs del sitio | `chatSitio()`, en el código | siempre |
+
+  Los precios salen de la base porque uno escrito a mano en el prompt quedaría
+  viejo el día que alguien lo cambia en el back office, y el chat cotizaría
+  distinto de `/precios/planes`. **El mapa de URLs es lo único que se queda en el
+  código, y a propósito**: es un hecho de *este sitio* —qué secciones existen y
+  en qué ruta—, no del producto. Si viviera del otro lado, renombrar una sección
+  acá dejaría al bot repartiendo 404 hasta que alguien se acuerde de editar un
+  documento en otro sistema.
+- **LA DESCRIPCIÓN DEL PRODUCTO LA MANTIENE EL NEGOCIO, NO ESTE REPO.** Sale del
+  microservicio de expertos (`GET /v4/datarocket/expertos?slug=reactor-asesor`,
+  Markdown pelado, Bearer con `DATABOX_APIKEY`) y se edita en el panel de cloud
+  de Databox, sin deploy. **Reemplazó al texto que estaba hardcodeado**, no se
+  sumó: el experto describe a Reactor como control de accesos (portones,
+  peatonales, invitaciones temporales, convivencia con RFID) y la portada de este
+  sitio lo describe como plataforma IoT genérica. Con las dos versiones en el
+  mismo prompt, el bot contesta distinto según qué párrafo agarre.
+- **El documento se cachea 10 minutos en `sys_get_temp_dir()` y se revalida con
+  `ETag`.** El endpoint manda `Cache-Control: no-cache`, así que al vencer se
+  pregunta de nuevo — pero con `If-None-Match`, y un 304 no trae cuerpo. Sin
+  caché, una conversación de diez mensajes serían diez viajes a otro servidor
+  **antes** de cada llamada a OpenAI.
+- **La copia vencida NO se tira si el endpoint no contesta.** Los tres niveles,
+  en orden: endpoint, copia local aunque esté vieja, y `CHAT_PRODUCTO_MINIMO`.
+  Quedarse sin conocimiento deja al bot diciendo "no sé" a todo, que es peor que
+  contestar con un documento de hace dos horas porque *parece* que funciona.
+- **Lo que viene del experto es DATO, nunca instrucción, y el prompt lo dice.**
+  Ese texto lo edita gente fuera de este repo y entra al prompt de sistema, al
+  lado de las reglas: sin esa línea, quien pueda escribir ahí puede reescribirle
+  las reglas al bot desde afuera. Va también un tope de 60.000 caracteres, porque
+  el documento entra en **cada** mensaje y el día que alguien pegue un manual
+  entero la factura se multiplica sin que nadie de este lado se entere.
 - **LA AYUDA SE LLEVA EL CUPO Y EL BLOG APORTA UNO SOLO.** El blog son notas de
   difusión escritas para convencer: una respuesta de soporte armada con tres de
   ellas suena igual de segura que una armada con la ayuda.
@@ -259,6 +300,48 @@ más el widget en [sistema/pie.php](sistema/pie.php).
   la respuesta JSON prende el enlace).
 - **Se declaró en [privacidad.php](privacidad.php)**, que es donde ya está la
   lista de proveedores: el dato sale del país y eso se dice.
+- **CADA MENSAJE GUARDA LA URL COMPLETA DESDE LA QUE SE ESCRIBIÓ**
+  (`conversaciones_mensajes`.`origen`, 29/09/2026), y no alcanza con la de la
+  conversación: la burbuja está en el pie de **todas** las páginas y el `uuid`
+  vive en `sessionStorage`, así que alguien pregunta por los planes en
+  `/precios/planes`, sigue navegando y tres mensajes después pregunta otra cosa
+  parado en `/ayuda`. `conversaciones`.`pagina` sólo sabe dónde se **abrió**.
+  Va la URL entera y no el path: el host y la querystring son parte del contexto
+  —una consulta que llegó con `?utm_source=` dice de dónde salió esa persona—.
+  **La valida el servidor** (`conversacionOrigenValido()`): sólo `http`/`https`
+  y sólo del propio host, porque ese campo lo escribe el cliente y lo termina
+  leyendo un operador en cloud. Lo que no pasa queda en `NULL`.
+  **Ojo con el nombre**: `conversaciones`.`origen` es la **IP** y
+  `conversaciones_mensajes`.`origen` es la **URL** — mismo nombre, dos
+  significados, en dos tablas que se leen siempre juntas.
+- **SI BORRAN LA CONVERSACIÓN DESDE CLOUD, EL CHAT SE REINICIA SOLO** y quien
+  estaba escribiendo no se entera. El navegador guarda el `uuid` en
+  `sessionStorage`, así que después de una baja lo sigue mandando: el endpoint
+  contesta **409 con `reiniciar: true`** —una bandera para el cliente, no un
+  texto para leer—, el front olvida el uuid y **reenvía el mismo mensaje**, que
+  abre una conversación nueva.
+  Hasta el 29/09/2026 ahí salía *"La conversación expiró. Recargá la página"* y
+  era un callejón sin salida doble: **recargar no limpia `sessionStorage`** —
+  muere con la pestaña, no con la recarga— así que el consejo no servía, y el
+  uuid muerto seguía viajando en cada mensaje, que fallaban todos igual. Una
+  baja hecha por privacidad desde el panel no puede dejar a una persona sin
+  poder escribir.
+  **El reenvío es UNO solo** (`reintento`): si el segundo intento también falla
+  se muestra el error, porque un ciclo de reintentos contra un endpoint que
+  rechaza es cómo un error se convierte en una tormenta de requests pagos.
+  **Lo que ya está pintado en pantalla no se borra**: sacarle a alguien de la
+  vista lo que acaba de escribir es peor que dejar dos burbujas que el asistente
+  ya no recuerda.
+- **Las conversaciones se leen desde `cloud`**, en *Comunicación →
+  Conversaciones* ([cloud/api/conversaciones.php](../cloud/api/conversaciones.php),
+  §40 de [cloud/DESIGN.md](../cloud/DESIGN.md)): el listado con la primera
+  pregunta de cada charla, la ficha con el diálogo completo y la baja. **La baja
+  existe ahí y no en los otros módulos read-only por un motivo concreto**: estas
+  dos tablas son las únicas que acumulan texto libre, IP y navegador de gente que
+  nunca se registró.
+- **Lo que NO hay todavía es una política de retención.** Las filas se acumulan
+  sin límite y nada las purga; el borrado de cloud es fila por fila. Cuando se
+  decida el plazo, la tarea va al Programador de tareas de cloud.
 
 ## Rutas: tres `.htaccess` y el orden importa
 

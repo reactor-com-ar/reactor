@@ -173,6 +173,9 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     <a href="#/difusion" data-route="difusion" class="nav-item nav-sub-item">
                         <i class="fa-solid fa-paper-plane nav-icon"></i> Difusión
                     </a>
+                    <a href="#/conversaciones" data-route="conversaciones" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-comments nav-icon"></i> Conversaciones
+                    </a>
                 </div>
             </div>
 

@@ -421,10 +421,12 @@ function facturarContexto(array $con): array
         );
 
         // Renglon de la promocion. `contratos`.`promo` SE LEE COMO PORCENTAJE,
-        // que es lo que hace el legacy y lo que ofrece su combo (0, 10, ... 100)
-        // aunque el esquema la declare FK contra `articulos`. Por eso el ABM no
-        // la escribe (ver PROMO en `contratos.php`): aca solo se lee, y con las
-        // 50 filas en NULL este renglon no sale nunca.
+        // que es lo que hace el legacy, y ESA CUENTA NO CAMBIO cuando la columna
+        // paso a ser FK contra `promociones` (migracion `20260929_1100`): el id
+        // de esa tabla ES el porcentaje, justamente para que esta linea siga
+        // valiendo. Ver PROMO en `contratos.php`.
+        // Desde que el ABM la escribe, este renglon SI puede salir -- hasta
+        // entonces las 50 filas tenian `promo` en NULL y nunca aparecia.
         $promo = (int) ($con['promo'] ?? 0);
         $desde = trim((string) ($con['desde'] ?? ''));
         $hasta = trim((string) ($con['hasta'] ?? ''));

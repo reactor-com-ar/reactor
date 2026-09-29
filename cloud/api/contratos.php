@@ -12,23 +12,29 @@ require __DIR__ . '/bootstrap.php';
  * facturacion (`facturado` / `facturar` / `tolerancia`) y del envio del estado
  * de cuenta (`remitir` / `remitido`).
  *
- * TODAS las columnas son editables MENOS dos:
+ * TODAS las columnas son editables menos `id`, que es el AUTO_INCREMENT.
  *
- *   - `id`, que es el AUTO_INCREMENT.
- *   - `promo`, que se sirve pero no se escribe. Ver PROMO abajo.
+ * PROMO SE ESCRIBE DESDE EL 29/09/2026, Y ANTES NO SE PODIA. La columna estaba
+ * rota en el esquema: lo declaraba `FOREIGN KEY (promo) REFERENCES articulos
+ * (id)`, pero el sistema historico la usa como un PORCENTAJE de descuento --
+ * `cContrato::facturar()` calcula `($articulo->venta * $promo) / 100` y el combo
+ * `$xContrato->promo` ofrecia 0, 10, 20 ... 100. Las dos lecturas no podian
+ * convivir: `articulos` tiene ids 1..279 y ninguno de esos once valores existe
+ * ahi, asi que cualquier promo que se guardara violaba la FK. El ABM la mostraba
+ * de solo lectura porque escribirla eligiendo una lectura era repartir plata o
+ * romper el INSERT.
  *
- * PROMO ES DE SOLO LECTURA, Y NO POR COMODIDAD. La columna esta rota en el
- * esquema: `db/schema.sql` la declara `FOREIGN KEY (promo) REFERENCES
- * articulos (id)`, pero el sistema historico la usa como un PORCENTAJE de
- * descuento -- `cContrato::facturar()` calcula `($articulo->venta * $promo) /
- * 100` y el combo `$xContrato->promo` ofrece 0, 10, 20 ... 100. Las dos
- * lecturas no pueden convivir: `articulos` tiene ids 1..279 y NINGUNO de los
- * once valores del combo existe ahi, asi que cualquier promo que se guardara
- * violaria la FK. Hoy no explota porque las 50 filas la tienen en NULL.
- * Mientras no se decida cual de las dos cosas es, el ABM la muestra (traducida
- * contra `combos`, como el legacy) y no la toca: escribirla eligiendo una
- * lectura es repartir plata o romper el INSERT, y ninguna de las dos es una
- * decision que le toque a un formulario.
+ * LA TABLA `promociones` DESACTIVA ESA ELECCION PORQUE SU `id` ES EL PORCENTAJE
+ * (migracion `20260929_1100`): la fila del 15 % tiene `id = 15`, asi que la
+ * columna guarda el numero que el legacy espera Y apunta a una fila que existe.
+ * Por eso `promo` se lee como FK contra `promociones` (de ahi sale
+ * `promo_texto`, ya no de `combos`) y a la vez sigue siendo el porcentaje con el
+ * que el front calcula el abono con descuento. "Sin promocion" es NULL, no la
+ * fila 0: el 0 del sistema historico es un centinela, no una referencia.
+ *
+ * PLAN_MODO es `ENUM('dinamico','fijo') NOT NULL DEFAULT 'fijo'` (misma
+ * migracion): que se hace con el plan cuando el dominio crece. Se valida contra
+ * PLAN_MODOS y nunca se guarda vacia -- la columna es NOT NULL.
  *
  * FECHAS CENTINELA. El sistema historico no usa NULL para "sin fecha": usa
  * `1500-01-01` (`cTiempo::genesis()`) y, para `baja`, `2500-01-01`
@@ -48,10 +54,25 @@ require __DIR__ . '/bootstrap.php';
  * `?impacto=1&id=N` y el DELETE repite las validaciones (ABM.md, "Eliminar").
  */
 
-/** Claves de `combos` con los textos de los codigos cortos de `contratos`. */
+/**
+ * Claves de `combos` con los textos de los codigos cortos de `contratos`.
+ *
+ * `$xContrato->promo` YA NO SE USA: los descuentos salen de la tabla
+ * `promociones` (ver PROMO en la cabecera). El combo sigue cargado en la base
+ * porque lo dibuja el back office viejo.
+ */
 const COMBO_TIPO       = '$xContrato->tipo';
-const COMBO_PROMO      = '$xContrato->promo';
 const COMBO_REMITIR    = '$xContrato->remitir';
+
+/**
+ * Los dos valores del ENUM `contratos`.`plan_modo`, con el texto que muestra la
+ * pantalla. El orden es el de declaracion del ENUM, que es el que usa
+ * `ORDER BY plan_modo` -- ordena por el indice interno, no por el texto.
+ */
+const PLAN_MODOS = [
+    'dinamico' => 'Dinámico',
+    'fijo'     => 'Fijo',
+];
 
 /** Ultimo recurso si `combos` no tiene cargada la clave. */
 const COMBOS_FALLBACK = [
@@ -117,7 +138,7 @@ function handleList(): void
     // tiene cargado— no se puede buscar por su texto.
     $q = trim((string) ($_GET['q'] ?? ''));
     [$condiciones, $busq] = busquedaWhere($q, [
-        'do.nombre', 'cl.nombre', 'pl.nombre', 'pl.descripcion', 'cbt.texto', 'c.uuid',
+        'do.nombre', 'cl.nombre', 'pl.nombre', 'pl.descripcion', 'cbt.texto', 'pr.nombre', 'c.uuid',
     ]);
     $busq[':combo_tipo'] = COMBO_TIPO;
 
@@ -131,10 +152,12 @@ function handleList(): void
                 do.situacion   AS dominio_situacion,
                 c.tipo,
                 c.plan,
+                c.plan_modo,
                 pl.nombre      AS plan_nombre,
                 pl.descripcion AS plan_descripcion,
                 ar.venta       AS plan_venta,
                 c.promo,
+                pr.nombre      AS promo_nombre,
                 c.desde,
                 c.hasta,
                 c.registro,
@@ -154,6 +177,7 @@ function handleList(): void
          LEFT JOIN dominios  do ON do.id = c.dominio
          LEFT JOIN planes    pl ON pl.id = c.plan
          LEFT JOIN articulos ar ON ar.id = pl.articulo
+         LEFT JOIN promociones pr ON pr.id = c.promo
          LEFT JOIN combos    cbt ON cbt.combo = :combo_tipo AND cbt.valor = c.tipo'
         . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
          ORDER BY c.id DESC'
@@ -164,7 +188,6 @@ function handleList(): void
 
     $contratos = array_map(static function (array $r) use ($hoy): array {
         $tipo    = trim((string) ($r['tipo']    ?? ''));
-        $promo   = trim((string) ($r['promo']   ?? ''));
         $remitir = trim((string) ($r['remitir'] ?? ''));
 
         $fila = [
@@ -180,11 +203,16 @@ function handleList(): void
             'tipo'               => $tipo,
             'tipo_texto'         => combo(COMBO_TIPO)[$tipo] ?? '',
             'plan'               => idOrNull($r['plan']),
+            'plan_modo'          => (string) ($r['plan_modo'] ?? 'fijo'),
+            'plan_modo_texto'    => PLAN_MODOS[(string) ($r['plan_modo'] ?? 'fijo')] ?? '',
             'plan_nombre'        => trim((string) ($r['plan_nombre'] ?? '')),
             'plan_descripcion'   => trim((string) ($r['plan_descripcion'] ?? '')),
             'plan_venta'         => $r['plan_venta'] === null ? null : (float) $r['plan_venta'],
-            'promo'              => $promo === '' ? null : $promo,
-            'promo_texto'        => combo(COMBO_PROMO)[$promo] ?? '',
+            // `promo` ES el porcentaje de descuento y ademas el id de la fila de
+            // `promociones` (ver PROMO en la cabecera): el front lo usa con los
+            // dos sentidos -- para el select y para la cuenta del abono.
+            'promo'              => idOrNull($r['promo']),
+            'promo_texto'        => trim((string) ($r['promo_nombre'] ?? '')),
             'remitir'            => $remitir,
             'remitir_texto'      => combo(COMBO_REMITIR)[$remitir] ?? '',
             'habilitado'         => esHabilitado($r['habilitado']) ? 1 : 0,
@@ -213,12 +241,19 @@ function handleList(): void
         return $fila;
     }, $stmt->fetchAll());
 
+    // `hoy` viaja con el resumen porque el front lo necesita para armar el
+    // atajo "Facturables" (`facturar <= hoy`), y tiene que ser EL MISMO dia con
+    // el que se conto `facturable` aca arriba. Calculado en el navegador seria
+    // el del reloj del operador: a las 21 h de Buenos Aires, `toISOString()` ya
+    // devuelve manana, y el atajo mostraria una cantidad distinta de la que
+    // anuncia la tarjeta que se acaba de tocar.
     $resumen = [
         'total'          => count($contratos),
         'habilitados'    => 0,
         'deshabilitados' => 0,
         'facturables'    => 0,
         'remisibles'     => 0,
+        'hoy'            => $hoy,
     ];
     foreach ($contratos as $c) {
         if ($c['habilitado'] === 1) $resumen['habilitados']++;
@@ -270,13 +305,28 @@ function catalogos(): array
          ORDER BY p.habilitado DESC, p.orden ASC, p.nombre ASC'
     )->fetchAll());
 
+    // Las promociones vienen TODAS por el mismo motivo que los planes: un
+    // contrato puede estar parado sobre una que se deshabilito despues, y
+    // filtrarla aca lo dejaria sin promo al guardarlo. El front las marca.
+    // `ORDER BY id` es el orden por descuento -- el id ES el porcentaje.
+    $promos = array_map(static fn(array $r): array => [
+        'id'         => (int) $r['id'],
+        'nombre'     => trim((string) ($r['nombre'] ?? '')),
+        'habilitado' => esHabilitado($r['habilitado']) ? 1 : 0,
+    ], db()->query('SELECT id, nombre, habilitado FROM promociones ORDER BY id ASC')->fetchAll());
+
     return [
-        'clientes' => $clientes,
-        'dominios' => $dominios,
-        'planes'   => $planes,
-        'tipos'    => comboLista(COMBO_TIPO),
-        'promos'   => comboLista(COMBO_PROMO),
-        'remitir'  => comboLista(COMBO_REMITIR),
+        'clientes'   => $clientes,
+        'dominios'   => $dominios,
+        'planes'     => $planes,
+        'tipos'      => comboLista(COMBO_TIPO),
+        'promos'     => $promos,
+        'plan_modos' => array_map(
+            static fn(string $v, string $t): array => ['valor' => $v, 'texto' => $t],
+            array_keys(PLAN_MODOS),
+            array_values(PLAN_MODOS)
+        ),
+        'remitir'    => comboLista(COMBO_REMITIR),
     ];
 }
 
@@ -345,14 +395,12 @@ function handleCreate(): void
         $data['uuid'] = uuidLibre();
     }
 
-    // `promo` no entra en el INSERT: queda en el NULL del esquema. Ver PROMO
-    // en la cabecera del archivo.
     $stmt = db()->prepare(
         'INSERT INTO contratos
-             (uuid, cliente, dominio, tipo, plan, desde, hasta, registro, firma,
+             (uuid, cliente, dominio, tipo, plan, plan_modo, promo, desde, hasta, registro, firma,
               alta, baja, facturado, facturar, tolerancia, remitir, remitido, habilitado)
          VALUES
-             (:uuid, :cliente, :dominio, :tipo, :plan, :desde, :hasta, :registro, :firma,
+             (:uuid, :cliente, :dominio, :tipo, :plan, :plan_modo, :promo, :desde, :hasta, :registro, :firma,
               :alta, :baja, :facturado, :facturar, :tolerancia, :remitir, :remitido, :habilitado)'
     );
     $stmt->execute(bindContrato($data));
@@ -380,6 +428,8 @@ function handleUpdate(): void
                 dominio    = :dominio,
                 tipo       = :tipo,
                 plan       = :plan,
+                plan_modo  = :plan_modo,
+                promo      = :promo,
                 desde      = :desde,
                 hasta      = :hasta,
                 registro   = :registro,
@@ -468,8 +518,6 @@ function dependencias(int $id): array
 /**
  * Valida y normaliza el payload. `$id` es null en el alta y el id propio en la
  * edicion (para que el chequeo de uuid unico no choque contra si mismo).
- *
- * `promo` NO se lee del payload a proposito: ver PROMO en la cabecera.
  */
 function validarContrato(array $in, ?int $id): array
 {
@@ -500,6 +548,22 @@ function validarContrato(array $in, ?int $id): array
     $out['cliente'] = fkOpcional($in['cliente'] ?? null, 'clientes', 'El cliente');
     $out['dominio'] = fkOpcional($in['dominio'] ?? null, 'dominios', 'El dominio');
     $out['plan']    = fkOpcional($in['plan']    ?? null, 'planes',   'El plan');
+    // Un id que no este en `promociones` no es solo una FK rota: como el id ES
+    // el porcentaje, seria un descuento que nadie definio (ver la cabecera).
+    $out['promo']   = fkOpcional($in['promo']   ?? null, 'promociones', 'La promocion');
+
+    // plan_modo: la columna es NOT NULL, asi que un payload sin el campo -- o
+    // con uno fuera del ENUM -- cae en 'fijo', que es el default del esquema y
+    // lo que hacen hoy todas las filas. Un valor invalido se rechaza en vez de
+    // normalizarse en silencio: elegir el modo equivocado cambia lo que se
+    // factura.
+    $planModo = trim((string) ($in['plan_modo'] ?? ''));
+    if ($planModo === '') {
+        $planModo = 'fijo';
+    } elseif (!isset(PLAN_MODOS[$planModo])) {
+        json_error("El modo de plan \"{$planModo}\" no existe", 422);
+    }
+    $out['plan_modo'] = $planModo;
 
     // tipo: varchar(3), y ademas tiene que ser uno de los del combo. Un tipo
     // fuera del catalogo se veria como el codigo pelado en toda pantalla que
@@ -541,6 +605,8 @@ function bindContrato(array $d): array
         ':dominio'    => $d['dominio'],
         ':tipo'       => $d['tipo'],
         ':plan'       => $d['plan'],
+        ':plan_modo'  => $d['plan_modo'],
+        ':promo'      => $d['promo'],
         ':desde'      => $d['desde'],
         ':hasta'      => $d['hasta'],
         ':registro'   => $d['registro'],

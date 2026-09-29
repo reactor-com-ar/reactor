@@ -107,12 +107,14 @@ function conversacionExiste(string $uuid): bool
  *
  * `$rol` son los dos valores del ENUM, que son los de la API de OpenAI: `user`
  * para la persona y `assistant` para el modelo. Las tres columnas de medición
- * (`modelo`, `contexto`, tokens) sólo aplican a la respuesta.
+ * (`modelo`, `contexto`, tokens) sólo aplican a la respuesta, y `origen` sólo a
+ * lo que escribió la persona.
  */
 function conversacionMensajeAlta(
     int $conversacion,
     string $rol,
     string $texto,
+    ?string $origen = null,
     ?string $modelo = null,
     ?string $contexto = null,
     ?int $tokensEntrada = null,
@@ -120,18 +122,59 @@ function conversacionMensajeAlta(
 ): void {
     $sql = db()->prepare(
         'INSERT INTO conversaciones_mensajes
-                (conversacion, fecha, rol, texto, modelo, contexto, tokens_entrada, tokens_salida)
-         VALUES (:conversacion, NOW(), :rol, :texto, :modelo, :contexto, :te, :ts)'
+                (conversacion, fecha, rol, texto, origen, modelo, contexto, tokens_entrada, tokens_salida)
+         VALUES (:conversacion, NOW(), :rol, :texto, :origen, :modelo, :contexto, :te, :ts)'
     );
     $sql->execute([
         ':conversacion' => $conversacion,
         ':rol'          => $rol,
         ':texto'        => $texto,
+        ':origen'       => $origen,
         ':modelo'       => $modelo,
         ':contexto'     => $contexto === null ? null : mb_substr($contexto, 0, 500),
         ':te'           => $tokensEntrada,
         ':ts'           => $tokensSalida,
     ]);
+}
+
+/**
+ * La URL que manda el navegador, lista para guardar — o null si no sirve.
+ *
+ * SE VALIDA AUNQUE SÓLO SE VAYA A MOSTRAR. Este campo lo escribe el cliente, o
+ * sea cualquiera que arme el POST a mano, y lo termina leyendo un operador en el
+ * panel de cloud. Ahí se imprime escapado, así que no hay XSS; lo que se evita
+ * es que en esa pantalla aparezcan cadenas que *parecen* enlaces y no lo son
+ * (`javascript:…`, `data:…`) o texto arbitrario disfrazado de URL.
+ *
+ * SÓLO SE ACEPTA `http` Y `https` Y SÓLO DEL PROPIO SITIO: el chat vive
+ * únicamente en las páginas de este host, así que una URL de otro dominio no
+ * puede ser cierta — o el POST no vino de acá, o alguien lo escribió a mano. En
+ * los dos casos el dato no sirve y queda en NULL, que es lo que ya significa
+ * "no se sabe" para las filas viejas.
+ */
+function conversacionOrigenValido(string $url): ?string
+{
+    $url = trim($url);
+    if ($url === '' || mb_strlen($url) > 500) {
+        return null;
+    }
+
+    $partes = parse_url($url);
+    if ($partes === false || !isset($partes['scheme'], $partes['host'])) {
+        return null;
+    }
+    if (!in_array(strtolower($partes['scheme']), ['http', 'https'], true)) {
+        return null;
+    }
+
+    // El host del request ya viene sin puerto en `HTTP_HOST` sólo a veces, así
+    // que se lo saca a los dos lados antes de comparar.
+    $propio = strtolower((string) preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? '')));
+    if ($propio === '' || strtolower($partes['host']) !== $propio) {
+        return null;
+    }
+
+    return $url;
 }
 
 /**

@@ -380,6 +380,62 @@ rótulo con ícono.
   para que los dos modales se lean igual y el ojo encuentre cada campo en el
   mismo lugar.
 
+### 8.2 Ayuda del campo (el `?` con globito)
+
+Cuando un campo necesita una explicación, va **el signo de pregunta al lado del
+rótulo** y el texto en un globito que se abre al pasar el mouse — no una
+`.form-nota` debajo del control.
+
+```html
+<div class="form-group">
+  <label for="con-promo">
+    Promoción
+    <span class="field-help" tabindex="0" role="note">
+      <i class="fa-regular fa-circle-question"></i>
+      <span class="field-help-tip">El descuento se aplica al abono del plan…</span>
+    </span>
+  </label>
+  <select id="con-promo">…</select>
+</div>
+```
+
+Lo arma `ayudaDeCampo(html)`, que devuelve sólo el markup: el hover y el foco
+son CSS y no hay nada que cablear.
+
+**Reglas:**
+
+- **Reemplaza a la `.form-nota` bajo el control, no la acompaña.** Los campos
+  van de a dos por renglón (`.form-row` es un grid de dos columnas): una nota de
+  tres líneas debajo de uno empuja hacia abajo sólo su mitad y deja los dos
+  controles desalineados. La nota al pie sigue valiendo para lo que habla del
+  formulario entero y no de un campo — en Contratos, la de las fechas centinela.
+- **El texto va en el HTML, no en un `title=`.** El tooltip nativo del sistema
+  tarda casi un segundo, no se puede dar estilo, no admite `<strong>` y no
+  aparece nunca al navegar con teclado. (El `title=` sí se sigue usando para
+  rótulos de un botón de ícono, que es otra cosa: nombrar el control, no
+  explicarlo.)
+- **ABRE HACIA ABAJO.** El `.modal-body` scrollea (`overflow-y: auto`), así que
+  un globito que sube por encima del primer renglón queda recortado contra el
+  borde del modal. Y se ancla al borde **izquierdo** del ícono en vez de
+  centrarse, para que crezca hacia adentro del formulario.
+- **`pointer-events: none` en el globito**: cae encima del campo de abajo y sin
+  eso se come sus clicks.
+- **Lleva `tabindex="0"`** y el CSS engancha `:focus-visible` además de `:hover`:
+  sin eso la ayuda no existe para quien no usa mouse.
+- **El texto es literal del código.** `ayudaDeCampo()` inyecta el HTML tal cual
+  —lleva `<strong>`—, así que nunca se le pasa un dato de la base.
+
+### 8.3 Un campo a todo el ancho
+
+`.form-row` es un **grid de dos columnas fijas**: un único hijo ocupa nada más
+que la primera y deja la mitad derecha vacía. Un campo que tiene que ocupar el
+100 % **sale del `.form-row`** y va suelto dentro de la `.form-section`, que es
+flex column con el mismo `gap`. Hoy lo usa `Promoción` en Editar contrato.
+
+El `<div class="form-group"></div>` vacío como relleno es lo contrario: sirve
+cuando el campo **sí** ocupa media fila y se quiere dejar el hueco a la derecha
+(`Tipo` en la misma pantalla).
+
 ## 9. Toolbar (filtros + búsqueda + acciones)
 
 Patrón normativo para el encabezado de cualquier listado ABM (ver `ABM.md` §2).
@@ -481,6 +537,25 @@ tbody tr:hover { background: var(--row-hover); }
 .td-id       { color: var(--muted); font-size: .8rem; }
 ```
 
+**Un atributo de un dato que ya está en la celda se dibuja como ÍCONO pegado a
+ese dato, no como columna nueva.** En Contratos, `plan_modo` va a la derecha del
+nombre del plan dentro de `Tipo / Plan`: candado si es `fijo` —queda el plan
+pactado aunque el dominio crezca— y reciclado si es `dinamico`, o sea que sigue
+al consumo (`.plan-modo-icon`). Cuatro reglas:
+
+- **Es un ícono porque es un adjetivo del dato, no otro dato.** Una columna
+  propia obliga a cruzar la fila entera para saber de qué plan habla, y suma
+  ancho a un listado que ya scrollea en horizontal.
+- **Los dos estados se dibujan, no sólo uno.** Un ícono que aparece y desaparece
+  se lee como "tiene algo raro"; dos íconos distintos se leen como una elección.
+- **Lo que distingue un estado del otro es la FORMA del ícono, no el color.** Los
+  dos van en `--muted`, el mismo gris del texto al que acompañan: son un
+  atributo de ese dato y no un estado que compita con él. Pintar uno de los dos
+  lo convierte en una alerta que nadie pidió — y en una columna entera de íconos
+  de color no se distingue nada.
+- **Si el dato base falta, el ícono tampoco va.** Un candado al lado de "Sin
+  plan" prometería que hay algo fijado.
+
 ## 11. Badges
 
 Los badges usan fondo translúcido sobre el rojo oscuro de la app — no fondos pasteles sólidos (no contrastarían bien con `--surface`).
@@ -528,6 +603,44 @@ Si la stat-card es clickeable, agregale `.dash-link`:
 .dash-link:hover { opacity: .75; }
 .stat-card.dash-link:hover { background: var(--bg); }
 ```
+
+### 12.1 Las stat cards como filtros rápidos
+
+**Una tarjeta que cuenta un subconjunto del listado que está abajo es el filtro
+rápido de ese subconjunto.** En **Contratos** las cinco —Total, Habilitados,
+Deshabilitados, Facturables, Remisibles— dejan el listado en lo que anuncian.
+Son las mismas cinco entradas del menú `Listar` del back office viejo
+(`reactor-admin/contratos/listar.php`), que es de donde sale la idea.
+
+```html
+<div class="stat-card dash-link" data-atajo="habilitados" role="button" tabindex="0"
+     title="Ver sólo los habilitados">
+```
+
+**Reglas:**
+
+- **El atajo REEMPLAZA el estado de la vista, no se suma a él.** Se parte de los
+  defaults y se aplica el atajo encima. Es la condición para que signifique
+  algo: la tarjeta dice `28` y tocarla tiene que mostrar 28 filas. Conservando
+  el dominio o el texto que hubiera en el buscador, el número y la lista dirían
+  cosas distintas y no habría forma de saber cuál manda. **Eso incluye limpiar
+  el buscador rápido** — y como ese texto se resuelve en el servidor (`ABM.md`),
+  hay que volver a pedir, no sólo re-renderizar.
+- **El atajo se arma con filtros que el Modal de Filtros YA tiene.** Así abrirlo
+  después de tocar una tarjeta muestra por qué la lista viene acotada, y
+  `Limpiar` la desarma — es la misma regla de §21-bis.1. Si un atajo necesitara
+  una condición que el modal no ofrece, primero va el filtro al modal.
+- **Una fecha que el atajo necesita la calcula el BACKEND y viaja en el
+  resumen**, nunca `new Date()` en el navegador. `Facturables` es
+  `facturar <= hoy`, y ese `hoy` tiene que ser el mismo con el que el endpoint
+  contó la tarjeta: a las 21 h de Buenos Aires `toISOString()` ya devuelve
+  mañana, y el atajo mostraría una cantidad distinta de la que se acaba de tocar.
+- **`role="button"` + `tabindex="0"` + `Enter` / `Espacio`.** Un `<div>` que
+  responde al click y no al teclado es un botón que no existe para quien no usa
+  mouse.
+- **No toda stat card es un atajo.** Sólo la que cuenta un subconjunto *de ese
+  mismo listado*. Un total que no se puede expresar como filtro de la tabla de
+  abajo se queda quieto.
 
 ## 13. Dashboard grid (solo en pantalla de dashboard)
 
@@ -963,6 +1076,7 @@ contenido.
 
 **Variantes:**
 - `.modal-wide`: aumenta el `max-width` a 760px. Usar **solo** cuando el contenido sea un editor monoespaciado (JSON, logs, payloads) que necesita ancho real para no envolver — ver §23. Los formularios normales se quedan en el ancho base de 520px.
+- `.modal-xwide`: 1100px. Un solo módulo la usa y **de a pares**: el Consultar y el Editar de Comprobantes (§25-quater). La condición es la misma que habilita `.modal-wide` — que el ancho **compre layout**: la ficha pone dos paneles de datos lado a lado y una grilla de renglones de seis columnas, que en 760px colapsan a una columna y a dos líneas por renglón. No usarla para formularios comunes.
 - `.modal-subtitle`: chip secundario al lado del título (mismo bloque `.modal-title`) para identificar el recurso editado, por ejemplo `Configuración JSON · Nombre · <code>UID</code>`. No reemplaza al título, lo complementa.
 - `.modal-header-primary`: pinta la barra de título en `var(--primary)`, el mismo rojo del chrome (sidebar + topbar). Va **junto a** `.modal-header`, no en su lugar.
 
@@ -1603,6 +1717,21 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 - **Las tres pestañas del módulo se llaman igual** (`General` / `Permisos` / `Paneles` en Consultar, Nuevo y Editar): son la misma ficha en tres modos, y si los rótulos no coinciden se leen como pantallas distintas.
 - **Si la validación falla en un campo que está en otra pestaña, hay que traer al operador a esa pestaña ANTES de enfocar.** Enfocar un input dentro de un `.modal-tabpanel[hidden]` no hace nada: el error se marca donde no se ve y el modal parece no responder al Guardar. Por eso `wireModalTabs()` devuelve su función `mostrar(nombre)` — no alcanza con cablear los clicks.
 
+**Las pestañas también sirven para partir una ficha larga en dos mitades temáticas**, aunque no haya ninguna relación con otra tabla. Es lo que hace **Contratos** (`General` / `Facturación`), en Consultar y en Alta/Edición:
+
+- **`Facturación` arranca en el `plan` y se lleva todo lo que sigue** — abono, promo y su vigencia, las fechas de vida del contrato (`registro`, `firma`, `alta`, `baja`) y las del ciclo (`facturado`, `facturar`, `remitir`). **`General` es de quién es el contrato**: dominio, cliente, identificador, habilitado y tipo.
+- **Cinco campos se quedan en `General` contra ese criterio**, y no es una excepción caprichosa: `Tolerancia`, `Facturable`, `Remitido`, `Comprobantes` y `Pagos` no son la condición comercial pactada sino **el seguimiento del contrato** — en qué estado está hoy y cuánto se le emitió. Son lo que se mira al abrir la ficha, no al revisar el plan.
+- **El corte es el mismo en los dos modales.** Es §14 aplicado a las pestañas: consultar y editar el mismo registro no pueden verse como dos pantallas de sistemas distintos, así que `Tolerancia` y `Remitido` están en `General` también en el formulario, bajo la sección `Seguimiento`.
+- **La cuenta de tarjetas de §25 se hace POR PESTAÑA, no sobre el total.** Cada `view-grid` es su propio flex: los `half` tienen que ser pares **dentro de cada panel** y cada `full` caer después de un renglón cerrado de ese panel. Contratos queda 10 `half` + 1 `full` en General y 12 `half` en Facturación.
+- **Una nota que habla de los campos de las dos pestañas va afuera de los paneles**, al pie del `.modal-body`. En Contratos es la de las fechas centinela (`1500-01-01` / `2500-01-01`): hay fechas en las dos solapas y repetirla en cada panel sería ruido.
+
+**Un campo que no se edita desde esta pantalla se dibuja como `<input readonly>`, no como un `<select>` deshabilitado ni como un select que no se puede cambiar.** En **Editar contrato** son `Dominio` y `Cliente`: muestran el nombre en un input de sólo lectura, mientras que el **Alta** los sigue dibujando como selects. Cuatro reglas:
+
+- **El motivo es de datos, no de interfaz.** De quién es el contrato no se cambia desde el ABM: la facturación ya emitida cuelga del contrato por FK, así que moverlo de dominio le cambiaría el titular a comprobantes que ya se entregaron. En el alta, en cambio, hay que elegirlos — y elegir el dominio precarga el cliente.
+- **Un `<select disabled>` no sirve**: se lee como un desplegable roto y además el navegador no lo manda en el submit. El input con el nombre dice lo mismo sin prometer una elección que no existe.
+- **El id sigue viajando en el payload**, tomado de la fila que se está editando. El endpoint reescribe las dos columnas en el `UPDATE`, así que omitirlas las borraría.
+- **El foco inicial se corre al primer campo editable** (en Contratos, `Identificador`): abrir un formulario con el cursor en un campo que no se puede tipear se lee como que el modal no tomó el foco.
+
 El cableado sale de **`wireModalTabs(scope, onShow)`**, el helper compartido: recibe el `.modal-backdrop`, alterna `active` y `hidden` por `data-tab` / `data-panel`, y devuelve `mostrar(nombre)`. El `onShow` opcional corre en cada cambio y es lo que usa Consultar usuario para cargar su solapa recién al abrirla.
 
 **Un campo de la ficha que nombra otra entidad se dibuja como pastilla clickeable** (`.badge.badge-link`, §11) y abre la ficha de esa entidad apilada encima. Hoy lo usan `Usuario` y `Dominio` en Consultar perfil. Tres reglas:
@@ -1654,6 +1783,73 @@ Para las entidades que tienen **hijos que se miran junto con la cabecera**: los 
 - **Sólo lo usan los módulos que filtran en el servidor** (hoy Comprobantes). En los que se traen la tabla entera, la ventana *es* la consulta y el pie no agregaría nada.
 - **El aviso de recorte es obligatorio cuando `filas > traidos`.** Un total de 35 millones arriba de 100 filas, sin decir que hay 2.226 más, se lee como que la tabla miente.
 - **Con la búsqueda rápida activa el pie se recalcula sobre lo que se ve.** El buscador de la toolbar filtra la ventana en el navegador; dejar ahí los totales del servidor pondría un número que no corresponde a ninguna de las dos cosas.
+
+## 25-quater. Ficha con formato de comprobante
+
+**Es la excepción a §25, y es una sola: Comprobantes.** El resto de los Consultar del panel son una grilla de tarjetas —un campo por tarjeta— y eso funciona mientras los campos se miren de a uno. Un comprobante pasa los veinte campos y no se mira así: lo primero que se busca es **qué documento es, cuánto dice y si está autorizado**, y con veinte tarjetas iguales esas tres cosas quedan al mismo nivel que la cotización del dólar.
+
+Así que la ficha tiene **encabezado + pestañas**, y las tarjetas de §25 siguen valiendo puertas adentro de las pestañas que muestran campos sueltos.
+
+```html
+<div class="modal modal-xwide">
+  <div class="modal-header modal-header-primary">
+    <div class="modal-title"><i class="fa-solid fa-file-invoice"></i>
+      Comprobante <span class="modal-subtitle">#7706</span></div>
+  </div>
+  <div class="modal-menubar">…Cerrar · Imprimir ▾ · Acciones ▾…</div>
+  <div class="modal-body">
+
+    <div class="ficha-hero">
+      <div>
+        <div class="ficha-hero-talonario">Alfatec - Prefactura - X - 001</div>
+        <div class="ficha-hero-doc">
+          <span class="ficha-hero-tipo">Prefactura X</span>
+          <span class="ficha-hero-nro">001-003411</span>
+        </div>
+        <div class="ficha-hero-meta">#7706 · UUID <code>BWK1FBBXPL5XY6JQ</code></div>
+        <div class="ficha-hero-total-block">
+          <div class="ficha-hero-total-label">Total</div>
+          <div class="ficha-hero-total">$ 22.425,00</div>
+        </div>
+      </div>
+      <div class="ficha-hero-side">
+        <div><span class="badge badge-success">Cancelado</span></div>
+        <div class="ficha-hero-fechas">
+          <div><span class="muted">Emisión:</span> 31/7/2026</div>
+          <div><span class="muted">Vencimiento:</span> 7/8/2026</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-tabs" role="tablist">…General · Cuerpo · Detalles · Pagos…</div>
+
+    <div class="modal-tabpanel" data-panel="general">
+      <div class="ficha-panel-grid">
+        <div class="ficha-panel-col">
+          <div class="ficha-panel-label">Datos fiscales</div>
+          <div class="ficha-panel">
+            <div class="ficha-linea"><span class="ficha-linea-rot">Talonario:</span> …</div>
+            <div class="ficha-linea"><span class="ficha-linea-rot">CUIT:</span>
+              <span class="muted">Sin dato</span></div>
+          </div>
+        </div>
+        <div class="ficha-panel-col">…Cliente…</div>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+- **El encabezado dice la identidad y el importe, nada más.** Talonario arriba en versalitas, tipo + número en monoespaciado grande, `#id · UUID` en chico, y el total en `--primary`. A la derecha el badge de estado y las dos fechas. Lo que está acá **no se repite** en las tarjetas de abajo: repetir el total en una tarjeta lo devolvería al montón que el encabezado vino a sacar.
+- **El total va en monoespaciado y en el color primario.** Es el único número de la pantalla que se lee sin buscarlo, y eso es deliberado.
+- **`.ficha-panel` es la contracara de §25, no su reemplazo.** Una tarjeta por campo sirve cuando los campos se miran de a uno; los datos fiscales y los del cliente se leen **como bloque** ("¿a quién se le facturó?", "¿con qué CAE?"), y ahí ocho tarjetas sueltas son ruido. El rótulo del bloque va **afuera**, arriba. Fuera de esos dos bloques —o sea en la pestaña Detalles, que son campos sueltos— se vuelve a §25.
+- **El vacío se dice, no se deja en blanco**: `Sin dato` en cursiva `--muted`, el mismo criterio de §25. Una etiqueta con nada al lado no distingue "no tiene" de "no se cargó".
+- **Las cuatro pestañas tienen un criterio, no son cajones**: *General* es a quién y con qué respaldo fiscal; *Cuerpo* es qué se cobra (renglones + totales + observaciones, que son el texto que se **imprime**); *Detalles* es el resto del expediente (cliente, contrato, medio, cotización, comentarios internos); *Pagos* es qué entró. Las cuatro existen siempre — una pestaña que aparece y desaparece según los datos hace dudar de dónde estaba lo que se vio recién. Pagos lleva su recuento en un `badge` cuando hay.
+- **La pestaña abierta sobrevive al repintado.** La ficha se redibuja entera tras cada cambio de renglón y los botones de renglón viven en *Cuerpo*: sin recordarla, agregar un renglón devolvería al operador a *General* cada vez.
+- **Los totales van a la derecha, en `.ficha-totales`**, no en el `tfoot` de la tabla. Es donde se busca un total en cualquier factura, y deja la grilla de renglones leyéndose como lo que es: el detalle. Las Observaciones van **al lado** y no en Detalles, porque son el texto que se imprime junto a los renglones.
+- **La respuesta del CAE se esconde detrás de un "Ver".** Es el XML del rechazo de AFIP cuando falla: adentro de una línea de panel taparía todo lo demás. El overlay que la muestra se monta **fuera** del backdrop de la ficha, para no destruirla al abrirlo.
+- **El Editar del módulo repite el chrome**: mismo `.modal-xwide`, mismo título con `<i class="fa-solid fa-file-invoice">` + `.modal-subtitle` con el `#id`, y pestañas *General* / *Detalles*. Es la regla de §14 —consultar y editar el mismo registro no se pueden ver como dos pantallas de sistemas distintos— aplicada también al ancho. **La validación salta a la pestaña del campo que falló** antes de enfocarlo: marcar un error en un campo invisible se lee como un Guardar que no responde.
+- **Los renglones NO se editan en el Editar**, y el modal lo dice. Se cargan de a uno desde la pestaña *Cuerpo* de la ficha porque cada alta, edición o baja recalcula `subtotal` / `iva` / `total` **en el servidor** (ver `comprobanteTotalizar()`); un editor de líneas que guarde todo junto al cerrar tendría que recalcular en el navegador y mandar totales, que es justo lo que el endpoint no acepta.
 
 ## 26. Editor JSON (textarea monoespaciado)
 
@@ -2596,6 +2792,63 @@ acciones (§21-bis), `.form-row` / `.form-group` (§8), `.form-nota`,
 - **`Guardar` es un botón más de la barra, no la única acción**: convive con
   `Copiar enlace` y `Abrir`, que operan sobre el mismo enlace. `Cerrar` sigue
   primero y sigue siendo el único ghost (§21-bis).
+
+---
+
+## 40. Comunicación · Conversaciones
+
+Las charlas del **chat con IA de la burbuja de `www.reactor.com.ar`**. Dos tablas: `conversaciones` (una fila por charla) y `conversaciones_mensajes` (una por mensaje, de los dos lados). Endpoint `api/conversaciones.php`.
+
+Es el tercer módulo del grupo Comunicación y el único de los tres donde **el que escribe es alguien de afuera del sistema**: Notificaciones las produce un proceso, Difusión la dispara un operador, y acá las filas las genera un visitante anónimo conversando con el asistente.
+
+El módulo **no aporta componentes nuevos salvo las burbujas del diálogo**. Todo lo demás sale de las piezas ya documentadas: `moduleHeader()` (§23), `abmToolbar()` sin `+ Nuevo` (§9), tabla estándar (§10), Modal de Filtros compartido (§23-bis), tarjetas de consulta (§25) y barra de acciones del modal (§21-bis).
+
+```css
+/* El diálogo es una caja con SCROLL PROPIO dentro de la solapa. Ver la regla
+   de más abajo: lo único que se mueve es la lista de mensajes. */
+.conv-dialogo { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain;
+                background: var(--bg); border: 1px solid var(--border);
+                border-radius: var(--radius); padding: 16px; }
+
+/* Burbujas. La persona a la IZQUIERDA y el asistente a la derecha, al revés
+   que en la burbuja del sitio: acá el que lee es un operador y lo que viene a
+   buscar es qué le preguntaron. */
+.conv-msg.persona   { align-self: flex-start; background: var(--surface);
+                      border: 1px solid var(--border); }
+.conv-msg.asistente { align-self: flex-end;
+                      background: color-mix(in srgb, var(--primary) 18%, var(--surface));
+                      border: 1px solid color-mix(in srgb, var(--primary) 38%, transparent); }
+```
+
+**Reglas:**
+
+- **CONSULTA Y BAJA, SIN ALTA NI EDICIÓN, y las tres decisiones tienen motivo distinto.** Un alta fabricaría una charla que nunca ocurrió; una edición reescribiría lo que alguien dijo. **La baja sí está**, al revés que en Notificaciones, Señales y Registros: estas dos tablas son las únicas del sistema que acumulan texto libre, IP y navegador de gente que **nunca se registró** —datos personales bajo la 25.326— y tiene que existir la forma de borrar una conversación puntual sin entrar a la base a mano. `api/conversaciones.php` responde **GET y DELETE**, y nada más.
+- **La columna `Consulta` es la razón de ser del listado.** Es la primera pregunta de la persona, traída con una subconsulta. Sin ella cada fila son dos fechas y una IP, y habría que abrir la ficha de las cien para saber de qué hablaban.
+- **`Turnos` y `Mensajes` son dos números distintos y los dos se muestran.** `Turnos` es la columna `conversaciones`.`mensajes`, que cuenta **sólo los de la persona** porque es el contador con el que el sitio aplica su tope por conversación; `Mensajes` cuenta las filas de las dos partes. Mostrar uno solo haría que el número no cierre contra lo que se ve en la ficha.
+- **La búsqueda por texto entra a la tabla hija con `EXISTS`, no con `JOIN`.** El método es el de siempre (§ABM.md: términos cruzados con Y, cada uno en todos los campos con O), pero uno de esos campos es `conversaciones_mensajes`.`texto`: con un `JOIN` la consulta devolvería una fila por mensaje y el `LIMIT` —que cuenta filas, no conversaciones— dejaría de significar lo que dice. Cada término se busca **en los datos de la conversación O en alguno de sus mensajes**, con dos juegos de placeholders de prefijos distintos (`qc` / `qm`), porque cada nombre puede aparecer una sola vez en la sentencia.
+- **El modal de Consultar va en dos solapas: `General` y `Conversación`** (§25, `wireModalTabs()`). En la primera, las diez tarjetas con los datos de la charla; en la segunda, el diálogo. **Se dibujan las dos de entrada, sin lazy-load** —al revés que la solapa `Perfiles` de Usuarios—: el diálogo ya vino en el mismo request que abrió el modal, así que no hay nada que diferir.
+- **EL SCROLL ES DE LA LISTA DE MENSAJES, NO DEL MODAL.** `.conv-dialogo` lleva su `max-height` y su `overflow-y`; el `.modal-body` no scrollea en esa solapa porque nada más ocupa alto. Si scrollease el cuerpo entero, las solapas se irían hacia arriba en la primera vuelta de rueda y se perdería de vista en qué pestaña se está parado — el mismo motivo por el que §21-bis fija la barra de acciones. Lleva `overscroll-behavior: contain` para que al llegar al final la rueda no siga empujando lo de atrás.
+- **Al abrir la solapa el diálogo se posiciona abajo de todo**, que es donde está lo último que se dijo y, en una conversación que terminó mal, lo que se viene a leer. Va en el `onShow` de `wireModalTabs()` y no al montar el modal: el panel nace con `hidden` y un elemento oculto tiene `scrollHeight` 0, así que fijar el scroll antes de mostrarlo no hace nada.
+- **La solapa `Conversación` SE AUTOREFRESCA cada 3 segundos** (`CONV_REFRESCO_MS`). La charla puede estar pasando en ese momento —alguien escribiendo en el sitio mientras del otro lado se la mira—, así que mientras la solapa esté a la vista se vuelve a pedir la ficha y, si hay mensajes nuevos, se repinta y se baja al final. Tres reglas, y las tres son la funcionalidad:
+  - **Sólo se repinta si hay algo nuevo**, comparando el `id` del último mensaje. Repintar cada 3 segundos pase lo que pase tiene dos efectos que se notan enseguida: el `scrollTop` al final le arranca la lectura de las manos a quien subió a leer algo, y el DOM reemplazado le corta cualquier selección de texto.
+  - **Sólo corre con la solapa abierta.** En `General` no hay nada que refrescar, y seguir pidiendo sería una consulta cada 3 segundos por cada modal que alguien dejó abierto. Lo prende y lo apaga el `onShow`; cerrar el modal lo apaga también.
+  - **Un error corta el ciclo**, no lo reintenta: sesión vencida, red caída o la conversación borrada desde otra pestaña. Insistir cada 3 segundos contra un endpoint que falla sólo llena el log.
+  - El refresco actualiza **el badge de la solapa y las tarjetas `Mensajes` y `Tokens`** de `General`: si no, mirar una conversación en vivo deja `Mensajes 4` al lado de un badge que dice 8, que se lee como un error de la pantalla.
+  - Arriba del diálogo va el aviso **`En vivo · se actualiza cada 3 segundos`** con un punto que late. No es decoración: sin él, una conversación que crece sola parece que la pantalla se movió por las suyas, y decir cada cuánto evita la lectura opuesta —quedarse esperando algo que ya llegó—.
+- **Cada burbuja lleva adentro el rótulo de quién habla y la hora.** El rótulo no es redundante con el lado en el que cae: es lo único que distingue a las dos cuando la pantalla se imprime, se captura o se lee con un lector de pantalla, donde "está a la derecha" no significa nada.
+- **La burbuja del asistente va con TINTE de primary, no con primary sólido.** Es la regla dura 2: fuera del chrome el rojo institucional sólo aparece como acento. El tinte más el borde alcanzan para distinguirla de un vistazo, que es para lo que está el color.
+- **Debajo de lo que escribió la persona va la URL completa desde la que lo escribió** (`conversaciones_mensajes`.`origen`), chica y en `--muted`. El chat vive en el pie de **todas** las páginas del sitio y la conversación sobrevive a la navegación, así que una misma charla puede empezar en `/precios/planes` y seguir en `/ayuda`: saber desde dónde preguntó cada cosa es la mitad de entender qué buscaba. `conversaciones`.`pagina` —la tarjeta *Página de apertura*— sólo dice dónde empezó.
+  - **No se recorta con ellipsis.** Una URL cortada a la mitad no se puede copiar ni pegar en la barra del navegador, que es para lo que se la mira; envuelve en dos líneas y listo.
+  - **Sólo del lado de la persona.** La respuesta del modelo no se escribe desde ninguna página: esas filas van en `NULL` y eso significa *no aplica*, no *falta*.
+  - **OJO CON EL NOMBRE:** `conversaciones`.`origen` es la **IP** y `conversaciones_mensajes`.`origen` es la **URL**. Dos columnas con el mismo nombre y distinto significado en dos tablas que se leen siempre juntas. Por eso la tarjeta de la IP se rotula **`IP de origen`** y no `Origen` a secas: dos rótulos iguales para dos cosas distintas en la misma ficha se leen mal.
+- **EL DIÁLOGO MUESTRA LA CHARLA Y NADA MÁS.** Debajo de las respuestas hubo primero una línea con modelo y tokens, y después los `uuid` de los artículos que se le pasaron al modelo; las dos se sacaron por el mismo motivo: son datos de auditoría y competían con lo que se viene a leer, que es qué se preguntó y qué se contestó. El **modelo** y los **tokens** pasaron a ser tarjetas de la solapa `General` —el modelo es el de la última respuesta, que dentro de una conversación no cambia salvo que se toque `OPENAI_MODELO` en el medio—. Los **artículos se siguen guardando** en `conversaciones_mensajes`.`contexto` y el endpoint los sigue devolviendo: dejaron de pintarse, no de registrarse, así que el día que haya que reconstruir de dónde salió una respuesta el dato está.
+  - **Lo único que queda debajo de un mensaje es la URL**, y sólo del lado de la persona. Es la excepción y tiene motivo: no es auditoría del sistema sino contexto de la consulta — desde dónde la hizo cambia qué estaba buscando.
+- **El diálogo se pide al abrir la ficha, no viene con el listado.** Son hasta 50 mensajes por conversación: traerlos para las 100 filas de la ventana serían miles de textos que nadie va a leer.
+- **Debajo de cada respuesta van los `uuid` de los artículos que se le pasaron al modelo.** Es lo único que queda del contexto con el que contestó —el prompt de sistema **no se guarda**, se rearma en cada turno— y es lo que permite entender de dónde salió una respuesta rara. Una respuesta con `sin artículos` contestó sólo con el documento del experto y los planes.
+- **El KPI de costo dice `< USD 0,01` en vez de `USD 0,00`.** Con el modelo chico que usa el chat, un mes de tráfico real puede costar menos de un centavo; un `toFixed(2)` pelado deja el indicador clavado en cero y se lee como un contador roto. Que el gasto sea despreciable es el dato, pero hay que decirlo de una forma que no parezca un bug. El backend manda **cuatro decimales** por eso mismo.
+- **Los dos precios por millón de tokens están en el endpoint, no en la base** (`CONVERSACIONES_USD_ENTRADA` / `_SALIDA`). Son de OpenAI, cambian cuando ellos quieren y no hay nada que el operador pueda configurar; por eso el KPI dice **estimado** y por eso el rótulo lo aclara.
+- **Ocho tarjetas media + `Identificador` y `Navegador` full**, en ese orden: cuatro renglones que cierran de a dos y después los dos anchos. Agregar o quitar un campo obliga a rehacer la cuenta (§25).
+- **La baja arrastra los mensajes por la FK `ON DELETE CASCADE` y el `confirmDialog` dice cuántos son.** No hace falta el modal de impacto de §15.1: no hay nada que se conserve sin la referencia, así que el desglose entra en la frase — el mismo trato que `confirmDeleteDomain`.
 
 ---
 

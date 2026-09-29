@@ -321,6 +321,45 @@ textarea { resize: vertical; min-height: 60px; }
 .form-group select,
 .form-group textarea { width: 100%; }
 
+/* Ayuda del campo: el signo de pregunta al lado del rótulo y el globito que
+ * aparece al pasar el mouse. Reemplaza a la `.form-nota` bajo el control cuando
+ * la aclaración es larga — ahí el texto empuja el campo de al lado hacia abajo y
+ * el formulario queda con los renglones desalineados. El texto vive en el HTML y
+ * no en un `title=`: el tooltip nativo del sistema tarda casi un segundo, no se
+ * puede dar estilo y no aparece nunca al navegar con teclado.
+ *
+ * ABRE HACIA ABAJO, no hacia arriba: el `.modal-body` scrollea
+ * (`overflow-y: auto`), así que lo que sube por encima del primer renglón queda
+ * recortado por el borde del modal. Y se ancla al borde IZQUIERDO del ícono en
+ * vez de centrarse, para que crezca hacia adentro del formulario. */
+.field-help {
+    position: relative;
+    display: inline-flex; align-items: center; vertical-align: middle;
+    margin-left: 5px;
+    color: var(--muted); cursor: help;
+    transition: color .15s;
+}
+.field-help:hover, .field-help:focus-visible { color: var(--text); outline: none; }
+.field-help i { font-size: .85rem; }
+.field-help-tip {
+    position: absolute; top: calc(100% + 8px); left: 0; z-index: 20;
+    width: max-content; max-width: 280px;
+    padding: 9px 11px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    /* El globito hereda del `<label>`, que va en 600 y en `--muted`: sin esto
+     * se lee como otro rótulo y no como una explicación. */
+    font-size: .78rem; font-weight: 400; line-height: 1.5;
+    text-transform: none; letter-spacing: normal; white-space: normal;
+    opacity: 0; visibility: hidden;
+    transition: opacity .12s ease, visibility .12s;
+    /* Sin esto, el globito que cae sobre el campo de abajo se come sus clicks. */
+    pointer-events: none;
+}
+.field-help:hover .field-help-tip,
+.field-help:focus-visible .field-help-tip { opacity: 1; visibility: visible; }
+
 /* Campo de contraseña con botón de ojo para mostrar/ocultar. El wrapper es el
  * que posiciona el botón; el input reserva a la derecha el ancho que ocupa,
  * para que el texto nunca quede por debajo del ícono. */
@@ -807,6 +846,15 @@ tbody tr.row-clickable { cursor: pointer; }
  * modales de Filtros de los módulos con muchos campos (§26). */
 .modal.modal-wide { max-width: 760px; }
 
+/* Variante extra ancha. Un solo módulo la usa, y de a pares: el Consultar y el
+ * Editar de Comprobantes (§25-quater). La ficha pone lado a lado dos paneles de
+ * datos y una grilla de renglones de seis columnas; en 760px esa tabla envuelve
+ * el detalle a dos líneas y las dos columnas de datos quedan en una — o sea, el
+ * ancho compra layout, que es la misma condición que habilita `.modal-wide`.
+ * El Editar la hereda por la regla de §14: consultar y editar el mismo registro
+ * no se pueden ver como dos pantallas de sistemas distintos. */
+.modal.modal-xwide { max-width: 1100px; }
+
 /* Tabs dentro de un modal (ej.: Consultar usuario → General / Perfiles). */
 .modal-tabs        { display: flex; gap: 4px; border-bottom: 1px solid var(--border);
                      margin: 0; padding: 0; }
@@ -1249,6 +1297,109 @@ th.action-col, td.action-col {
     font-size: .82rem; color: var(--text);
 }
 .table-foot .muted { font-size: .78rem; }
+
+/* ---------- 25-quater. Ficha con formato de comprobante ----------
+ * La ficha de Comprobantes no se lee como el resto de los Consultar: lo que se
+ * mira primero es QUÉ documento es y CUÁNTO dice, no la lista de sus campos.
+ * Por eso arriba va un encabezado tipo factura —talonario, tipo + número,
+ * total, estado y fechas— y el resto de los campos se reparte en pestañas.
+ * Las tarjetas de §25 siguen valiendo puertas adentro de cada pestaña.
+ */
+
+/* Encabezado: a la izquierda la identidad del documento y el total; a la
+ * derecha el estado y las dos fechas, alineados contra el borde. */
+.ficha-hero {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 16px; flex-wrap: wrap;
+}
+.ficha-hero-talonario {
+    font-size: .72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin-bottom: 4px;
+}
+.ficha-hero-doc   { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ficha-hero-tipo  { font-family: monospace; font-size: 1.5rem; font-weight: 700; }
+.ficha-hero-nro   { font-family: monospace; font-size: 1.2rem; color: var(--muted); }
+.ficha-hero-meta  { font-size: .78rem; color: var(--muted); margin-top: 6px; }
+.ficha-hero-meta code {
+    font-family: monospace; font-size: .78rem;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px;
+}
+.ficha-hero-total-block { margin-top: 10px; }
+.ficha-hero-total-label {
+    font-size: .72rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em;
+}
+.ficha-hero-total {
+    font-family: monospace; font-size: 1.5rem; font-weight: 700;
+    color: var(--primary); line-height: 1.1;
+}
+.ficha-hero-side   { text-align: right; min-width: 180px; }
+.ficha-hero-fechas { margin-top: 10px; font-size: .85rem; line-height: 1.6; }
+.ficha-hero-fechas .muted { color: var(--muted); }
+
+/* Panel agrupador: varias líneas "Etiqueta: valor" en una sola tarjeta. Es la
+ * contracara de §25 — una tarjeta por campo sirve cuando los campos se miran
+ * de a uno, pero los datos fiscales y los del cliente se leen COMO BLOQUE
+ * (¿a quién se le facturó?, ¿con qué CAE?) y ahí ocho tarjetas sueltas hacen
+ * ruido. El rótulo del bloque va afuera, arriba. */
+.ficha-panel-grid {
+    display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+    gap: 12px; align-items: start;
+}
+.ficha-panel-col   { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ficha-panel-label {
+    font-size: .72rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+.ficha-panel {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+}
+.ficha-linea       { font-size: .9rem; line-height: 1.55; padding: 3px 0; word-break: break-word; }
+.ficha-linea-rot   { color: var(--muted); font-weight: 600; }
+.ficha-linea .muted{ color: var(--muted); font-style: italic; }
+.ficha-linea code  {
+    font-family: monospace; font-size: .85rem;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px;
+}
+
+/* Cierre del cuerpo: observaciones a la izquierda y la caja de totales contra
+ * el borde derecho, que es donde se busca un total en cualquier factura. */
+.ficha-cierre {
+    display: grid; grid-template-columns: minmax(0,1fr) 300px;
+    gap: 16px; align-items: end;
+}
+.ficha-totales {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+}
+.ficha-total-linea {
+    display: flex; justify-content: space-between; gap: 12px;
+    font-size: .9rem; padding: 2px 0;
+}
+.ficha-total-linea .muted { color: var(--muted); }
+.ficha-total-linea .val   { font-family: monospace; font-variant-numeric: tabular-nums; }
+.ficha-total-linea.final {
+    font-size: 1rem; font-weight: 700;
+    padding: 6px 0 0; margin-top: 6px;
+    border-top: 1px solid var(--border);
+}
+.ficha-total-linea.final .val { color: var(--primary); }
+
+@media (max-width: 860px) {
+    .ficha-panel-grid { grid-template-columns: 1fr; }
+    .ficha-cierre     { grid-template-columns: 1fr; align-items: stretch; }
+    .ficha-hero-side  { text-align: left; }
+}
 
 /* ---------- 26. ABM: Modal de Filtros ----------
  * Centraliza todos los filtros del listado (ver ABM.md §3). Estructura:
@@ -1773,6 +1924,13 @@ body.login-page { background: var(--bg); }
  * el dominio: el gap va acá y no en márgenes de los hijos. */
 .paneles-wrap          { display: flex; flex-direction: column; gap: 12px; }
 
+/* Modo del plan en la celda `Tipo / Plan` de Contratos: candado = `fijo`,
+ * reciclado = `dinamico`. LOS DOS EN `--muted`, el mismo gris del nombre del
+ * plan al que acompañan: es un atributo de ese texto y no un estado que compita
+ * con él. Lo que distingue un modo del otro es la forma del ícono, no el color
+ * — pintar uno de los dos lo convierte en una alerta que nadie pidió. */
+.plan-modo-icon        { color: var(--muted); font-size: .75rem; margin-left: 6px; }
+
 /* ---------- 36. Comunicación: Notificaciones ----------
  * El listado reusa la tabla estándar; lo único propio es el glifo que la fila
  * trae en `notificaciones`.`icono`, que va delante del mensaje. Se pinta en
@@ -1898,3 +2056,147 @@ body.login-page { background: var(--bg); }
 .run-status.info { color: var(--info); }
 .run-status.ok   { color: var(--success); }
 .run-status.err  { color: var(--danger); }
+
+/* =========================================================
+ * Diálogo de una conversación del chat (modal de Consultar
+ * de Comunicación · Conversaciones, DESIGN.md §40)
+ * ========================================================= */
+
+/* EL SCROLL ES DE ESTA CAJA, NO DEL MODAL. Es la diferencia con el resto de
+ * los modales: una conversación larga tiene decenas de mensajes, y si
+ * scrollease el `.modal-body` entero las solapas se irían hacia arriba y se
+ * perdería de vista en qué pestaña se está parado. Con la caja propia, el
+ * encabezado del modal y las solapas quedan fijos y lo único que se mueve es
+ * el diálogo.
+ *
+ * `overscroll-behavior: contain` corta el encadenado: al llegar al final de la
+ * lista la rueda deja de empujar al contenedor de atrás, que es lo que hace que
+ * un scroll anidado se sienta roto. */
+.conv-dialogo {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 52vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+/* Aviso de que la solapa se refresca sola.
+ *
+ * NO ES DECORACIÓN: sin él, una conversación que crece mientras alguien la mira
+ * parece que la pantalla se movió sola. Dice además cada cuánto, que es lo que
+ * evita la otra lectura equivocada — quedarse esperando algo que ya llegó. */
+.conv-vivo {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 8px;
+    font-size: .72rem;
+    color: var(--muted);
+}
+
+.conv-vivo-punto {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+    animation: conv-latido 2s ease-in-out infinite;
+}
+
+@keyframes conv-latido {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .25; }
+}
+
+/* Quien pidió menos animación no tiene por qué ver un punto latiendo. */
+@media (prefers-reduced-motion: reduce) {
+    .conv-vivo-punto { animation: none; }
+}
+
+.conv-msg {
+    max-width: 82%;
+    min-width: 180px;
+    padding: 10px 13px;
+    border-radius: 10px;
+    font-size: .88rem;
+    line-height: 1.55;
+}
+
+/* Rótulo y hora, adentro de la burbuja y en la misma línea: el rótulo dice
+ * quién habla sin depender de que se note de qué lado cayó la burbuja, que es
+ * lo único que distingue a las dos en una captura o impresa en blanco y negro. */
+.conv-msg-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 5px;
+}
+
+.conv-msg-rol {
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    opacity: .85;
+}
+
+.conv-msg-hora {
+    font-size: .68rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+/* Los saltos de línea del texto original se respetan: el modelo separa en
+ * párrafos y sin esto la respuesta entera sale como un bloque. */
+.conv-msg-texto {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* La persona a la IZQUIERDA y el asistente a la derecha, al revés que en la
+ * burbuja del sitio. Acá el que lee es un operador y lo que viene a buscar es
+ * qué le preguntaron, no qué contestó el bot. */
+.conv-msg.persona {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 3px;
+}
+
+/* TINTE DE PRIMARY, NO PRIMARY SÓLIDO: la regla dura 2 del design system dice
+ * que fuera del chrome el rojo institucional sólo aparece como acento. Una
+ * burbuja pintada de rojo entero acá metería una tercera zona roja en una
+ * pantalla que no es chrome. El tinte + el borde alcanzan para distinguirla de
+ * un vistazo, que es para lo que está el color. */
+.conv-msg.asistente {
+    align-self: flex-end;
+    background: color-mix(in srgb, var(--primary) 18%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--primary) 38%, transparent);
+    border-bottom-right-radius: 3px;
+}
+
+/* La URL COMPLETA desde la que se escribió ese mensaje, debajo del texto de la
+ * persona. Chica y en `--muted` a propósito: es contexto, no contenido — quien
+ * lee el diálogo viene a leer lo que se dijo, y la URL contesta la pregunta
+ * siguiente ("¿desde dónde lo preguntó?").
+ *
+ * NO SE RECORTA con ellipsis: se pide entera y entera se muestra, aunque
+ * envuelva en dos líneas. Una URL cortada a la mitad no se puede copiar ni
+ * pegar en la barra del navegador, que es exactamente para lo que se la mira.
+ * El `title` repite el valor para el tooltip. */
+.conv-msg-origen {
+    margin-top: 6px;
+    font-size: .68rem;
+    line-height: 1.35;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+    .conv-msg { max-width: 92%; }
+}

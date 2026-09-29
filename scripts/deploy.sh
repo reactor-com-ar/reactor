@@ -45,12 +45,40 @@ case "${1:-}" in
         ;;
 esac
 
-VERSION="1.0.$(date +%s)"
+INICIO="$(date +%s)"
+VERSION="1.0.$INICIO"
+
+# ---- La hora de cierre sale SIEMPRE, y por eso va en un trap ----
+# No alcanza con un echo al final del script: con 'set -e' cualquier paso que
+# falle corta antes de llegar ahi, y el deploy que se corta a mitad es
+# justamente el que hay que poder ubicar en el tiempo (que quedo subido, contra
+# que hora del log del server). El trap corre en los dos caminos y distingue
+# uno de otro con el codigo de salida.
+#
+# La hora va DENTRO del recuadro de cierre, en la ultima linea antes de la
+# separadora. Por eso la separadora final la imprime el trap y no el banner del
+# paso 6: el trap corre despues del script, asi que es el unico que puede
+# quedar entre la ultima linea del banner y el cierre del recuadro.
+finalizar() {
+    cod=$?
+    fin="$(date '+%Y-%m-%d %H:%M:%S')"
+    seg=$(( $(date +%s) - INICIO ))
+    echo ""
+    if [ "$cod" = 0 ]; then
+        echo "  Finalizado: $fin  (${seg}s)"
+    else
+        echo "  INTERRUMPIDO: $fin  (${seg}s, codigo $cod)"
+    fi
+    echo "================================================"
+    echo ""
+}
+trap finalizar EXIT
 
 echo ""
 echo "================================================"
 echo "  Deploy reactor -- version: $VERSION"
 echo "  Host: $HOST"
+echo "  Inicio: $(date '+%Y-%m-%d %H:%M:%S')"
 case "$MODE" in
     sync)    echo "  Modo: sync (no se reinician contenedores)" ;;
     restart) echo "  Modo: restart (recrea contenedores)" ;;
@@ -266,7 +294,11 @@ if [ -n "$BUMPEADOS" ]; then
     ssh -i "$KEY" -o StrictHostKeyChecking=no "$USER@$HOST" "
         set -e
         for d in $BUMPEADOS; do
-            echo '$VERSION' > '$BASE_REMOTE/\$d/version.txt'
+            # Comillas DOBLES: \$d lo tiene que expandir el shell remoto. Con
+            # comillas simples la ruta viaja literal ('.../\$d/version.txt') y
+            # el redirect falla con 'No such file or directory'. \$VERSION no
+            # se escapa a proposito: lo expande bash local.
+            echo '$VERSION' > \"$BASE_REMOTE/\$d/version.txt\"
         done
     "
     echo "  version.txt -> $VERSION  en:$BUMPEADOS"
@@ -383,5 +415,5 @@ echo "    cloud: https://cloud.reactor.com.ar"
 echo "    panel: https://panel.reactor.com.ar"
 echo "    app:   https://app.reactor.com.ar   (alias: pwa. / newapp. / webapp.)"
 echo "    www:   https://www.reactor.com.ar   (alias: reactor.com.ar)"
-echo "================================================"
-echo ""
+# La separadora que cierra este recuadro la imprime finalizar(), para que la hora
+# quede adentro. Ver el trap al principio del script.

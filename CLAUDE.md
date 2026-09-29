@@ -447,6 +447,50 @@ canjeó) son columnas, y el uso único pasó a ser el **default**.
   en 1: ese enlace es para que una persona entre una vez, recién creada su
   cuenta.
 
+## `promociones`: el `id` ES el porcentaje de descuento
+
+Tabla creada por
+[cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql](cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql),
+sembrada del 5 % al 100 % de 5 en 5. **La fila del 15 % tiene `id = 15`**, la PK
+va a mano y **no lleva `AUTO_INCREMENT`**.
+
+No es una comodidad: es lo único que permite que `contratos`.`promo` exista. El
+esquema la declaraba `FOREIGN KEY (promo) REFERENCES articulos (id)` mientras que
+el legacy la lee como un **porcentaje** — `cContrato::facturar()` calcula
+`($articulo->venta * $promo) / 100` —, y las dos lecturas no podían convivir:
+`articulos` tiene ids 1..279 y ninguno de los once valores del combo
+`$xContrato->promo` existe ahí, así que cualquier promo que se guardara violaba
+la FK. Por eso el ABM la mostraba de sólo lectura hasta el 29/09/2026.
+
+- **Con la PK sembrada, la columna satisface las dos lecturas a la vez**: guarda
+  el número que el legacy espera y apunta a una fila que existe. Un id
+  correlativo (1, 2, 3…) daría una FK igual de válida y le haría facturar al
+  legacy 1 %, 2 % y 3 % de descuento sin que nadie lo note. **Es plata.**
+- **Agregar un 12 % es insertar `id = 12`.** No hay renumeración posible: cambiar
+  un id cambia el descuento de todos los contratos que lo usan, y por eso la FK
+  es `ON UPDATE RESTRICT` como el resto del esquema. Una promo que ya no se
+  ofrece se apaga con `habilitado = 0`, no se borra.
+- **"Sin promoción" es `NULL`**, no una fila `id = 0`: el `0` del sistema
+  histórico es un centinela y no una referencia, y es lo que ya tenían las 50
+  filas. Por eso el `0` = "Ninguna" del combo legacy no se migró como fila.
+- **El renglón de descuento de `cloud/api/contratos_accion.php` no cambió** —
+  sigue leyendo `promo` como porcentaje—, pero desde que el ABM la escribe **sí
+  puede salir**: hasta entonces las 50 filas la tenían en `NULL` y el renglón no
+  aparecía nunca.
+
+### `contratos.plan_modo`: `dinamico` y `fijo`, y nace en `fijo`
+
+`ENUM('dinamico','fijo') NOT NULL DEFAULT 'fijo'`, de la misma migración: qué se
+hace con el plan cuando el dominio crece. El default **no es un valor cualquiera**
+— es lo que hacen hoy las 50 filas, cuyo plan se eligió a mano y nada lo mueve.
+Sembrar `dinamico` les habría cambiado el comportamiento a todos los contratos
+vivos desde un `ALTER`. El modo se elige contrato por contrato, desde el ABM.
+
+Valen las reglas de `perfiles.tipo`: se escribe con el valor del catálogo
+(`PLAN_MODOS` en [cloud/api/contratos.php](cloud/api/contratos.php)) y **un valor
+nuevo va al final del `ENUM`** — `ORDER BY plan_modo` ordena por el índice
+interno, no por el texto.
+
 ## `perfiles.registrante`: quién otorgó el acceso
 
 Columna de `perfiles` entre `panel` y `habilitado`, creada por

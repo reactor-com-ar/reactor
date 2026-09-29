@@ -984,6 +984,7 @@ CREATE TABLE `contratos` (
   `dominio` int DEFAULT NULL,
   `tipo` varchar(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `plan` int DEFAULT NULL,
+  `plan_modo` enum('dinamico','fijo') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'fijo' COMMENT 'que se hace con el plan cuando el dominio crece',
   `promo` int DEFAULT NULL,
   `desde` date DEFAULT NULL,
   `hasta` date DEFAULT NULL,
@@ -1005,7 +1006,7 @@ CREATE TABLE `contratos` (
   CONSTRAINT `fk_contratos_cliente` FOREIGN KEY (`cliente`) REFERENCES `clientes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_contratos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_contratos_plan` FOREIGN KEY (`plan`) REFERENCES `planes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_contratos_promo` FOREIGN KEY (`promo`) REFERENCES `articulos` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_contratos_promo` FOREIGN KEY (`promo`) REFERENCES `promociones` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1127,6 +1128,7 @@ CREATE TABLE `conversaciones_mensajes` (
   `fecha` datetime NOT NULL,
   `rol` enum('user','assistant') COLLATE utf8mb4_unicode_ci NOT NULL,
   `texto` mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `origen` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `modelo` varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `contexto` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `tokens_entrada` int DEFAULT NULL,
@@ -2584,6 +2586,39 @@ CREATE TABLE `productos` (
   `manual` int DEFAULT NULL,
   `articulo` int DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `promociones`
+--
+-- El catalogo de descuentos que puede llevar un contrato (`contratos`.`promo`).
+--
+-- EL `id` ES EL PORCENTAJE: la fila del 15 % tiene `id = 15`. No es una
+-- casualidad ni una comodidad, es lo que permite que la columna exista. El
+-- sistema historico lee `contratos`.`promo` como un porcentaje --
+-- `cContrato::facturar()` calcula `($articulo->venta * $promo) / 100` -- mientras
+-- que el esquema la declaraba FK contra `articulos`, y las dos lecturas no
+-- podian convivir. Con la PK sembrada a mano y sin AUTO_INCREMENT la columna
+-- satisface las dos: guarda el numero que el legacy espera y apunta a una fila
+-- que existe. Un id correlativo (1, 2, 3...) le haria facturar 1 %, 2 % y 3 % de
+-- descuento sin que nadie lo note. Agregar un 12 % es insertar `id = 12`.
+--
+-- "SIN PROMOCION" ES `NULL` y no una fila `id = 0`: el `0` del sistema historico
+-- es un centinela, no una referencia.
+--
+-- Sembrada del 5 % al 100 % de 5 en 5 por
+-- cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql.
+--
+
+DROP TABLE IF EXISTS `promociones`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `promociones` (
+  `id` int NOT NULL COMMENT 'ES el porcentaje de descuento: la fila del 15 % tiene id 15',
+  `nombre` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

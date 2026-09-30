@@ -323,10 +323,39 @@ function catalogos(): array
         'habilitado' => (int) $r['estado'] === 1 ? 1 : 0,
     ], db()->query('SELECT id, nombre, estado FROM medios ORDER BY estado DESC, nombre ASC')->fetchAll());
 
+    // El catalogo entero de clientes, para el "Elegir de clientes" del editor
+    // (DESIGN.md §25-quinquies). VIAJA COMPLETO a proposito: son 64 filas, asi
+    // que un endpoint de busqueda aparte seria un request por tecla para datos
+    // que ya caben en memoria -- el mismo criterio del combo con buscador
+    // (§34-bis). Van los seis campos que el editor copia al comprobante, no
+    // solo el nombre: la gracia de elegir un cliente es no volver a tipear el
+    // CUIT ni el domicilio.
+    $clientes = array_map(static fn(array $r): array => [
+        'id'        => (int) $r['id'],
+        'nombre'    => trim((string) ($r['nombre']    ?? '')),
+        'razon'     => trim((string) ($r['razon']     ?? '')),
+        'cuit'      => trim((string) ($r['cuit']      ?? '')),
+        'condicion' => trim((string) ($r['condicion'] ?? '')),
+        'correo'    => trim((string) ($r['correo']    ?? '')),
+        'celular'   => trim((string) ($r['celular']   ?? '')),
+        // Las tres columnas del domicilio se pegan aca y no en el front: el
+        // comprobante tiene UNA sola columna `domicilio` y la regla de como se
+        // arma es del dato, no de la pantalla.
+        'domicilio' => implode(', ', array_filter([
+            trim((string) ($r['domicilio'] ?? '')),
+            trim((string) ($r['localidad'] ?? '')),
+            trim((string) ($r['provincia'] ?? '')),
+        ], static fn(string $v): bool => $v !== '')),
+    ], db()->query(
+        'SELECT id, nombre, razon, cuit, condicion, correo, celular, domicilio, localidad, provincia
+         FROM clientes ORDER BY nombre ASC'
+    )->fetchAll());
+
     return [
         'talonarios' => $talonarios,
         'empresas'   => $empresas,
         'medios'     => $medios,
+        'clientes'   => $clientes,
         'tipos'      => comboLista(COMBO_TALONARIO_TIPO),
         'estados'    => comboLista(COMBO_ESTADO),
         'condiciones'=> comboLista(COMBO_CONDICION),

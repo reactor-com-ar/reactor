@@ -16,7 +16,7 @@ Las columnas del listado deben respetar este orden:
 3. **Columna `Acciones`, al final:**
    - Una sola columna llamada **`Acciones`** que contiene un botón con **ícono hamburguesa** (`fa-bars`).
    - El click sobre el botón **y** el **click derecho** sobre cualquier punto de la fila abren el **mismo menú contextual**, posicionado en el punto de activación.
-   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Contratos, Comprobantes, Talonarios, Notificaciones, Difusión, Señales, Registros, Adopciones, Usuarios, Perfiles, Controladores, Roles y Permisos** (más la solapa Perfiles del modal de Consultar de Usuarios).
+   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Contratos, Comprobantes, Talonarios, Artículos, Planes, Notificaciones, Difusión, Señales, Registros, Adopciones, Usuarios, Perfiles, Controladores, Roles y Permisos** (más la solapa Perfiles del modal de Consultar de Usuarios).
    - El menú contextual debe incluir, como mínimo y en este orden:
      - **Consultar** — ícono de ojo (`fa-eye`).
      - **Editar** — ícono de lápiz (`fa-pencil`).
@@ -42,7 +42,7 @@ Las columnas del listado deben respetar este orden:
 
 ### Dónde se filtra: en el navegador o en el servidor
 
-- **EL TEXTO LIBRE SIEMPRE EN EL SERVIDOR.** El buscador rápido y el campo `Buscar` del modal de Filtros se resuelven en SQL, en los **18** listados, sin excepción — ver "Cómo busca el texto libre". Esto no depende del tamaño de la tabla: un filtro de texto en el navegador sólo ve lo que se trajo, así que el día que el endpoint gane un `LIMIT` contesta *"no hay resultados"* sobre filas que existen, que es la única respuesta que un buscador no puede dar.
+- **EL TEXTO LIBRE SIEMPRE EN EL SERVIDOR.** El buscador rápido y el campo `Buscar` del modal de Filtros se resuelven en SQL, en los **20** listados, sin excepción — ver "Cómo busca el texto libre". Esto no depende del tamaño de la tabla: un filtro de texto en el navegador sólo ve lo que se trajo, así que el día que el endpoint gane un `LIMIT` contesta *"no hay resultados"* sobre filas que existen, que es la única respuesta que un buscador no puede dar.
 - **El resto de los filtros, por defecto en el navegador.** El módulo se trae la tabla entera en el `render*()` y el modal de Filtros recorta ese array. Es lo que hacen casi todos: con 18 talonarios o 50 contratos traer todo es más barato que ida y vuelta por cada filtro.
 - **En el servidor cuando la tabla es grande y crece** (Comprobantes: 2.326 filas y una más por cada facturación). Ahí el modal de Filtros arma una query string, el endpoint filtra en SQL y `Aplicar` **vuelve a pedir la ventana** en vez de recortar un array.
 - **Cuando se filtra en el servidor, la búsqueda rápida de la toolbar sigue siendo client-side** y opera **sólo sobre la ventana traída**. Son dos cosas distintas y hay que decirlo en la pantalla, o el operador concluye que un comprobante no existe cuando lo que pasa es que quedó fuera del límite:
@@ -58,15 +58,25 @@ Las columnas del listado deben respetar este orden:
 Arriba de la tabla, y en este orden de izquierda a derecha:
 
 1. **Buscador rápido** (`.search-wrap > .search-input`), con su × para limpiarlo.
-2. **`Filtros`** — `btn btn-secondary btn-sm` con `fa-filter`. Abre el Modal de Filtros.
-3. **`Refrescar`** — **sin texto**: `btn btn-secondary btn-sm btn-icon-only` con
+2. **`Listar`** — **sólo en el módulo que tiene filtros rápidos** (hoy Contratos):
+   `btn btn-secondary btn-sm` con `fa-list` + `fa-caret-down .menubar-caret`.
+   Despliega los mismos atajos que las stat cards (`DESIGN.md` §12.1) y los
+   aplica **por la misma función**, nunca con una copia del criterio.
+3. **`Filtros`** — `btn btn-secondary btn-sm` con `fa-filter`. Abre el Modal de Filtros.
+4. **`Refrescar`** — **sin texto**: `btn btn-secondary btn-sm btn-icon-only` con
    `fa-rotate`, `title` y `aria-label` "Refrescar listado". Misma variante que
    `Filtros` para que se lean como un par y no como una acción suelta.
-4. A la derecha del todo, la acción primaria `+ Nuevo <entidad>` (que los
+5. A la derecha del todo, la acción primaria `+ Nuevo <entidad>` (que los
    módulos read-only omiten).
 
-Lo dibuja entero el helper compartido `abmToolbar()` y el botón de refrescar lo
-cablea `wireRefresh(idPrefix, route, state)`: ningún módulo arma el suyo.
+Lo dibuja entero el helper compartido `abmToolbar()`; el botón de refrescar lo
+cablea `wireRefresh(idPrefix, route, state)` y el desplegable `Listar`
+—que se pide con `listar: true`— lo cablea `wireListarMenu(idPrefix, itemsFn)`:
+ningún módulo arma el suyo.
+
+**`Listar` va entre el buscador y `Filtros`**, no después: es el atajo a lo que
+en `Filtros` habría que armar campo por campo, y `Filtros` + `Refrescar` tienen
+que quedar pegados para leerse como un par.
 
 **Refrescar vuelve a pedirle todo al backend y re-renderiza el módulo completo**
 —listado, catálogos y stat cards—, **conservando los filtros y la búsqueda
@@ -164,7 +174,7 @@ Reglas al aplicarlo:
 `busquedaWhere($consulta, $columnas)` vive en
 [lib/busqueda.php](lib/busqueda.php) y lo carga `api/bootstrap.php` para todos
 los endpoints. Devuelve `[$condiciones, $params]` para meter en el `WHERE`; con
-la consulta vacía las dos vienen vacías y no se agrega nada. Lo usan los 18
+la consulta vacía las dos vienen vacías y no se agrega nada. Lo usan los 20
 listados más `Razón social` de Comprobantes, el Visor de sucesos y el
 Programador de tareas.
 
@@ -255,11 +265,12 @@ hay una versión por listado.
 ### Alta / Edición
 - El modal de **crear un nuevo registro** y el de **editar** deben incluir **todos los campos** de la entidad.
 - Ambos modales comparten la misma estructura de campos; la única diferencia es si vienen precargados con los datos del registro (edición) o vacíos (alta).
-- **La excepción son las entidades con ciclo de vida, y hay que declararla.** Un comprobante no es una fila que se edita: es un documento que pasa por `Preparación → Pendiente → Cancelado`, con `Anulado` como salida. Ahí el ABM **no** expone todos los campos:
+- **La excepción son las entidades con ciclo de vida, y hay que declararla.** Un comprobante no es una fila que se edita: es un documento que pasa por `Preparación → Pendiente → Cancelado`, con `Anulado` como salida. Un dispositivo tampoco: es un equipo que se **fabrica**, y recién después se adopta, se instala y empieza a reportar. Ahí el ABM **no** expone todos los campos:
   - **el alta pide lo mínimo para existir** (en Comprobantes, sólo el talonario) y deja el registro en su primer estado; el resto se completa desde la ficha, que se abre sola al crear;
   - **la edición se habilita sólo en el estado que la admite**, y sobre los campos que ese estado admite;
   - **lo derivado y lo asignado no se editan nunca**: los totales salen de los hijos, el número de la serie del talonario, el CAE de AFIP;
   - **todo eso sí se muestra**. La restricción es de escritura, no de lectura, y la ficha dice **qué no se puede editar y por qué** — un campo ausente sin explicación se lee como un olvido.
+  - **Cuando el alta además crea filas en otra tabla, es un asistente y no un formulario.** Es el caso de Dispositivos (`DESIGN.md` §43): el alta pide modelo, producto y las tres credenciales, y de ahí salen el dispositivo **y un canal por cada canal que declara el modelo**. Tres pasos —qué equipo es, con qué credenciales nace, qué se va a escribir— y el último es la **previsualización que devuelve el backend**, con la tabla de canales real. Un alta que escribe en dos tablas no se confirma con un botón `Guardar` y una frase; vale la misma regla de `GET` previsualiza / `POST` ejecuta que las acciones de negocio, y por eso vive en `<entidad>_accion.php`. **El formulario de todos los campos no desaparece**: se queda con la edición y con el alta manual, que es lo que resuelve un dato roto o un equipo sin modelo en el catálogo.
 - **El estado se resuelve en el backend y viaja como booleanos.** `comprobanteSalida()` sirve `puede_editar`, `puede_autorizar`, `puede_anular`: la UI no dibuja lo que no corresponde y **cada endpoint vuelve a chequear la precondición contra la base**. Es el mismo criterio de los tres permisos del perfil en `CLAUDE.md` — esconder el botón no es el control de acceso. Duplicar la condición en el front (`estado === '1'` repetido en seis lugares) es cómo se desincronizan la pantalla y el endpoint.
 - **Las transiciones no son un `PUT`.** Autorizar, anular y duplicar viven en su propio endpoint (`comprobantes_accion.php?accion=…`) porque ninguna es "guardá los campos que te mando": cada una tiene su precondición y varias tocan más de una tabla. Mezclarlas con la edición haría que un payload con `estado` adentro se saltee la precondición.
 - **Un contador compartido se toma con `SELECT … FOR UPDATE`.** Autorizar lee `talonarios.serie`, le suma uno y guarda; sin el lock, dos autorizaciones simultáneas leen el mismo valor y emiten **dos comprobantes con el mismo número fiscal**. El sistema histórico no lo hace y por eso acá sí.

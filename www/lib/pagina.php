@@ -90,6 +90,30 @@ function wwwMiniatura(?string $miniatura = null): string
 }
 
 /**
+ * ¿Esta página se indexa?
+ *
+ * Por defecto SÍ: todo este docroot es el sitio público y existe para que lo
+ * encuentren. La excepción son las páginas cuya URL es la credencial —el visor
+ * y la hoja de un comprobante, que se abren con el `uuid` y nada más—: ahí el
+ * contenido es la razón social, el CUIT, el domicilio, el correo y el celular de
+ * un cliente, y un buscador que lo indexe lo publica para cualquiera sin el
+ * enlace. El legacy no ponía la meta y esas URLs eran indexables.
+ *
+ * `wwwRobots(false)` apaga el indexado de la página en curso; `cabeza.php` emite
+ * la meta sólo cuando está apagado, así que la página normal no cambia en nada.
+ */
+function wwwRobots(?bool $indexar = null): bool
+{
+    static $valor = true;
+
+    if ($indexar !== null) {
+        $valor = $indexar;
+    }
+
+    return $valor;
+}
+
+/**
  * Fecha de última modificación, en formato ISO 8601 UTC.
  *
  * Por defecto es la del archivo .php que se está sirviendo, igual que hacía el

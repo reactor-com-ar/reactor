@@ -437,8 +437,122 @@ El detalle del paquete está en [fontawesome/README.md](fontawesome/README.md).
 - **`/preguntas`**: es el Lorem Ipsum en inglés que venía con el theme ("Neque
   porro quisquam est qui dolorem ?"). El FAQ real es `/ayuda/preguntas`, que está
   en el menú y sale de la base.
-- **Todo el circuito transaccional** (`cuenta/`, `pagar/`, `pagos/`,
-  `comprobante/`, `comprobantes/`, `contrato/`, `usuarios/`, `inscripciones/`,
-  `agentes/`): decisión de alcance, el pedido fue el sitio público.
+- **Casi todo el circuito transaccional** (`cuenta/`, `pagos/`, `comprobantes/`,
+  `contrato/`, `usuarios/`, `inscripciones/`, `agentes/`): decisión de alcance,
+  el pedido fue el sitio público. **`comprobante/` y `pagar/` SÍ se portaron**
+  (30/09/2026) — ver la sección siguiente: son las dos URLs que el sistema
+  *nuevo* ya emite hacia acá.
 - **Las carpetas con sufijo `___`** (`info___/`, `productos/actuadores___/`),
   que en el legacy es la marca de "desactivado".
+
+## El comprobante y su pago (30/09/2026)
+
+Son cinco archivos más `lib/comprobantes.php`, y existen porque **el sistema
+nuevo ya emite dos URLs de este sitio que hasta ahora no respondían**:
+
+| URL | quién la emite | qué hace |
+|---|---|---|
+| `/comprobante/visor?uuid=` | el botón **Abrir** del correo (`accionCorreo()` en [cloud/api/comprobantes_accion.php](../cloud/api/comprobantes_accion.php)) y el *Compartir* del back office viejo | la ficha: datos, total, estado y los tres botones |
+| `/pagar/?uid=` | el ítem *Botón de pago* de Comercial → Comprobantes (`PAGO_BASE` en [cloud/api/comprobantes_lib.php](../cloud/api/comprobantes_lib.php)) | 302 al visor |
+| `/comprobante/hoja?uuid=` | el visor | la hoja A4 imprimible |
+| `/comprobante/abrir?uuid=` | el back office viejo y el panel legacy | 302 a la hoja |
+| `/comprobante/descargar?uuid=` | ídem | 302 a la hoja con el diálogo de impresión |
+| `/comprobante/pagar` | el botón **Pagar** del visor (POST) | 302 al cobrador de Databox |
+
+- **LAS SEIS SON URLs PUBLICADAS Y NO SE CAMBIAN.** La del visor está en las
+  casillas de correo de los clientes; `abrir` y `descargar` las enlazan
+  `reactor-admin/comprobantes/consultar.php` y
+  `reactor-panel/comprobantes/consultar.php`, que siguen vivas del otro lado de
+  la transición. Es el mismo criterio de `/instaladores` y `/ayuda/preguntas`.
+- **EL `uuid` ES LA ÚNICA CREDENCIAL**, y de ahí salen tres reglas. Se valida
+  por FORMA antes de tocar la base —16 alfanuméricos en mayúscula, que es lo que
+  tienen los 2.332 comprobantes— así que un identificador mal armado se contesta
+  404 sin consultar. El visor y la hoja van **`noindex`**: lo que muestran es la
+  razón social, el CUIT, el domicilio, el correo y el celular de un cliente, y el
+  legacy los tenía indexables. Y **no hace falta cupo por IP** como en el chat:
+  son 36^16 combinaciones y el uuid no es correlativo.
+- **`wwwRobots(false)` es nuevo y vive en [lib/pagina.php](lib/pagina.php)**;
+  `sistema/cabeza.php` emite la meta sólo cuando está apagado, así que ninguna
+  otra página cambia.
+- **LOS CUATRO CANDADOS DEL PAGO son el motivo de todo esto**
+  (`comprobantePagable()`): es una prefactura (`talonarios.tipo = 'F'`), está
+  **Pendiente** (`estado = '2'`), el total es mayor a cero y tiene número de
+  serie. `comprobante/pagar.php` del legacy **no chequeaba ninguno**: leía el
+  comprobante y redirigía al cobrador. Los tenía sólo la otra puerta,
+  `pagar/index.php`, así que **la misma factura era pagable dos veces según por
+  qué enlace se entrara**. De las 1.222 prefacturas de la base hay **969
+  canceladas**: sin el candado del estado, reabrir un correo viejo vuelve a
+  cobrar una factura ya paga. El total en cero tampoco es teórico — la última
+  prefactura emitida está en 0,00 y MercadoPago la rechaza del otro lado, después
+  de que la persona ya se fue del sitio.
+- **El chequeo del servidor es el control; esconder el botón no.** El visor no
+  dibuja *Pagar* y `pagar.php` corta igual, con el motivo en criollo
+  (`comprobanteMotivoNoPagable()`): "Esta factura ya está paga", "fue anulada",
+  "todavía no fue emitida". El legacy escondía el botón y no ponía nada en su
+  lugar.
+- **Ninguna página enlaza el pago con un `<a href>`**: el botón del visor es un
+  **POST**. Un GET que crea una preferencia de cobro del otro lado lo dispara
+  solo el prefetch del navegador o el preview del cliente de correo — el mismo
+  motivo por el que `Aceptar` de las invitaciones dejó de ser un enlace. **El GET
+  se sigue atendiendo** porque el enlace viejo está en correos ya enviados; lo
+  que se sacó del HTML es la URL, no la ruta.
+- **`fct` es el id del comprobante y NO SE TOCA**: es con lo que Databox concilia
+  el pago. **El concepto sí se arregló**: el legacy lo armaba con
+  `$xComprobante->punto`, una propiedad que `cComprobante` no declara —el punto
+  de venta está en `talonarios`— así que todas las preferencias salieron
+  diciendo "Factura 000-3349".
+- **La vuelta del cobrador se muestra.** `ret` apunta al visor y éste lee `res`
+  (`A` aprobado / `R` rechazado) para pintar el cartel arriba del comprobante. En
+  el legacy ese cartel estaba escrito en `pagar.php` pero era **código muerto**:
+  el `ret` apuntaba al visor, no ahí, así que nadie lo alcanzaba nunca. Un `res`
+  que no se reconozca se trata como **pendiente y no como aprobado**.
+  **Volver con `res=A` NO significa que el comprobante figure pago**: este sitio
+  no escribe nada en la base, quien lo marca cancelado es el circuito de pagos
+  del back office al conciliar. Por eso el visor muestra el estado real debajo.
+- **`/pagar/?uid=` manda al visor y no salta al cobrador** como hacía el legacy.
+  Quien lo abre desde cloud es un operador que necesita ver el comprobante y
+  copiar el enlace; quien lo recibe es un cliente, y pagar sin ver qué se paga no
+  es un atajo. Además un GET no crea una preferencia de cobro.
+
+### La hoja es HTML, no un PDF generado
+
+El legacy armaba el PDF con **dompdf**, y el camino era una vuelta entera: la
+página pedía por HTTP su propia `hoja?id=<id cifrado>` con `file_get_contents`,
+le pasaba el HTML a dompdf y devolvía el binario. **Acá no hay composer ni
+`vendor/` en ninguna de las cuatro apps**, y `php:8.2-apache` no trae `gd` —que
+dompdf necesita para el JPG del membrete—, así que traerlo era sumar una
+dependencia y un cambio de Dockerfile para reproducir un documento que el
+navegador ya sabe imprimir. *Descargar* abre el diálogo de impresión y "Guardar
+como PDF" da el mismo papel: **una sola hoja A4 con el membrete embebido**,
+verificado.
+
+- **Lo que se pierde es el NOMBRE del archivo**, que en el legacy fijaba
+  `cComprobante::archivo()`. Se compensa con el `<title>`, que es lo que los
+  navegadores proponen al guardar: sale igual, `PREFACTURA - 001-007290 -
+  2026-09-15`.
+- **`print-color-adjust: exact` NO es decorativo.** El membrete es una imagen de
+  fondo y los fondos no se imprimen salvo que se pida: sin esa regla la hoja sale
+  sin la banda gris, sin el logo y con el texto blanco del pie invisible sobre
+  blanco.
+- **LAS POSICIONES SON ABSOLUTAS Y ESTÁN ATADAS A `fondo.jpg`.** El membrete es
+  una A4 completa con recuadros dibujados, y cada bloque de texto tiene que caer
+  adentro del suyo. Las coordenadas son las del legacy con el margen de 43px que
+  dompdf le ponía al body ya sumado. **Mover un bloque sin mirar la imagen lo
+  saca del recuadro.**
+- **`talonarios`.`fondo` guarda sólo el nombre del archivo** (`fondo.jpg` en las
+  18 filas). En el legacy lo resolvía el chroot de dompdf contra
+  `/var/www/reactor-www/comprobante/`; acá se resuelve contra la misma carpeta de
+  este sitio y **sólo si el archivo existe**: una hoja sin membrete se lee igual,
+  una que pide una imagen que no está queda con el ícono roto.
+- **Con más de 20 renglones se aprieta el interlineado, no se recorta la lista**
+  (`.cuerpo.denso`). El alto entre el encabezado y los recuadros del pie es fijo
+  —610px— y no es una preferencia estética: el membrete dibuja los recuadros ahí.
+  El comprobante más largo de la base tiene **27 renglones** y con el
+  interlineado normal tapaba los dos recuadros y dejaba el "Total ARS" encima de
+  Observaciones. `overflow` queda en `visible` igual: recortar en silencio un
+  renglón es esconder lo que se facturó y nadie lo notaría hasta que el cliente
+  reclame.
+- **`imprimir.php` no se portó.** Aceptaba el id cifrado con la XOR del legacy y
+  **nada lo enlaza**: era el intermediario entre `abrir`/`descargar` y dompdf.
+  Portarlo obligaba a traer ese cifrado a este repo para no ganar ninguna ruta
+  nueva.

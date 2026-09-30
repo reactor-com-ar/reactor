@@ -274,6 +274,14 @@ body.has-banner .layout   { min-height: calc(100vh - 44px); }
 }
 .btn-icon-sm:hover { background: var(--bg); color: var(--text); }
 
+/* El atributo `hidden` tiene que ganarle al `display: inline-flex` de `.btn`.
+ * La regla del navegador para `[hidden]` es `display: none` con especificidad
+ * de selector de tipo, asi que cualquier clase la pisa y el boton se seguia
+ * dibujando (se vio con el `Atras` del asistente de alta de Dispositivos en su
+ * primer paso). Va aca, una sola vez, en vez de un `style.display` por
+ * llamador; `.combo-clear` ya traia su propia version de esta linea. */
+.btn[hidden], .btn-icon-sm[hidden] { display: none; }
+
 /* ---------- 7. Inputs, selects, textareas ---------- */
 input[type=text], input[type=number], input[type=url], input[type=tel],
 input[type=email], input[type=date], input[type=time], input[type=datetime-local],
@@ -360,6 +368,21 @@ textarea { resize: vertical; min-height: 60px; }
 .field-help:hover .field-help-tip,
 .field-help:focus-visible .field-help-tip { opacity: 1; visibility: visible; }
 
+/* EN LA ÚLTIMA COLUMNA SE ANCLA AL BORDE DERECHO, y no es un retoque estético:
+ * anclado a la izquierda el globito mide hasta 280px y se sale del modal, que
+ * al ser `overflow-y: auto` se vuelve contenedor de scroll en los dos ejes —
+ * o sea que aparece una BARRA HORIZONTAL en un formulario que entra holgado.
+ * Pasó con `Orden` en la tercera columna de `Editar plan` (scrollWidth 831
+ * contra 760 de ancho).
+ *
+ * La regla mira la posición en la grilla y no una clase que ponga quien llama:
+ * un campo se mueve de columna al reordenar el formulario y nadie se acordaría
+ * de cambiarle el modificador. `:last-child` es la celda de más a la derecha en
+ * `.form-row`, `.form-row-3` y `.form-row-4` por igual, así que la misma línea
+ * cubre las tres grillas. Con `right: 0` el globito crece hacia adentro, que es
+ * la misma intención del `left: 0` en las otras columnas. */
+.form-row > *:last-child .field-help-tip { left: auto; right: 0; }
+
 /* Campo de contraseña con botón de ojo para mostrar/ocultar. El wrapper es el
  * que posiciona el botón; el input reserva a la derecha el ancho que ocupa,
  * para que el texto nunca quede por debajo del ícono. */
@@ -393,6 +416,20 @@ textarea { resize: vertical; min-height: 60px; }
     padding-bottom: 8px; border-bottom: 1px solid var(--border);
 }
 .form-section-title i { font-size: .8rem; opacity: .8; }
+
+/* Botón dentro del título de una sección: el "Regenerar" de las credenciales
+ * del asistente de Dispositivos y el "Elegir de clientes" de la sección Cliente
+ * del editor de Comprobantes. `margin-left: auto` lo manda contra el borde
+ * derecho y las dos reglas tipográficas se cancelan porque
+ * `.form-section-title` va en versalitas y un botón no.
+ *
+ * Es UNA clase y no una por módulo: los dos casos son la misma cosa —la acción
+ * que rellena los campos de esa sección— y con dos nombres el segundo que la
+ * necesite copia el que encuentre primero. */
+.form-section-btn {
+    margin-left: auto;
+    text-transform: none; letter-spacing: normal;
+}
 
 /* ---------- 9. Toolbar ---------- */
 .toolbar       { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -873,6 +910,107 @@ tbody tr.row-clickable { cursor: pointer; }
  * pestañas o no. */
 .modal-tabpanel         { display: flex; flex-direction: column; gap: 16px; }
 .modal-tabpanel[hidden] { display: none; }
+
+/* ---------- 14-bis. Asistente por pasos dentro de un modal ----------
+ * Lo usa el alta de Dispositivos (§43). No es una variante de `.modal-tabs`:
+ * las pestañas se recorren en cualquier orden y el asistente NO — cada paso
+ * valida antes de dejar pasar al siguiente, y por eso los pasos se dibujan como
+ * un recorrido con estado (pendiente / actual / hecho) y no como botones.
+ *
+ * Por lo mismo el indicador NO es clickeable: saltar al paso 3 sin haber
+ * elegido modelo dejaría al asistente mostrando una confirmación de nada. Se
+ * avanza con los botones de la barra, que son los que validan.
+ *
+ * El panel repite el `gap: 16px` del `.modal-body` por el mismo motivo que
+ * `.modal-tabpanel`: reemplaza al body como contenedor directo del contenido.
+ */
+.wizard-steps {
+    display: flex; align-items: stretch; gap: 8px;
+    list-style: none; margin: 0; padding: 0;
+}
+.wizard-step {
+    flex: 1 1 0; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--surface) 40%, var(--bg));
+    border: 1px solid transparent;
+    color: var(--muted);
+    font-size: .8rem; font-weight: 600;
+    transition: color .15s, border-color .15s, background .15s;
+}
+/* El número es un disco de tamaño fijo: si creciera con el texto, los tres
+ * pasos dejarían de alinearse entre sí. El paso ya recorrido cambia el número
+ * por un tilde — el número ahí ya no informa nada y el tilde dice que ese paso
+ * quedó validado, que es la única diferencia entre "hecho" y "pendiente". */
+.wizard-step-num {
+    flex: 0 0 auto;
+    width: 24px; height: 24px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg); color: inherit;
+    font-size: .72rem; font-weight: 700;
+}
+.wizard-step-num i                      { display: none; }
+.wizard-step.is-done .wizard-step-n     { display: none; }
+.wizard-step.is-done .wizard-step-num i { display: inline; }
+
+.wizard-step-title  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wizard-step.is-active {
+    color: var(--text);
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+}
+.wizard-step.is-active .wizard-step-num { background: var(--primary); color: #fff; }
+.wizard-step.is-done                    { color: var(--text); }
+.wizard-step.is-done .wizard-step-num   { background: var(--success); color: #0b1f12; }
+
+.wizard-panel         { display: flex; flex-direction: column; gap: 16px; }
+.wizard-panel[hidden] { display: none; }
+
+/* Vista previa de los canales que declara el modelo elegido. Va en el paso 1,
+ * pegada al select: elegir un modelo tiene que decir en el acto cuánto hardware
+ * se va a crear, no esperar a la confirmación. */
+.wizard-canales {
+    background: color-mix(in srgb, var(--surface) 90%, #000);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+}
+.wizard-canales-head {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: .78rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted);
+    margin-bottom: 8px;
+}
+.wizard-canales-list    { list-style: none; margin: 0; padding: 0;
+                          display: flex; flex-direction: column; gap: 6px; }
+.wizard-canales-list li { display: flex; align-items: center; gap: 8px;
+                          font-size: .82rem; min-width: 0; }
+.wizard-canal-num {
+    flex: 0 0 auto;
+    width: 20px; height: 20px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg); color: var(--muted);
+    font-size: .7rem; font-weight: 700;
+}
+.wizard-canal-mod { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Botón con forma de enlace dentro de una `.form-nota`: la salida al formulario
+ * completo desde el asistente. No es `.btn` a propósito — es una alternativa al
+ * camino normal, no una acción de la pantalla, y con forma de botón competiría
+ * con `Siguiente`. */
+.nota-link {
+    background: none; border: none; padding: 0;
+    font: inherit; color: var(--primary); font-weight: 600;
+    cursor: pointer; text-decoration: underline;
+}
+.nota-link:hover { color: var(--text); }
+
+/* En pantallas angostas el recorrido se apila: tres cajas de 100px con el
+ * rótulo cortado no dicen en qué paso está. */
+@media (max-width: 640px) {
+    .wizard-steps { flex-direction: column; }
+}
 
 /* Editor JSON: textarea monoespaciado, altura amplia, no envuelve lineas. */
 .json-editor {
@@ -1394,6 +1532,41 @@ th.action-col, td.action-col {
     border-top: 1px solid var(--border);
 }
 .ficha-total-linea.final .val { color: var(--primary); }
+
+/* ---------- 25-quinquies. Grilla de líneas del editor ----------
+ * La tabla editable de renglones del editor de Comprobantes (DESIGN.md
+ * §25-quinquies). Es la tabla estándar de §10 con los controles adentro de las
+ * celdas, así que lo único que agrega es lo que cambia por tener inputs: menos
+ * padding vertical —un `<td>` de 10px más el alto de un input deja renglones de
+ * 60px y ocho líneas no entran en pantalla— y campos que ocupan la celda entera
+ * en vez de su ancho por defecto. */
+.lineas-tabla td       { padding: 6px 8px; vertical-align: top; }
+.lineas-tabla th       { padding: 8px 8px; }
+.lineas-tabla input,
+.lineas-tabla select   { width: 100%; min-width: 0; }
+
+/* El nombre del artículo, bajo el detalle. Es la misma glosa que muestra la
+ * grilla de la ficha; acá va DEBAJO y no al lado porque al lado competiría con
+ * el texto que se está editando. */
+.linea-glosa {
+    margin-top: 4px; font-size: .76rem; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* El aviso de que el monto no es cantidad × unitario. Va en `--warn` y no en
+ * `--danger` porque NO es un error: un descuento en negativo o un renglón de
+ * encabezado en cero son divergencias legítimas y se guardan así. Es un botón
+ * —no un `<div>`— porque se puede clickear para igualarlo, y tiene que llegar
+ * por teclado como cualquier otra acción. */
+.linea-sugerencia {
+    display: block; margin-top: 4px; width: 100%;
+    background: none; border: none; padding: 0;
+    font: inherit; font-size: .74rem; text-align: right;
+    color: var(--warn); cursor: pointer;
+    font-variant-numeric: tabular-nums;
+}
+.linea-sugerencia:hover { text-decoration: underline; }
+.linea-sugerencia[hidden] { display: none; }
 
 @media (max-width: 860px) {
     .ficha-panel-grid { grid-template-columns: 1fr; }
@@ -1930,6 +2103,26 @@ body.login-page { background: var(--bg); }
  * con él. Lo que distingue un modo del otro es la forma del ícono, no el color
  * — pintar uno de los dos lo convierte en una alerta que nadie pidió. */
 .plan-modo-icon        { color: var(--muted); font-size: .75rem; margin-left: 6px; }
+
+/* Marca de "este precio salió con otra cotización", pegada al importe en pesos
+ * de Artículos. Misma métrica que `.plan-modo-icon` —es un atributo del número
+ * de al lado, no una columna— pero en `--warn` y no en `--muted`, y ahí está la
+ * diferencia: aquélla DESCRIBE un atributo (el modo del plan, que siempre vale
+ * algo) y ésta AVISA que el número que se está leyendo no es el que da la
+ * cuenta de hoy. Por eso además sólo se dibuja cuando corresponde: un ícono
+ * siempre presente deja de avisar nada. */
+.precio-viejo-icon     { color: var(--warn); font-size: .75rem; margin-left: 6px; }
+
+/* Los `metadatos` de un artículo son los bloques que lee la tienda pública
+ * (`<oferta>`, `<resumen>`, `<especificaciones>`), y su formato es parte del
+ * dato: los saltos de línea separan secciones y `||` separa columnas. Por eso
+ * se muestran y se editan monoespaciados y con los saltos intactos —`pre-wrap`
+ * y no un párrafo reflowado—, igual que el cuerpo de una difusión. */
+.art-metadatos         { white-space: pre-wrap; word-break: break-word;
+                         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                         font-size: .8rem; line-height: 1.45; margin: 0; }
+.art-metadatos-input   { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                         font-size: .8rem; line-height: 1.45; }
 
 /* ---------- 36. Comunicación: Notificaciones ----------
  * El listado reusa la tabla estándar; lo único propio es el glifo que la fila

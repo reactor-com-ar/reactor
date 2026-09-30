@@ -53,6 +53,12 @@ $wwwVersion = wwwVersion();
     <meta name="description" content="<?= e(wwwDescripcion()) ?>">
     <meta name="last-modified" content="<?= e(wwwModificada()) ?>">
     <link rel="canonical" href="<?= e(wwwCanonica()) ?>">
+    <?php if (!wwwRobots()): ?>
+        <!-- La página lo pidió con `wwwRobots(false)`: su URL es la credencial
+             (el visor y la hoja de un comprobante) y el contenido son los datos
+             fiscales de un cliente. Ver lib/pagina.php. -->
+        <meta name="robots" content="noindex, nofollow">
+    <?php endif; ?>
 
     <!-- vista previa al compartir -->
     <meta property="og:title" content="<?= e(wwwTitulo()) ?>">

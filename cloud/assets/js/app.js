@@ -43,6 +43,8 @@
         contratos:    { title: 'Contratos',    render: renderContratos,    group: 'comercial' },
         comprobantes: { title: 'Comprobantes', render: renderComprobantes, group: 'comercial' },
         talonarios:   { title: 'Talonarios',   render: renderTalonarios,   group: 'comercial' },
+        articulos:    { title: 'Artículos',    render: renderArticulos,    group: 'comercial' },
+        planes:       { title: 'Planes',       render: renderPlanes,       group: 'comercial' },
         notificaciones: { title: 'Notificaciones', render: renderNotificaciones, group: 'comunicacion' },
         difusion:       { title: 'Difusión',       render: renderDifusion,       group: 'comunicacion' },
         conversaciones: { title: 'Conversaciones', render: renderConversaciones, group: 'comunicacion' },
@@ -136,6 +138,29 @@
         const pedido = pendingContratoFilter;
         pendingContratoFilter = null;
         return pedido && pedido.route === route ? String(pedido.id) : '';
+    }
+
+    // Par GENÉRICO del mismo mecanismo, para las entidades que no tienen el
+    // suyo. Lo que cambia entre un pedido y otro no es la entidad sino en qué
+    // filtro del módulo destino se vuelca el valor, así que el `campo` viaja
+    // con él —igual que en el de usuario—: `plan` en Contratos, `articulo` en
+    // Planes, `codigo` en Artículos (ahí la fila ES la entidad pedida y no una
+    // FK, como ya pasa con Contratos → "Ver dominio").
+    //
+    // Los tres pares viejos siguen existiendo porque están cableados en once
+    // módulos; los nuevos usan éste y no estrenan uno por entidad.
+    let pendingCampoFilter = null;   // { route: 'contratos', campo: 'plan', valor: '118' }
+
+    function pedirFiltroCampo(route, campo, valor) {
+        pendingCampoFilter = { route, campo, valor: String(valor) };
+        if (currentRoute() === route) navigate();
+        else window.location.hash = '#/' + route;
+    }
+
+    function tomarFiltroCampo(route) {
+        const pedido = pendingCampoFilter;
+        pendingCampoFilter = null;
+        return pedido && pedido.route === route ? pedido : null;
     }
 
     // Mismo par, para el comprobante. Lo usa Contratos → "Facturar": el
@@ -427,6 +452,18 @@
         });
     }
 
+    // Cablea el desplegable `Listar` de la toolbar (`abmToolbar({ listar: true })`).
+    // `itemsFn` arma los items en el momento del click, mismo formato que
+    // openRowMenu: { act, label, icon, divider?, onSelect }.
+    function wireListarMenu(idPrefix, itemsFn) {
+        const btn = document.getElementById(`${idPrefix}-listar`);
+        if (!btn) return;
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            openRowMenu(itemsFn(), e.currentTarget);
+        });
+    }
+
     document.addEventListener('click', e => {
         if (!e.target.closest('.row-menu')) closeRowMenu();
     });
@@ -461,7 +498,8 @@
     // campos sobre los que opera.
     // `extraRight` (opcional) inyecta botones secundarios antes de "+ Nuevo"
     // en la zona derecha (ej.: "Monitor en tiempo real" en Señales).
-    function abmToolbar({ idPrefix, quickPlaceholder, newLabel, extraRight }) {
+    // `listar` (opcional) dibuja el desplegable de filtros rápidos (§9, §12.1).
+    function abmToolbar({ idPrefix, quickPlaceholder, newLabel, extraRight, listar }) {
         // newLabel = null|false ⇒ módulo read-only (señales, alertas): se omite
         // el botón `+ Nuevo` (ver DESIGN.md §9). El resto del toolbar (búsqueda
         // rápida + Filtros + Refrescar) se mantiene igual: un listado read-only
@@ -472,6 +510,20 @@
                </button>`
             : '';
         const extra = extraRight || '';
+        // `listar` = true ⇒ el desplegable de filtros rápidos, con los MISMOS
+        // atajos que las stat cards del módulo (§12.1). Va ANTES de `Filtros`
+        // por dos motivos: resuelve de un click lo que ahí habría que armar
+        // campo por campo —que es para lo que existe—, y `Filtros` + `Refrescar`
+        // tienen que quedar pegados para leerse como un par (§9).
+        // Dibuja sólo el trigger: los items los abre openRowMenu() al click,
+        // igual que `menubarMenu()`.
+        const listarBtn = listar
+            ? `<button type="button" class="btn btn-secondary btn-sm" id="${idPrefix}-listar"
+                       title="Filtros rápidos" aria-haspopup="menu">
+                   <i class="fa-solid fa-list"></i> Listar
+                   <i class="fa-solid fa-caret-down menubar-caret"></i>
+               </button>`
+            : '';
         return `
             <div class="toolbar">
                 <div class="toolbar-left">
@@ -481,6 +533,7 @@
                         <button type="button" class="search-clear"
                                 data-act="quick-clear" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">×</button>
                     </div>
+                    ${listarBtn}
                     <button type="button" class="btn btn-secondary btn-sm" id="${idPrefix}-filters">
                         <i class="fa-solid fa-filter"></i> Filtros
                     </button>
@@ -581,7 +634,7 @@
     // Abre el Modal de Filtros (ABM.md §3), con el formato estándar de modal:
     // título en primario + barra de acciones `Cancelar / Limpiar / Aplicar`,
     // sin footer (DESIGN.md §21-bis). Es un helper compartido: lo usan los
-    // nueve módulos, así que todos los modales de Filtros del sistema salen
+    // veinte módulos, así que todos los modales de Filtros del sistema salen
     // iguales de acá y no hay una versión por módulo que se pueda desalinear.
     // Recibe:
     //   - title:      siempre "Filtros" (lo dejamos parametrizable por las dudas).
@@ -1680,7 +1733,9 @@
         });
 
         btnFilt.addEventListener('click', () => openDevicesFiltersModal(state, allDominios, recargar));
-        btnNew.addEventListener('click',  () => openDeviceModal(null));
+        // El alta va por el asistente de fabricación, no por el formulario de
+        // 35 columnas: ver la cabecera de `openDeviceWizard()`.
+        btnNew.addEventListener('click',  () => openDeviceWizard());
         wireRefresh('dev', 'dispositivos', state);
 
         // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
@@ -1920,9 +1975,525 @@
         );
     }
 
+    /* ---------- Alta de dispositivo: asistente de fabricación ----------
+     *
+     * El `+ Nuevo dispositivo` del listado abre ESTE asistente y no el
+     * formulario de 35 columnas. Dar de alta un equipo no es llenar la fila de
+     * `dispositivos`: es la excepción que `ABM.md` declara para las entidades
+     * con ciclo de vida — el alta pide lo mínimo para que el equipo exista y el
+     * resto se completa desde la ficha, que se abre sola al crear.
+     *
+     * Es el porte de `reactor-admin/dispositivos/nuevo.php`, el alta del back
+     * office viejo: se eligen modelo y producto, las credenciales se generan,
+     * el identificador y el nombre se derivan, y el MODELO decide cuántos
+     * canales se crean y con qué módulo. Todo eso lo resuelve
+     * `api/dispositivos_accion.php?accion=fabricar` — `GET` previsualiza y
+     * `POST` ejecuta, las dos por la misma función del backend.
+     *
+     * TRES PASOS y no un formulario largo porque cada uno contesta una pregunta
+     * distinta: qué equipo es, con qué credenciales nace, y qué se va a
+     * escribir. El tercero muestra los canales REALES que devuelve el backend:
+     * un alta que además crea filas en otra tabla no se confirma a ciegas.
+     *
+     * LA BARRA DE ACCIONES LLEVA `Atrás` Y `Siguiente`, que es lo único que este
+     * modal agrega a §21-bis. Se respeta el resto de la regla — la salida
+     * primero y en `btn-ghost`, todo lo demás en `btn-primary`, sin footer — y
+     * el avance va a la derecha con `.modal-menubar-end`: en un asistente el
+     * sentido de la lectura ES la navegación, y `Siguiente` pegado a `Cancelar`
+     * los pone a un píxel de distancia.
+     */
+
+    const WIZ_PASOS = ['Equipo', 'Credenciales', 'Confirmación'];
+
+    /* Las credenciales las genera el SERVIDOR (§ cabecera del endpoint): el
+       alfabeto, el largo y —sobre todo— que la serie no esté ya tomada como
+       identificador son reglas de la base. Acá sólo se piden. */
+    function pedirCredenciales() {
+        return api('dispositivos_accion?accion=fabricar&credenciales=1');
+    }
+
+    async function openDeviceWizard() {
+        let cat, cred;
+        try {
+            [cat, cred] = await Promise.all([
+                api('dispositivos_accion?accion=fabricar&catalogo=1'),
+                pedirCredenciales(),
+            ]);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+            return;
+        }
+
+        // Lo elegido hasta ahora. `dominio` arranca en el de fábrica (Reactor),
+        // que es donde el back office viejo deja todo lo que se fabrica.
+        const w = {
+            paso:      0,
+            modelo:    '',
+            producto:  '',
+            dominio:   String(cat.fabrica.dominio.id || ''),
+            serial:    cred.serial,
+            identidad: cred.identidad,
+            llave:     cred.llave,
+            previo:    null,
+        };
+
+        const modeloDe = id => cat.modelos.find(m => String(m.id) === String(id)) || null;
+
+        const opciones = (items, actual, vacio) =>
+            (vacio === null ? '' : `<option value="">${escape(vacio)}</option>`) +
+            items.map(o => `<option value="${o.id}"${String(o.id) === String(actual) ? ' selected' : ''}>${escape(o.nombre)}</option>`).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Nuevo dispositivo
+                        <span class="modal-subtitle" id="wiz-sub"></span>
+                    </div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del asistente">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="atras" hidden>
+                        <i class="fa-solid fa-chevron-left"></i> Atrás
+                    </button>
+                    <button class="btn btn-sm btn-primary modal-menubar-end" data-act="siguiente">
+                        <span data-rol="rotulo">Siguiente</span>
+                        <i class="fa-solid fa-chevron-right" data-rol="icono"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <ol class="wizard-steps" id="wiz-steps">
+                        ${WIZ_PASOS.map((titulo, i) => `
+                            <li class="wizard-step" data-paso="${i}">
+                                <span class="wizard-step-num">
+                                    <span class="wizard-step-n">${i + 1}</span>
+                                    <i class="fa-solid fa-check"></i>
+                                </span>
+                                <span class="wizard-step-title">${escape(titulo)}</span>
+                            </li>`).join('')}
+                    </ol>
+
+                    <section class="wizard-panel" data-panel="0">
+                        <div class="form-section">
+                            <div class="form-section-title"><i class="fa-solid fa-microchip"></i>Qué equipo es</div>
+                            <div class="form-group">
+                                <label for="wiz-modelo">
+                                    Modelo *
+                                    ${ayudaDeCampo('El modelo define cuántos canales se crean y con qué módulo. Es lo único que decide el hardware; el producto es cómo se vende.')}
+                                </label>
+                                <select id="wiz-modelo">${opciones(cat.modelos, '', 'Elegí un modelo…')}</select>
+                                <div class="field-error" id="wiz-modelo-err" style="display:none"></div>
+                            </div>
+                            <div id="wiz-canales-previa"></div>
+                            <div class="form-group">
+                                <label for="wiz-producto">Producto *</label>
+                                <select id="wiz-producto">${opciones(cat.productos, '', 'Elegí un producto…')}</select>
+                                <div class="form-nota">Sólo los productos en venta.</div>
+                                <div class="field-error" id="wiz-producto-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-section">
+                            <div class="form-section-title"><i class="fa-solid fa-sitemap"></i>Dónde nace</div>
+                            <div class="form-group">
+                                <label for="wiz-dominio">Dominio</label>
+                                <select id="wiz-dominio">${opciones(cat.dominios, w.dominio, null)}</select>
+                                <div class="form-nota">
+                                    Un equipo recién fabricado queda en
+                                    <strong>${escape(cat.fabrica.dominio.nombre)}</strong>, el dominio de stock.
+                                    Se reasigna al adoptarlo.
+                                </div>
+                            </div>
+                            <div class="form-nota">
+                                El agente (<strong>${escape(cat.fabrica.agente.nombre)}</strong>) y el transceptor
+                                (<strong>${escape(cat.fabrica.transceptor.nombre)}</strong>) son fijos en el alta.
+                                Se cambian después desde la ficha.
+                            </div>
+                            <div class="form-nota">
+                                ¿El equipo no responde a ningún modelo del catálogo?
+                                <button type="button" class="nota-link" data-act="manual">Cargalo con el formulario completo</button>.
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="wizard-panel" data-panel="1" hidden>
+                        <div class="form-section">
+                            <div class="form-section-title">
+                                <i class="fa-solid fa-key"></i>Credenciales del equipo
+                                <button type="button" class="btn btn-sm btn-secondary form-section-btn" data-act="regenerar">
+                                    <i class="fa-solid fa-rotate"></i> Regenerar
+                                </button>
+                            </div>
+                            <div class="form-nota">
+                                Las genera el servidor, ${cat.fabrica.credencialLargo} caracteres cada una.
+                                Se pueden escribir a mano si el equipo ya viene grabado.
+                            </div>
+                            <div class="form-group">
+                                <label for="wiz-serial">Serie *</label>
+                                <input type="text" id="wiz-serial" maxlength="16" spellcheck="false" value="${escape(w.serial)}">
+                                <div class="field-error" id="wiz-serial-err" style="display:none"></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="wiz-identidad">Identidad *</label>
+                                    <input type="text" id="wiz-identidad" maxlength="50" spellcheck="false" value="${escape(w.identidad)}">
+                                    <div class="field-error" id="wiz-identidad-err" style="display:none"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="wiz-llave">Llave *</label>
+                                    <input type="text" id="wiz-llave" maxlength="50" spellcheck="false" value="${escape(w.llave)}">
+                                    <div class="field-error" id="wiz-llave-err" style="display:none"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-section">
+                            <div class="form-section-title"><i class="fa-solid fa-fingerprint"></i>Lo que se deriva</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="wiz-uuid">Identificador (UUID)</label>
+                                    <input type="text" id="wiz-uuid" readonly>
+                                    <div class="form-nota">Es la serie. Con él se identifica el equipo contra el transceptor.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="wiz-nombre">Nombre</label>
+                                    <input type="text" id="wiz-nombre" readonly>
+                                    <div class="form-nota">Modelo + serie. Se puede cambiar después desde la ficha.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="wizard-panel" data-panel="2" hidden>
+                        <div id="wiz-confirmar"></div>
+                    </section>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const $      = sel => backdrop.querySelector(sel);
+        const btnNext = $('[data-act="siguiente"]');
+        const btnBack = $('[data-act="atras"]');
+        const sub     = $('#wiz-sub');
+
+        function showError(id, msg) {
+            const err = $('#' + id + '-err');
+            const inp = $('#' + id);
+            if (err) { err.textContent = msg; err.style.display = 'block'; }
+            inp.classList.add('input-invalid');
+            return inp;
+        }
+        function clearErrors() {
+            backdrop.querySelectorAll('.field-error').forEach(e => { e.style.display = 'none'; });
+            backdrop.querySelectorAll('.input-invalid').forEach(e => e.classList.remove('input-invalid'));
+        }
+
+        /* ---- paso 1 ---- */
+        const selModelo   = $('#wiz-modelo');
+        const selProducto = $('#wiz-producto');
+        const selDominio  = $('#wiz-dominio');
+        const previaCan   = $('#wiz-canales-previa');
+
+        // Los canales del modelo YA VIENEN resueltos en el catálogo — mismo
+        // parseo que después usa el POST —, así que elegir un modelo muestra en
+        // el acto lo que se va a crear sin volver al servidor.
+        function pintarCanalesDelModelo() {
+            const m = modeloDe(w.modelo);
+            if (!m) { previaCan.innerHTML = ''; return; }
+
+            if (!m.canales.length) {
+                previaCan.innerHTML = `<div class="form-nota">Este modelo no declara canales: el dispositivo se crea sin ninguno.</div>`;
+                return;
+            }
+
+            previaCan.innerHTML = `
+                <div class="wizard-canales">
+                    <div class="wizard-canales-head">
+                        <i class="fa-solid fa-diagram-project"></i>
+                        ${m.canales.length} canal${m.canales.length === 1 ? '' : 'es'} a crear
+                        ${m.sinModulo ? `<span class="badge badge-warn">${m.sinModulo} sin módulo</span>` : ''}
+                    </div>
+                    <ul class="wizard-canales-list">
+                        ${m.canales.map(c => `
+                            <li>
+                                <span class="wizard-canal-num">${c.canal}</span>
+                                <span class="wizard-canal-mod">${c.modulo
+                                    ? escape(c.modulo_nombre)
+                                    : '<span class="muted">Sin módulo</span>'}</span>
+                                ${c.componente ? `<code>${escape(c.componente)}</code>` : ''}
+                            </li>`).join('')}
+                    </ul>
+                </div>`;
+        }
+
+        selModelo.addEventListener('change', () => {
+            w.modelo = selModelo.value;
+            pintarCanalesDelModelo();
+            refrescarDerivados();
+        });
+        selProducto.addEventListener('change', () => { w.producto = selProducto.value; });
+        selDominio.addEventListener('change',  () => { w.dominio  = selDominio.value;  });
+
+        // Salida al formulario de las 35 columnas. Un equipo que no responde a
+        // ningún modelo del catálogo no tiene canales que derivar, así que el
+        // asistente no lo sabe crear: sin esta puerta, el alta manual —que el
+        // back office viejo sí permitía— quedaría sin entrada en la pantalla.
+        $('[data-act="manual"]').addEventListener('click', () => {
+            close();
+            openDeviceModal(null);
+        });
+
+        /* ---- paso 2 ---- */
+        const inpSerial    = $('#wiz-serial');
+        const inpIdentidad = $('#wiz-identidad');
+        const inpLlave     = $('#wiz-llave');
+        const inpUuid      = $('#wiz-uuid');
+        const inpNombre    = $('#wiz-nombre');
+
+        // El identificador y el nombre son campos derivados: van readonly, se
+        // recomponen en vivo y NO viajan en el payload — los calcula el backend
+        // (`ABM.md`, "Alta / Edición"). Acá sólo se muestran para que el
+        // operador vea con qué nombre va a nacer el equipo.
+        function refrescarDerivados() {
+            const m = modeloDe(w.modelo);
+            inpUuid.value   = w.serial;
+            inpNombre.value = !w.serial ? '' : (m ? `${m.nombre} | ${w.serial}` : w.serial);
+        }
+
+        [[inpSerial, 'serial'], [inpIdentidad, 'identidad'], [inpLlave, 'llave']].forEach(([inp, campo]) => {
+            inp.addEventListener('input', () => {
+                w[campo] = inp.value.trim();
+                if (campo === 'serial') refrescarDerivados();
+            });
+        });
+
+        const btnRegen = $('[data-act="regenerar"]');
+        btnRegen.addEventListener('click', async () => {
+            btnRegen.disabled = true;
+            try {
+                const n = await pedirCredenciales();
+                w.serial = n.serial; w.identidad = n.identidad; w.llave = n.llave;
+                inpSerial.value = n.serial; inpIdentidad.value = n.identidad; inpLlave.value = n.llave;
+                clearErrors();
+                refrescarDerivados();
+            } catch (e) {
+                toast(e.message, { error: true, duration: 6000 });
+            } finally {
+                btnRegen.disabled = false;
+            }
+        });
+
+        /* ---- validación por paso ---- */
+        const CREDENCIAL_OK = /^[A-Za-z0-9._-]+$/;
+
+        function validarPaso(n) {
+            clearErrors();
+            let primero = null;
+            // Se marcan TODOS los campos que fallaron y el foco va al primero.
+            // `primero = primero || showError(...)` cortocircuita y deja sin
+            // marcar todo lo que venga después del primer error.
+            const fallar = (id, msg) => {
+                const inp = showError(id, msg);
+                primero = primero || inp;
+            };
+
+            if (n === 0) {
+                if (!w.modelo)   fallar('wiz-modelo',   'Elegí un modelo');
+                if (!w.producto) fallar('wiz-producto', 'Elegí un producto');
+            }
+            if (n === 1) {
+                [['wiz-serial', w.serial, 'La serie'],
+                 ['wiz-identidad', w.identidad, 'La identidad'],
+                 ['wiz-llave', w.llave, 'La llave']].forEach(([id, valor, rotulo]) => {
+                    if (!valor)                      fallar(id, `${rotulo} es obligatoria`);
+                    else if (!CREDENCIAL_OK.test(valor)) fallar(id, `${rotulo} sólo admite letras, números y . _ -`);
+                });
+                // La serie es además el identificador, y esa columna es varchar(16).
+                if (w.serial && w.serial.length > 16) fallar('wiz-serial', 'La serie no puede superar 16 caracteres: también es el identificador');
+            }
+
+            if (primero) { primero.focus(); return false; }
+            return true;
+        }
+
+        /* ---- paso 3 ---- */
+        function recuadro(cls, icono, titulo, items) {
+            if (!items.length) return '';
+            return `
+                <div class="del-blocker ${cls}">
+                    <i class="fa-solid ${icono}"></i>
+                    <div>
+                        <strong>${escape(titulo)}</strong>
+                        <ul class="del-list">${items.map(t =>
+                            `<li class="del-item"><span class="del-item-label">${escape(t)}</span></li>`).join('')}</ul>
+                    </div>
+                </div>`;
+        }
+
+        function pintarConfirmacion(previo) {
+            const d        = previo.dispositivo;
+            const canales  = previo.canales || [];
+            const bloqueos = previo.bloqueos || [];
+            const avisos   = previo.avisos || [];
+
+            const filas = !canales.length
+                ? `<tr><td colspan="4" class="muted" style="text-align:center">El modelo no declara canales.</td></tr>`
+                : canales.map(c => `
+                    <tr>
+                        <td class="td-num">${c.canal}</td>
+                        <td>${c.modulo ? escape(c.modulo_nombre) : '<span class="muted">Sin módulo</span>'}</td>
+                        <td>${c.componente ? `<code>${escape(c.componente)}</code>` : '<span class="muted">—</span>'}</td>
+                        <td class="td-nombre">${escape(c.nombre)}</td>
+                    </tr>`).join('');
+
+            $('#wiz-confirmar').innerHTML = `
+                <div class="del-lead">
+                    Se va a crear el dispositivo <strong>${escape(d.nombre)}</strong>
+                    (<code>${escape(d.uuid)}</code>) en el dominio
+                    <strong>${escape(previo.dominio ? previo.dominio.nombre : '—')}</strong>,
+                    junto con <strong>${canales.length}</strong> canal${canales.length === 1 ? '' : 'es'}.
+                </div>
+                ${recuadro('', 'fa-ban', 'No se puede crear.', bloqueos)}
+                ${recuadro('del-aviso', 'fa-triangle-exclamation', 'Revisá antes de crear.', avisos)}
+                ${viewGrid([
+                    viewCardHalf('Modelo',        previo.modelo   ? escape(previo.modelo.nombre)   : DEV_DASH),
+                    viewCardHalf('Producto',      previo.producto ? escape(previo.producto.nombre) : DEV_DASH),
+                    viewCardHalf('Dominio',       previo.dominio
+                        ? `<span class="badge badge-info">${escape(previo.dominio.nombre)}</span>` : DEV_DASH),
+                    viewCardHalf('Agente',        escape(previo.fabrica.agente.nombre || '—')),
+                    viewCardHalf('Transceptor',   escape(previo.fabrica.transceptor.nombre || '—')),
+                    viewCardHalf('Habilitado',    '<span class="badge badge-success">Habilitado</span>'),
+                    viewCardFull('Identificador', `<code>${escape(d.uuid)}</code>`),
+                    viewCardHalf('Serie',         `<code>${escape(d.serial)}</code>`),
+                    viewCardHalf('Identidad',     `<code>${escape(d.identidad)}</code>`),
+                    viewCardFull('Llave',         `<code>${escape(d.llave)}</code>`),
+                ])}
+                <div class="ficha-bloque">
+                    <div class="ficha-bloque-head">
+                        <span><i class="fa-solid fa-diagram-project"></i> Canales</span>
+                    </div>
+                    <table class="ficha-tabla">
+                        <thead>
+                            <tr>
+                                <th class="td-num">Canal</th>
+                                <th>Módulo</th>
+                                <th>Componente</th>
+                                <th>Nombre</th>
+                            </tr>
+                        </thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>`;
+
+            // Un bloqueo esconde el botón, igual que en el borrado con desglose:
+            // el endpoint lo vuelve a chequear, pero ofrecer lo que no se puede
+            // hacer es peor que no ofrecerlo.
+            btnNext.hidden = bloqueos.length > 0;
+        }
+
+        /* ---- navegación ---- */
+        function pintarPaso() {
+            backdrop.querySelectorAll('.wizard-panel').forEach(p => {
+                p.hidden = +p.dataset.panel !== w.paso;
+            });
+            backdrop.querySelectorAll('.wizard-step').forEach(s => {
+                const i = +s.dataset.paso;
+                s.classList.toggle('is-active', i === w.paso);
+                s.classList.toggle('is-done',   i <  w.paso);
+            });
+
+            sub.textContent = `Paso ${w.paso + 1} de ${WIZ_PASOS.length} · ${WIZ_PASOS[w.paso]}`;
+            btnBack.hidden  = w.paso === 0;
+            btnNext.hidden  = false;
+
+            const ultimo = w.paso === WIZ_PASOS.length - 1;
+            btnNext.querySelector('[data-rol="rotulo"]').textContent = ultimo ? 'Crear dispositivo' : 'Siguiente';
+            btnNext.querySelector('[data-rol="icono"]').className    = ultimo
+                ? 'fa-solid fa-microchip' : 'fa-solid fa-chevron-right';
+
+            backdrop.querySelector('.modal-body').scrollTop = 0;
+        }
+
+        async function irAConfirmar() {
+            const qs = new URLSearchParams({
+                accion: 'fabricar',
+                modelo: w.modelo, producto: w.producto, dominio: w.dominio,
+                serial: w.serial, identidad: w.identidad, llave: w.llave,
+            });
+            btnNext.disabled = true;
+            try {
+                w.previo = await api('dispositivos_accion?' + qs.toString());
+                w.paso = 2;
+                pintarPaso();
+                pintarConfirmacion(w.previo);
+            } catch (e) {
+                toast(e.message, { error: true, duration: 6000 });
+            } finally {
+                btnNext.disabled = false;
+            }
+        }
+
+        async function crear() {
+            btnNext.disabled = true;
+            try {
+                const r = await api('dispositivos_accion?accion=fabricar', {
+                    method: 'POST',
+                    body: {
+                        modelo: +w.modelo, producto: +w.producto, dominio: +w.dominio,
+                        serial: w.serial, identidad: w.identidad, llave: w.llave,
+                    },
+                });
+                toast(`Dispositivo #${r.id} creado con ${r.canales} canal${r.canales === 1 ? '' : 'es'}`);
+                close();
+                navigate();
+                // La ficha se abre sola: el alta pidió lo mínimo y el resto
+                // —telemetría, chip, monitoreo— se completa desde ahí.
+                openDeviceViewModal({ id: r.id });
+            } catch (e) {
+                btnNext.disabled = false;
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        }
+
+        btnBack.addEventListener('click', () => {
+            if (w.paso === 0) return;
+            w.paso--;
+            pintarPaso();
+        });
+
+        btnNext.addEventListener('click', () => {
+            if (w.paso === 2) { crear(); return; }
+            if (!validarPaso(w.paso)) return;
+            if (w.paso === 0) { w.paso = 1; pintarPaso(); refrescarDerivados(); selModelo.blur(); inpSerial.focus(); return; }
+            irAConfirmar();
+        });
+
+        refrescarDerivados();
+        pintarPaso();
+        selModelo.focus();
+    }
+
     /**
      * Alta / edición con las 35 columnas. `row` es null en el alta, o trae
      * al menos el id en la edición: el registro completo lo pide fetchDevice.
+     *
+     * EL ALTA NORMAL YA NO ENTRA POR ACÁ — la hace `openDeviceWizard()`, que es
+     * lo que abre el `+ Nuevo dispositivo` del listado. Este modal se queda con
+     * la edición y con el alta manual: crear una fila con las 35 columnas
+     * puestas a mano es lo que se necesita para reparar un dato o para dar de
+     * alta un equipo que no responde a ningún modelo del catálogo, y por eso el
+     * `POST` del ABM sigue existiendo.
      */
     async function openDeviceModal(row) {
         const isEdit = !!row;
@@ -3150,6 +3721,11 @@
             // no una FK, así que el pedido se vuelca en el filtro `Código`.
             const cntPedido = tomarFiltroContrato('contratos');
             if (cntPedido) state.codigo = cntPedido;
+            // "Ver contratos" desde Planes, por el filtro `Plan` — que existe
+            // como campo del Modal de Filtros, así que la lista acotada se
+            // explica sola y se puede limpiar (ABM.md §1.3).
+            const campoPedido = tomarFiltroCampo('contratos');
+            if (campoPedido) state[campoPedido.campo] = campoPedido.valor;
 
             root.innerHTML = `
                 ${moduleHeader('Contratos', 'El acuerdo comercial de cada dominio: cliente, plan y las fechas del ciclo de facturación.')}
@@ -3189,6 +3765,7 @@
                     idPrefix:         'con',
                     quickPlaceholder: 'Buscar dominio, cliente, plan o identificador…',
                     newLabel:         'Nuevo contrato',
+                    listar:           true,
                 })}
                 <div class="table-card" id="con-table"></div>
             `;
@@ -3325,12 +3902,52 @@
         remisibles:     ()    => ({ estado: '1', remitir: '1' }),
     };
 
+    /* Los mismos cinco atajos en el desplegable `Listar` de la toolbar, en el
+       orden y con los separadores del menú del back office viejo.
+
+       ES SÓLO LA PRESENTACIÓN: qué estado deja cada uno sigue saliendo de
+       ATAJOS_CONTRATOS, que es lo que también leen las stat cards. Con el
+       criterio duplicado acá, tocar `Facturables` en el menú y en la tarjeta
+       podría dar listas distintas — y la tarjeta que anuncia el número quedaría
+       desmintiendo al menú.
+
+       Las tarjetas siguen estando: son las que muestran CUÁNTOS hay. El menú
+       resuelve el otro lado —elegir sin apuntarle a una tarjeta y sin abrir
+       Filtros para armarlo campo por campo— y por eso conviven. */
+    const MENU_LISTAR_CONTRATOS = [
+        { atajo: 'total',          label: 'Todos',          icon: 'fa-list' },
+        { divider: true },
+        { atajo: 'habilitados',    label: 'Habilitados',    icon: 'fa-check' },
+        { atajo: 'deshabilitados', label: 'Deshabilitados', icon: 'fa-xmark' },
+        { divider: true },
+        { atajo: 'facturables',    label: 'Facturables',    icon: 'fa-cash-register' },
+        { atajo: 'remisibles',     label: 'Remisibles',     icon: 'fa-paper-plane' },
+    ];
+
     function wireContratosView(state, allContratos, hoy) {
         const tableWrap = document.getElementById('con-table');
         const quick     = document.getElementById('con-quick');
         const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
         const btnFilt   = document.getElementById('con-filters');
         const btnNew    = document.getElementById('con-new');
+
+        // Aplicar un atajo (DESIGN.md §12.1). Lo llaman los DOS accesos —el
+        // desplegable `Listar` y las stat cards—: son el mismo atajo por dos
+        // caminos, y con una copia por acceso agregar uno dejaría a uno
+        // ofreciendo lo que el otro no.
+        //
+        // El atajo REEMPLAZA el estado de la vista, no se suma: se parte de los
+        // defaults y se le aplica encima. Y se pasa por `recargar()` y no por
+        // `applyAndRender()` porque también limpia el texto del buscador, que se
+        // resuelve en el servidor: sin volver a pedir, el listado seguiría
+        // acotado por una búsqueda que ya no está escrita.
+        function aplicarAtajo(nombre) {
+            const armar = ATAJOS_CONTRATOS[nombre];
+            if (!armar) return;
+            Object.assign(state, contratosDefaults(), armar(hoy));
+            quick.value = '';
+            recargar();
+        }
 
         function applyAndRender() {
             const codigo = parseInt(state.codigo, 10);
@@ -3424,18 +4041,18 @@
         btnNew.addEventListener('click',  () => openContratoModal(null));
         wireRefresh('con', 'contratos', state);
 
-        // Las stat cards como filtros rápidos. Se pasa por `recargar()` y no por
-        // `applyAndRender()` porque el atajo también limpia el texto del
-        // buscador, que se resuelve en el servidor: sin volver a pedir, el
-        // listado seguiría acotado por una búsqueda que ya no está escrita.
+        // El desplegable `Listar` de la toolbar: los cinco atajos a un click,
+        // sin pasar por el modal de Filtros.
+        wireListarMenu('con', () => MENU_LISTAR_CONTRATOS.map(it =>
+            it.divider
+                ? { divider: true }
+                : { act: it.atajo, label: it.label, icon: it.icon,
+                    onSelect: () => aplicarAtajo(it.atajo) }
+        ));
+
+        // Las stat cards, que son los mismos cinco atajos por el otro camino.
         document.querySelectorAll('.stats-bar [data-atajo]').forEach(card => {
-            const aplicar = () => {
-                const armar = ATAJOS_CONTRATOS[card.dataset.atajo];
-                if (!armar) return;
-                Object.assign(state, contratosDefaults(), armar(hoy));
-                quick.value = '';
-                recargar();
-            };
+            const aplicar = () => aplicarAtajo(card.dataset.atajo);
             card.addEventListener('click', aplicar);
             // `role="button"` promete que Enter y Espacio funcionan.
             card.addEventListener('keydown', e => {
@@ -5596,15 +6213,46 @@
         });
     }
 
-    /* ---- Edición: los doce campos, sólo en Preparación ---- */
+    /* ---- Edición: la cabecera y la grilla, sólo en Preparación ----
+       DESIGN.md §25-quinquies. Dos solapas y un solo Guardar: `General` son los
+       datos del documento y del cliente, `Líneas` es la grilla de renglones con
+       la caja de totales que se recalcula mientras se tipea, y `Detalles` los
+       comentarios internos.
 
-    function openComprobanteEditModal(c, onGuardado) {
+       LAS OBSERVACIONES VIVEN EN `Líneas`, no en `Detalles`: es el texto que se
+       IMPRIME debajo de los renglones, así que se escribe mirándolos — el mismo
+       criterio con el que la ficha las pone al lado de los totales (§25-quater).
+       En `Detalles` quedan sólo los comentarios, que no salen impresos.
+
+       LOS RENGLONES SE GUARDAN CON LA CABECERA, no de a uno. La grilla se
+       sincroniza entera con un `PATCH` a `comprobantes_renglones`, que resuelve
+       altas, bajas y cambios en UNA transacción; `openRenglonModal()` sigue
+       existiendo para editar un renglón suelto desde la ficha, con el `orden` y
+       el artículo a la vista. */
+
+    async function openComprobanteEditModal(c, onGuardado) {
         const cat = CATALOGOS_COMPROBANTES;
+
+        /* Los renglones NO viajan con el comprobante — ni en el listado ni en
+           la cabecera de la ficha —, así que el editor los pide antes de
+           dibujarse. Se abre ya cargado y no con un esqueleto: es lo que hace
+           `openRenglonModal()`, y un modal que aparece vacío y se llena solo
+           invita a tipear sobre campos que están por ser reemplazados. */
+        let renglones;
+        try {
+            const d = await api('comprobantes_renglones?comprobante=' + encodeURIComponent(c.id));
+            renglones = d.renglones || [];
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+            return;
+        }
 
         const condOpts = ['<option value="">Sin condición</option>'].concat(
             (cat.condiciones || []).map(o =>
                 `<option value="${escape(o.valor)}"${o.valor === c.condicion ? ' selected' : ''}>${escape(o.texto)}</option>`)
         ).join('');
+
+        const clientes = cat.clientes || [];
 
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
@@ -5630,6 +6278,9 @@
                         <button type="button" class="modal-tab active" data-tab="general" role="tab">
                             <i class="fa-solid fa-circle-info"></i> General
                         </button>
+                        <button type="button" class="modal-tab" data-tab="lineas" role="tab">
+                            <i class="fa-solid fa-list-ul"></i> Líneas
+                        </button>
                         <button type="button" class="modal-tab" data-tab="detalles" role="tab">
                             <i class="fa-solid fa-note-sticky"></i> Detalles
                         </button>
@@ -5640,11 +6291,11 @@
                             <div class="form-section-title">Comprobante</div>
                             <div class="form-row form-row-3">
                                 <div class="form-group">
-                                    <label for="cpb-emision">Emisión</label>
+                                    <label for="cpb-emision">Fecha de emisión</label>
                                     <input type="date" id="cpb-emision" value="${escape(c.emision ?? '')}">
                                 </div>
                                 <div class="form-group">
-                                    <label for="cpb-vencimiento">Vencimiento</label>
+                                    <label for="cpb-vencimiento">Fecha de vencimiento</label>
                                     <input type="date" id="cpb-vencimiento" value="${escape(c.vencimiento ?? '')}">
                                     <div class="field-error" id="cpb-vencimiento-err" style="display:none"></div>
                                 </div>
@@ -5663,67 +6314,139 @@
                         </div>
 
                         <div class="form-section">
-                            <div class="form-section-title">Cliente</div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="cpb-cliente">Cliente (ID)</label>
-                                    <input type="number" id="cpb-cliente" min="1"
-                                           value="${escape(String(c.cliente ?? ''))}" placeholder="Opcional">
-                                    ${c.cliente_nombre ? `<div class="form-nota">${escape(c.cliente_nombre)}</div>` : ''}
-                                </div>
-                                <div class="form-group">
-                                    <label for="cpb-condicion">Condición fiscal</label>
-                                    <select id="cpb-condicion">${condOpts}</select>
+                            <div class="form-section-title">
+                                Cliente
+                                <button type="button" class="btn btn-sm btn-secondary form-section-btn"
+                                        data-act="elegir-cliente"
+                                        ${clientes.length ? '' : 'disabled title="No hay clientes cargados"'}>
+                                    <i class="fa-solid fa-address-book"></i> Elegir de clientes
+                                </button>
+                            </div>
+                            <div class="form-group" id="cpb-cliente-picker" hidden>
+                                <label for="cpb-cliente-combo-q">Buscar un cliente</label>
+                                ${comboHtml({
+                                    id: 'cpb-cliente-combo',
+                                    placeholder: 'Nombre, razón social o CUIT…',
+                                })}
+                                <div class="form-nota">
+                                    Al elegirlo se copian razón social, domicilio, correo, celular, CUIT y
+                                    condición en los campos de abajo. Después se pueden corregir a mano:
+                                    lo que se guarda en el comprobante es lo que quede acá.
                                 </div>
                             </div>
                             <div class="form-group">
+                                <label for="cpb-cliente">Cliente (ID)</label>
+                                <input type="number" id="cpb-cliente" min="1"
+                                       value="${escape(String(c.cliente ?? ''))}" placeholder="Opcional">
+                                <div class="form-nota" id="cpb-cliente-nota">${
+                                    c.cliente_nombre ? escape(c.cliente_nombre) : ''}</div>
+                            </div>
+                            <div class="form-group">
                                 <label for="cpb-razon">Razón social</label>
-                                <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}">
+                                <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}"
+                                       placeholder="Razón social del cliente">
                                 <div class="field-error" id="cpb-razon-err" style="display:none"></div>
                                 <div class="form-nota">Sin razón social el comprobante no se puede autorizar.</div>
                             </div>
                             <div class="form-group">
                                 <label for="cpb-domicilio">Domicilio</label>
-                                <input type="text" id="cpb-domicilio" maxlength="250" value="${escape(c.domicilio ?? '')}">
+                                <input type="text" id="cpb-domicilio" maxlength="250"
+                                       value="${escape(c.domicilio ?? '')}" placeholder="Calle, número, localidad">
                             </div>
-                            <div class="form-row form-row-3">
+                            <div class="form-row">
                                 <div class="form-group">
-                                    <label for="cpb-cuit">CUIT</label>
-                                    <input type="text" id="cpb-cuit" maxlength="50" value="${escape(c.cuit ?? '')}">
+                                    <label for="cpb-correo">Correo</label>
+                                    <input type="email" id="cpb-correo" maxlength="100"
+                                           value="${escape(c.correo ?? '')}" placeholder="cliente@ejemplo.com">
+                                    <div class="field-error" id="cpb-correo-err" style="display:none"></div>
+                                    <div class="form-nota">
+                                        Es a donde va el comprobante cuando se envía por correo.
+                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <label for="cpb-celular">Celular</label>
-                                    <input type="text" id="cpb-celular" maxlength="100" value="${escape(c.celular ?? '')}">
+                                    <input type="text" id="cpb-celular" maxlength="100"
+                                           value="${escape(c.celular ?? '')}" placeholder="2644123456">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cpb-cuit">CUIT</label>
+                                    <input type="text" id="cpb-cuit" maxlength="50"
+                                           value="${escape(c.cuit ?? '')}" placeholder="30-12345678-9">
                                 </div>
                                 <div class="form-group">
-                                    <label for="cpb-correo">Correo</label>
-                                    <input type="email" id="cpb-correo" maxlength="100" value="${escape(c.correo ?? '')}">
-                                    <div class="field-error" id="cpb-correo-err" style="display:none"></div>
+                                    <label for="cpb-condicion">Condición frente al IVA</label>
+                                    <select id="cpb-condicion">${condOpts}</select>
                                 </div>
                             </div>
-                            <div class="form-nota">
-                                El correo es a donde va el comprobante cuando se envía por correo.
+                        </div>
+                    </div>
+
+                    <div class="modal-tabpanel" data-panel="lineas" hidden>
+                        <div class="table-card">
+                            <table class="lineas-tabla">
+                                <thead>
+                                    <tr>
+                                        <th style="width:96px" class="td-num">Cantidad</th>
+                                        <th>Detalle</th>
+                                        <th style="width:120px">IVA</th>
+                                        <th style="width:140px" class="td-num">Unitario</th>
+                                        <th style="width:150px" class="td-num">Monto</th>
+                                        <th style="width:48px"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cpb-lineas"></tbody>
+                            </table>
+                        </div>
+                        <div class="field-error" id="cpb-lineas-err" style="display:none"></div>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-secondary" data-act="add-linea">
+                                <i class="fa-solid fa-plus"></i> Agregar línea
+                            </button>
+                        </div>
+
+                        <div class="ficha-cierre">
+                            <div class="form-group" style="margin:0">
+                                <label for="cpb-observaciones">Observaciones</label>
+                                <textarea id="cpb-observaciones" rows="5" maxlength="2000"
+                                          placeholder="Se imprimen debajo de los renglones">${
+                                    escape(c.observaciones ?? '')}</textarea>
                             </div>
+                            <div class="ficha-totales">
+                                <div class="ficha-total-linea">
+                                    <span class="muted">Subtotal</span>
+                                    <span class="val" id="cpb-tot-subtotal">—</span>
+                                </div>
+                                <div class="ficha-total-linea">
+                                    <span class="muted">IVA</span>
+                                    <span class="val" id="cpb-tot-iva">—</span>
+                                </div>
+                                <div class="ficha-total-linea final">
+                                    <span>Total</span>
+                                    <span class="val" id="cpb-tot-total">—</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-nota">
+                            El <strong>monto</strong> es lo que suma el renglón y no se deriva de
+                            cantidad × unitario: los renglones de descuento van en negativo y los de
+                            encabezado en cero. Se completa solo mientras no se lo toque, y si queda
+                            distinto de la multiplicación aparece el aviso para igualarlo de un click.
+                            El <strong>IVA se desagrega</strong> del monto —los renglones van con IVA
+                            incluido—, así que los tres totales de acá son los mismos que recalcula el
+                            servidor al guardar. El <strong>orden impreso es el de la grilla</strong>.
                         </div>
                     </div>
 
                     <div class="modal-tabpanel" data-panel="detalles" hidden>
                         <div class="form-group">
-                            <label for="cpb-observaciones">Observaciones</label>
-                            <textarea id="cpb-observaciones" rows="6" maxlength="2000">${escape(c.observaciones ?? '')}</textarea>
-                            <div class="form-nota">Se imprimen en el comprobante, debajo de los renglones.</div>
-                        </div>
-                        <div class="form-group">
                             <label for="cpb-comentarios">Comentarios</label>
-                            <textarea id="cpb-comentarios" rows="6" maxlength="2000">${escape(c.comentarios ?? '')}</textarea>
+                            <textarea id="cpb-comentarios" rows="8" maxlength="2000"
+                                      placeholder="Notas internas">${escape(c.comentarios ?? '')}</textarea>
                             <div class="form-nota">Son internos: no salen impresos ni se envían al cliente.</div>
                         </div>
-                    </div>
-
-                    <div class="form-nota">
-                        Los renglones no se cargan acá: se agregan y se editan desde la pestaña
-                        <strong>Cuerpo</strong> de la ficha, uno por uno, porque cada cambio
-                        recalcula los totales en el servidor.
                     </div>
                 </div>
             </div>
@@ -5731,29 +6454,293 @@
         document.body.appendChild(backdrop);
         requestAnimationFrame(() => backdrop.classList.add('open'));
 
+        let clienteCtrl = null;
         const close = () => {
+            // El desplegable del combo cuelga del `<body>`, así que sobrevive al
+            // modal si no se lo destruye.
+            clienteCtrl?.destruir();
             backdrop.classList.remove('open');
             setTimeout(() => backdrop.remove(), 200);
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
-        // Los cuatro campos que valida el Guardar viven en General; si el
-        // operador está parado en Detalles el error se marcaría en un campo
-        // invisible y el modal parecería no responder.
         const mostrarPestana = wireModalTabs(backdrop);
 
         const el  = id => backdrop.querySelector('#cpb-' + id);
         const val = id => el(id).value.trim();
 
+        /* ---- Grilla de líneas ---- */
+
+        const tbody     = el('lineas');
+        const lineasErr = el('lineas-err');
+
+        /* Un renglón llega con `monto` MANUAL cuando lo que tiene no es
+           cantidad × unitario: ahí el número lo puso alguien a propósito —un
+           descuento en negativo, un encabezado en cero— y autocompletarlo al
+           tocar la cantidad lo borraría sin que se note. Los demás siguen la
+           multiplicación hasta que alguien escriba en el campo. */
+        function montoEsManual(r) {
+            const cant = Number(r?.cantidad ?? 0);
+            const unit = Number(r?.unitario ?? 0);
+            const mon  = Number(r?.monto ?? 0);
+            if (!Number.isFinite(cant) || !Number.isFinite(unit) || !Number.isFinite(mon)) return true;
+            return Math.round(cant * unit * 100) !== Math.round(mon * 100);
+        }
+
+        function lineaHtml(r) {
+            const cant = r?.cantidad ?? 1;
+            const unit = r?.unitario ?? 0;
+            const mon  = r?.monto ?? 0;
+            const ali  = r?.iva ?? 0;
+
+            // La alícuota se marca comparando NÚMEROS y no strings: el combo
+            // trae la clave `21.00` y un renglón puede llegar con `21`, que
+            // como texto no coincide — y el `<select>` caería en la primera
+            // opción, que es 0 %, cambiándole el IVA al renglón sin que nadie
+            // lo haya tocado.
+            const opts = (cat.ivas || []).map(o =>
+                `<option value="${escape(o.valor)}"${
+                    Number(o.valor) === Number(ali) ? ' selected' : ''
+                }>${escape(o.texto)}</option>`).join('');
+
+            return `
+                <tr data-linea data-id="${r?.id ? escape(String(r.id)) : ''}"
+                    data-articulo="${r?.articulo ? escape(String(r.articulo)) : ''}"
+                    data-monto-manual="${montoEsManual(r) ? '1' : ''}">
+                    <td><input type="text" class="lin-cantidad td-num" inputmode="decimal"
+                               value="${escape(String(cant))}"></td>
+                    <td><input type="text" class="lin-detalle" maxlength="500"
+                               value="${escape(r?.detalle ?? '')}" placeholder="Lo que se imprime en el renglón">
+                        ${r?.articulo_nombre
+                            ? `<div class="linea-glosa">· ${escape(r.articulo_nombre)}</div>` : ''}</td>
+                    <td><select class="lin-iva">${opts}</select></td>
+                    <td><input type="text" class="lin-unitario td-num" inputmode="decimal"
+                               value="${escape(String(unit))}"></td>
+                    <td><input type="text" class="lin-monto td-num" inputmode="decimal"
+                               value="${escape(String(mon))}">
+                        <button type="button" class="linea-sugerencia" hidden></button></td>
+                    <td class="action-col">
+                        <button type="button" class="btn-icon-sm" data-act="del-linea"
+                                title="Quitar la línea">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>`;
+        }
+
+        const num = v => {
+            const n = parseFloat(String(v ?? '').trim().replace(',', '.'));
+            return Number.isFinite(n) ? n : null;
+        };
+
+        /* Los totales de la grilla, con la MISMA cuenta que
+           `comprobanteTotalesDe()` del servidor: el total es la suma de los
+           montos y el IVA se DESAGREGA de cada uno, sólo en las alícuotas que
+           el backend desagrega (10,5 y 21). Cualquier otra fórmula acá haría
+           que la caja anuncie un total y el Guardar persista otro. */
+        function totales() {
+            let total = 0, iva = 0;
+            tbody.querySelectorAll('tr[data-linea]').forEach(tr => {
+                const monto = num(tr.querySelector('.lin-monto').value) ?? 0;
+                total += monto;
+                const ali = Math.round((num(tr.querySelector('.lin-iva').value) ?? 0) * 100) / 100;
+                if (ali === 10.5)     iva += monto - (monto / 1.105);
+                else if (ali === 21)  iva += monto - (monto / 1.21);
+            });
+            total = Math.round(total * 100) / 100;
+            iva   = Math.round(iva   * 100) / 100;
+            return { subtotal: Math.round((total - iva) * 100) / 100, iva, total };
+        }
+
+        function repintarTotales() {
+            const t = totales();
+            el('tot-subtotal').textContent = moneda(t.subtotal);
+            el('tot-iva').textContent      = moneda(t.iva);
+            el('tot-total').textContent    = moneda(t.total);
+        }
+
+        /* El aviso del monto: aparece sólo cuando el campo no coincide con
+           cantidad × unitario, y al clickearlo lo iguala. Es una sugerencia
+           VISIBLE y no un cálculo que se imponga — la misma decisión que ya
+           toma `openRenglonModal()`, adaptada a una grilla donde un renglón de
+           descuento tiene que poder quedarse en negativo. */
+        function repintarSugerencia(tr) {
+            const aviso = tr.querySelector('.linea-sugerencia');
+            const cant  = num(tr.querySelector('.lin-cantidad').value);
+            const unit  = num(tr.querySelector('.lin-unitario').value);
+            const mon   = num(tr.querySelector('.lin-monto').value);
+
+            if (cant === null || unit === null || mon === null) { aviso.hidden = true; return; }
+
+            const esperado = Math.round(cant * unit * 100) / 100;
+            if (Math.round(mon * 100) === Math.round(esperado * 100)) { aviso.hidden = true; return; }
+
+            aviso.hidden = false;
+            aviso.textContent = '≠ ' + moneda(esperado);
+            aviso.title = 'Cantidad × unitario = ' + moneda(esperado) + '. Click para usarlo.';
+        }
+
+        function wireLinea(tr) {
+            const cant  = tr.querySelector('.lin-cantidad');
+            const unit  = tr.querySelector('.lin-unitario');
+            const monto = tr.querySelector('.lin-monto');
+            const aviso = tr.querySelector('.linea-sugerencia');
+
+            const seguir = () => {
+                if (!tr.dataset.montoManual) {
+                    const c2 = num(cant.value), u2 = num(unit.value);
+                    if (c2 !== null && u2 !== null) {
+                        monto.value = String(Math.round(c2 * u2 * 100) / 100);
+                    }
+                }
+                repintarSugerencia(tr);
+                repintarTotales();
+            };
+
+            [cant, unit].forEach(i => i.addEventListener('input', seguir));
+
+            // Escribir en el monto lo vuelve manual para siempre: a partir de
+            // ahí cantidad y unitario dejan de pisarlo.
+            monto.addEventListener('input', () => {
+                tr.dataset.montoManual = '1';
+                repintarSugerencia(tr);
+                repintarTotales();
+            });
+
+            tr.querySelector('.lin-iva').addEventListener('change', repintarTotales);
+
+            aviso.addEventListener('click', () => {
+                const c2 = num(cant.value), u2 = num(unit.value);
+                if (c2 === null || u2 === null) return;
+                monto.value = String(Math.round(c2 * u2 * 100) / 100);
+                // Igualarlo con el aviso NO lo vuelve manual: el operador está
+                // pidiendo justamente que vuelva a seguir la multiplicación.
+                tr.dataset.montoManual = '';
+                repintarSugerencia(tr);
+                repintarTotales();
+            });
+
+            tr.querySelector('[data-act="del-linea"]').addEventListener('click', () => {
+                // Sin confirmación: la línea no se borra de la base hasta el
+                // Guardar, así que Cancelar la trae de vuelta. La baja directa
+                // de la ficha sí pregunta, porque ahí escribe en el acto.
+                tr.remove();
+                repintarVacio();
+                repintarTotales();
+            });
+
+            repintarSugerencia(tr);
+        }
+
+        /* La fila de "sin líneas" es una fila más de la tabla y no un bloque
+           aparte: con un `<div>` debajo del `<thead>` la grilla vacía pierde el
+           borde y se lee como si la tabla no hubiera cargado. */
+        function repintarVacio() {
+            tbody.querySelector('tr[data-vacio]')?.remove();
+            if (!tbody.querySelector('tr[data-linea]')) {
+                tbody.insertAdjacentHTML('beforeend',
+                    `<tr data-vacio><td colspan="6" class="muted" style="text-align:center">
+                        Sin líneas. El comprobante se puede guardar así, pero va a totalizar cero.
+                     </td></tr>`);
+            }
+        }
+
+        function agregarLinea(r) {
+            tbody.querySelector('tr[data-vacio]')?.remove();
+            tbody.insertAdjacentHTML('beforeend', lineaHtml(r));
+            const tr = tbody.lastElementChild;
+            wireLinea(tr);
+            return tr;
+        }
+
+        renglones.forEach(r => agregarLinea(r));
+        repintarVacio();
+        repintarTotales();
+
+        backdrop.querySelector('[data-act="add-linea"]').addEventListener('click', () => {
+            const tr = agregarLinea({ cantidad: 1, detalle: '', iva: 0, unitario: 0, monto: 0 });
+            tr.querySelector('.lin-detalle').focus();
+        });
+
+        /* ---- Elegir de clientes ---- */
+
+        /* El picker es el combo con buscador de §34-bis y no un modal aparte:
+           son 64 clientes que ya viajan con el listado, así que no hay nada que
+           ir a buscar al servidor, y un segundo modal encima del editor tapa
+           los campos que el cliente está por completar. Arranca plegado para
+           que el formulario no abra con un campo de búsqueda arriba de todo. */
+        const picker = el('cliente-picker');
+        backdrop.querySelector('[data-act="elegir-cliente"]').addEventListener('click', () => {
+            if (!clientes.length) return;
+            picker.hidden = !picker.hidden;
+            if (picker.hidden) return;
+
+            if (!clienteCtrl) {
+                clienteCtrl = wireCombo(backdrop, 'cpb-cliente-combo', {
+                    items:    clientes,
+                    clavesDe: cl => [cl.nombre, cl.razon, cl.cuit, cl.correo],
+                    textoDe:  cl => cl.nombre || cl.razon || `Cliente #${cl.id}`,
+                    filaDe:   cl => ({
+                        titulo:  cl.nombre || cl.razon || `Cliente #${cl.id}`,
+                        detalle: [cl.razon && cl.razon !== cl.nombre ? cl.razon : '', cl.cuit]
+                            .filter(Boolean).join(' · '),
+                    }),
+                    vacio:    'Ningún cliente coincide con esa búsqueda.',
+                    onChange: cl => { if (cl) volcarCliente(cl); },
+                });
+            }
+            clienteCtrl.focus();
+        });
+
+        /* Copia el cliente a los campos del comprobante. PISA lo que haya: el
+           botón se aprieta justo para eso, y un volcado parcial dejaría media
+           ficha de un cliente y media de otro — que es peor que rehacerla. */
+        function volcarCliente(cl) {
+            el('cliente').value   = cl.id;
+            el('cliente-nota').textContent = cl.nombre || '';
+            el('razon').value     = cl.razon || cl.nombre || '';
+            el('domicilio').value = cl.domicilio || '';
+            el('correo').value    = cl.correo || '';
+            el('celular').value   = cl.celular || '';
+            el('cuit').value      = cl.cuit || '';
+
+            /* La condición NO se copia a ciegas. `clientes`.`condicion` y
+               `comprobantes`.`condicion` son dos catálogos distintos: el del
+               cliente tiene `EX` y el del comprobante `RE`, y hay 2 clientes en
+               `EX`. Escribir un código que no está en el combo del comprobante
+               guardaría una condición fiscal que después ninguna pantalla sabe
+               mostrar, así que lo que no matchea se deja como estaba y se
+               avisa. */
+            const cond = (cl.condicion || '').trim();
+            const sel  = el('condicion');
+            if (cond === '') {
+                // Nada que copiar: el cliente no la tiene cargada.
+            } else if (Array.from(sel.options).some(o => o.value === cond)) {
+                sel.value = cond;
+            } else {
+                toast(`El cliente tiene la condición "${cond}", que no está en el catálogo del ` +
+                      'comprobante. Elegila a mano.', { duration: 7000 });
+            }
+
+            picker.hidden = true;
+            el('razon').focus();
+        }
+
         el('razon').focus();
+
+        /* ---- Guardar ---- */
 
         backdrop.querySelector('[data-act="save"]').addEventListener('click', async e => {
             const btn = e.currentTarget;
+
             ['razon', 'correo', 'vencimiento', 'cotizacion'].forEach(id => {
                 el(id + '-err').style.display = 'none';
                 el(id).classList.remove('input-invalid');
             });
+            lineasErr.style.display = 'none';
+            tbody.querySelectorAll('.input-invalid').forEach(i => i.classList.remove('input-invalid'));
+
             const marcar = (id, msg) => {
                 el(id + '-err').textContent = msg;
                 el(id + '-err').style.display = 'block';
@@ -5776,8 +6763,60 @@
             }
             if (bad) { mostrarPestana('general'); bad.focus(); return; }
 
+            /* Las líneas se validan acá y no sólo en el servidor porque el
+               `PATCH` es todo o nada: sin este paso, una fila sin detalle entre
+               ocho rebota el guardado entero con un mensaje que no dice cuál
+               es. El backend las valida igual — esconder el error no es el
+               control. */
+            const filas = Array.from(tbody.querySelectorAll('tr[data-linea]'));
+            let malaLinea = null;
+            filas.forEach((tr, i) => {
+                const campos = {
+                    detalle:  tr.querySelector('.lin-detalle'),
+                    cantidad: tr.querySelector('.lin-cantidad'),
+                    unitario: tr.querySelector('.lin-unitario'),
+                    monto:    tr.querySelector('.lin-monto'),
+                };
+                if (!campos.detalle.value.trim()) {
+                    campos.detalle.classList.add('input-invalid');
+                    malaLinea = malaLinea || { campo: campos.detalle, i,
+                                               msg: 'El detalle es obligatorio' };
+                }
+                ['cantidad', 'unitario', 'monto'].forEach(k => {
+                    if (num(campos[k].value) === null) {
+                        campos[k].classList.add('input-invalid');
+                        malaLinea = malaLinea || { campo: campos[k], i,
+                                                   msg: `La ${k} tiene que ser un número` };
+                    }
+                });
+            });
+            if (malaLinea) {
+                lineasErr.textContent = `Línea ${malaLinea.i + 1}: ${malaLinea.msg}.`;
+                lineasErr.style.display = 'block';
+                mostrarPestana('lineas');
+                malaLinea.campo.focus();
+                return;
+            }
+
+            const lineas = filas.map(tr => ({
+                id:       tr.dataset.id ? Number(tr.dataset.id) : null,
+                articulo: tr.dataset.articulo || '',
+                detalle:  tr.querySelector('.lin-detalle').value.trim(),
+                cantidad: num(tr.querySelector('.lin-cantidad').value),
+                unitario: num(tr.querySelector('.lin-unitario').value),
+                monto:    num(tr.querySelector('.lin-monto').value),
+                iva:      tr.querySelector('.lin-iva').value,
+            }));
+
             btn.disabled = true;
             try {
+                /* La cabecera va primero y la grilla después, en dos requests.
+                   No es lo ideal —el `PATCH` podría fallar con la cabecera ya
+                   guardada— pero son dos entidades con endpoints propios y el
+                   daño está acotado: lo que persiste es exactamente lo que se
+                   ve en pantalla, y el error dice que las líneas no se
+                   guardaron. Al revés (grilla primero) el fallo dejaría los
+                   totales movidos y la cabecera vieja, que es peor. */
                 await api('comprobantes', { method: 'PUT', body: {
                     id: c.id,
                     cliente:       val('cliente'),
@@ -5793,13 +6832,28 @@
                     observaciones: el('observaciones').value,
                     comentarios:   el('comentarios').value,
                 } });
-                toast('Comprobante actualizado');
-                close();
-                if (typeof onGuardado === 'function') onGuardado();
             } catch (err) {
                 btn.disabled = false;
                 toast(err.message, { error: true, duration: 6000 });
+                return;
             }
+
+            try {
+                await api('comprobantes_renglones', { method: 'PATCH', body: {
+                    comprobante: c.id,
+                    renglones:   lineas,
+                } });
+            } catch (err) {
+                btn.disabled = false;
+                toast('Los datos se guardaron, pero las líneas no: ' + err.message,
+                      { error: true, duration: 8000 });
+                mostrarPestana('lineas');
+                return;
+            }
+
+            toast('Comprobante actualizado');
+            close();
+            if (typeof onGuardado === 'function') onGuardado();
         });
     }
 
@@ -6830,6 +7884,1802 @@
                 await api('talonarios?id=' + encodeURIComponent(t.id), { method: 'DELETE' });
                 close();
                 toast('Talonario eliminado');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---------- Views: Artículos ----------
+     * ABM de `articulos`: el catálogo del que cuelga toda la plata del sistema
+     * — el abono de cada plan (`planes`.`articulo`), lo que se factura
+     * (`comprobantesrenglones`), lo que se le cobra a un chip y lo que publica
+     * la tienda.
+     *
+     * DOS COLUMNAS SON DERIVADAS Y NO SE TIPEAN:
+     *
+     *     compra = importacion × cotización   (sólo cuando la moneda es Dólar)
+     *     venta  = compra + compra × margen/100   (siempre)
+     *
+     * Es la cuenta de `cArticulo::recalcular()`, que el back office viejo
+     * aplica en cada guardado — acá también, porque es la definición misma de
+     * las columnas. La diferencia es que el formulario muestra el resultado EN
+     * VIVO antes de guardar, en vez de dejar que el operador se entere después
+     * de que corregirle el nombre a un artículo le movió el precio.
+     *
+     * LA COTIZACIÓN VIVE EN `parametros` y la mueve una tarea del legacy, así
+     * que cada fila en dólares arrastra la del día en que se la tocó por última
+     * vez: al 30/09/2026 hay cinco cotizaciones implícitas conviviendo y 70 de
+     * las 106 filas están con una anterior a la vigente. Eso NO es un error de
+     * datos, es el estado normal entre dos corridas — y por eso el módulo lo
+     * cuenta en una stat card, lo marca en la fila con un ícono y ofrece
+     * `Recalcular precios` como una acción con nombre y con previsualización,
+     * que es el `Actualizar` del menú `Acciones` del sistema histórico.
+     *
+     * VISIBILIDAD NO ES `habilitado`, son dos preguntas distintas: `habilitado`
+     * dice si el artículo se puede usar (95 de 106) y `visibilidad` si además
+     * se publica en la tienda (38). Un artículo público y deshabilitado es
+     * posible y no es una inconsistencia, así que van dos badges y no uno.
+     */
+    const ORDEN_ARTICULOS = [
+        { value: 'id',               label: 'Código'           },
+        { value: 'nombre',           label: 'Nombre'           },
+        { value: 'categoria_nombre', label: 'Categoría'        },
+        { value: 'venta',            label: 'Precio de venta'  },
+        { value: 'actual',           label: 'Stock actual'     },
+    ];
+
+    // Catálogos que deja el render del listado para los modales, igual que en
+    // Contratos y Talonarios: el GET del listado ya los trae.
+    let CATALOGOS_ARTICULOS = {
+        categorias: [], tipos: [], monedas: [], visibilidad: [],
+        cotizacion: 0, cotizacion_fecha: '',
+    };
+
+    function articulosDefaults() {
+        return {
+            codigo: '', texto: '', tipo: '', categoria: '', moneda: '',
+            visibilidad: '', habilitado: '', precio: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderArticulos(root) {
+        try {
+            const data = await api('articulos');
+            const r         = data.resumen;
+            const articulos = data.articulos;
+            CATALOGOS_ARTICULOS = data.catalogos;
+
+            const state = tomarEstadoVista('articulos', articulosDefaults());
+            // "Ver artículo" desde Planes. Acá el artículo es la fila y no una
+            // FK, así que el pedido se vuelca en el filtro `Código` — lo mismo
+            // que hace Contratos → "Ver dominio" sobre Dominios.
+            const pedido = tomarFiltroCampo('articulos');
+            if (pedido) state[pedido.campo] = pedido.valor;
+
+            root.innerHTML = `
+                ${moduleHeader('Artículos', 'El catálogo de productos, servicios y componentes: stock, precios y qué se publica en la tienda.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.habilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Deshabilitados</span>
+                        <span class="stat-value muted">${r.deshabilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Públicos</span>
+                        <span class="stat-value">${r.publicos}</span>
+                    </div>
+                    ${/* No es un contador de errores: son las filas valorizadas
+                         con una cotización anterior a la vigente, que es lo
+                         normal entre dos corridas del robot. Está acá porque es
+                         el número que decide si hay que recalcular. */''}
+                    <div class="stat-card" title="Valorizados con una cotización anterior a la vigente">
+                        <span class="stat-label">Precio viejo</span>
+                        <span class="stat-value orange">${r.desalineados}</span>
+                    </div>
+                </div>
+                <div class="form-nota" style="margin:-4px 0 14px">
+                    Cotización vigente <strong>${escape(moneda(r.cotizacion))}</strong>
+                    ${r.cotizacion_fecha ? `· actualizada el ${escape(formatDate(r.cotizacion_fecha))}` : ''}
+                    · sale de <code>parametros.articulos.dolar.cotizacion</code>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'art',
+                    quickPlaceholder: 'Buscar nombre, marca, SKU, EAN o categoría…',
+                    newLabel:         'Nuevo artículo',
+                })}
+                <div class="table-card" id="art-table"></div>
+            `;
+
+            wireArticulosView(state, articulos);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function articuloHabilitadoBadge(a) {
+        return a.habilitado === 1
+            ? `<span class="badge badge-success">Habilitado</span>`
+            : `<span class="badge badge-danger">Deshabilitado</span>`;
+    }
+
+    // `visibilidad` decide si el artículo sale en la tienda pública. Se destaca
+    // en ámbar cuando sí, que es la condición que importa mirar de un vistazo.
+    function articuloVisibilidadBadge(a) {
+        return a.visibilidad === '1'
+            ? `<span class="badge badge-warn">${escape(a.visibilidad_texto || 'Público')}</span>`
+            : `<span class="badge badge-info">${escape(a.visibilidad_texto || 'Privado')}</span>`;
+    }
+
+    // Marca de "este precio salió con otra cotización", pegada al importe en
+    // pesos. Es un ícono y no una columna nueva porque es un atributo del
+    // precio y no otro dato — mismo criterio que el modo del plan en Contratos.
+    // NO se dibuja cuando el precio está al día: un ícono siempre presente deja
+    // de avisar nada.
+    function articuloPrecioViejoIcono(a) {
+        if (!a.desalineado) return '';
+        return ` <i class="fa-solid fa-triangle-exclamation precio-viejo-icon"
+                    title="Calculado con una cotización anterior. Recalcular lo deja en ${escape(moneda(a.venta_recalculada))}."></i>`;
+    }
+
+    function articulosTableBody(articulos) {
+        if (!articulos.length) {
+            return `<div class="table-empty">No hay artículos que coincidan. Creá el primero con "Nuevo artículo".</div>`;
+        }
+
+        const rows = articulos.map(a => {
+            // Marca y categoría van de glosa bajo el nombre y no en columnas
+            // propias: son cómo se identifica el artículo, no datos que se
+            // comparen entre filas.
+            const glosa = [a.marca, a.categoria_nombre].filter(Boolean).join(' · ');
+            return `
+            <tr class="row-clickable" data-id="${a.id}">
+                <td><span class="td-id">#${a.id}</span></td>
+                <td>${a.tipo
+                    ? `<span class="badge badge-info">${escape(a.tipo_texto || a.tipo)}</span>`
+                    : '<span class="muted">—</span>'}</td>
+                <td>
+                    <div class="td-nombre">${escape(a.nombre)}</div>
+                    ${glosa ? `<div class="muted">${escape(glosa)}</div>` : ''}
+                </td>
+                <td class="td-num">${a.moneda === 'D'
+                    ? escape(numero(a.importacion))
+                    : '<span class="muted">—</span>'}</td>
+                <td class="td-num">${escape(moneda(a.venta))}${articuloPrecioViejoIcono(a)}</td>
+                <td class="td-num">${escape(numero(a.actual))}</td>
+                <td>${articuloVisibilidadBadge(a)}</td>
+                <td>${articuloHabilitadoBadge(a)}</td>
+                ${actionCells()}
+            </tr>
+        `;
+        }).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Tipo</th>
+                        <th>Nombre</th>
+                        <th class="td-num">USD</th>
+                        <th class="td-num">Venta</th>
+                        <th class="td-num">Stock</th>
+                        <th>Visibilidad</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wireArticulosView(state, allArticulos) {
+        const tableWrap = document.getElementById('art-table');
+        const quick     = document.getElementById('art-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('art-filters');
+        const btnNew    = document.getElementById('art-new');
+
+        function applyAndRender() {
+            const codigo = parseInt(state.codigo, 10);
+
+            const filtered = allArticulos.filter(a => {
+                if (Number.isFinite(codigo) && a.id !== codigo) return false;
+                if (state.tipo        && a.tipo        !== state.tipo)        return false;
+                if (state.categoria   && String(a.categoria) !== state.categoria) return false;
+                if (state.moneda      && a.moneda      !== state.moneda)      return false;
+                if (state.visibilidad && a.visibilidad !== state.visibilidad) return false;
+                if (state.habilitado  && String(a.habilitado) !== state.habilitado) return false;
+                if (state.precio === 'viejo' && !a.desalineado) return false;
+                if (state.precio === 'aldia' &&  a.desalineado) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = articulosTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(a) {
+            // Acción de negocio primero dentro del bloque de extras, después la
+            // navegación y por último las copias (ABM.md §1.3).
+            const extra = [
+                { act: 'recalcular', label: 'Recalcular precios', icon: 'fa-calculator',
+                  onSelect: () => pedirRecalcularArticulo(a) },
+            ];
+            if (a.planes_count > 0) {
+                extra.push({ act: 'planes', label: 'Listar planes', icon: 'fa-layer-group',
+                             onSelect: () => pedirFiltroCampo('planes', 'articulo', a.id) });
+            }
+            extra.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(a.nombre) });
+            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(a.id)) });
+
+            return standardRowMenuItems({
+                view:   true, onView:   () => openArticuloViewModal(a),
+                edit:   true, onEdit:   () => openArticuloModal(a),
+                delete: true, onDelete: () => pedirImpactoArticulo(a),
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const a  = allArticulos.find(x => x.id === id);
+                if (!a) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(a), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> acción por defecto: Consultar.
+                tr.addEventListener('click', () => openArticuloViewModal(a));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(a), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('articulos?q=' + encodeURIComponent(q)).then(d => d.articulos),
+            alLlegar: filas => { allArticulos = filas; applyAndRender(); },
+        });
+
+        btnFilt.addEventListener('click', () => openArticulosFiltersModal(state, recargar));
+        btnNew.addEventListener('click',  () => openArticuloModal(null));
+        wireRefresh('art', 'articulos', state);
+
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
+    }
+
+    // Etiqueta de una categoría en los desplegables: el nombre con su jerarquía
+    // de glosa, que es lo que dice de qué cuelga ("001.003").
+    function articuloCategoriaLabel(c) {
+        return c.jerarquia ? `${c.nombre || ('#' + c.id)} · ${c.jerarquia}` : (c.nombre || ('#' + c.id));
+    }
+
+    function openArticulosFiltersModal(state, onApply) {
+        const cat = CATALOGOS_ARTICULOS;
+
+        const opciones = (items, valorSel, todos, mapear) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === valorSel ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const tipOpts = opciones(cat.tipos,       state.tipo,        'Todos los tipos',   t => t);
+        const catOpts = opciones(cat.categorias,  state.categoria,   'Todas las categorías',
+                                 c => ({ valor: String(c.id), texto: articuloCategoriaLabel(c) }));
+        const monOpts = opciones(cat.monedas,     state.moneda,      'Indistinta',        t => t);
+        const visOpts = opciones(cat.visibilidad, state.visibilidad, 'Indistinta',        t => t);
+        const habOpts = opciones(
+            [{ valor: '1', texto: 'Habilitado' }, { valor: '0', texto: 'Deshabilitado' }],
+            state.habilitado, 'Todos', t => t);
+        const preOpts = opciones(
+            [{ valor: 'viejo', texto: 'Con cotización anterior' }, { valor: 'aldia', texto: 'Al día' }],
+            state.precio, 'Indistinto', t => t);
+        const ordOpts = ORDEN_ARTICULOS.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="art-fm-codigo">Código</label>
+                    <input type="number" id="art-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-texto">Buscar (nombre / marca / SKU / EAN / categoría)</label>
+                    <input type="search" id="art-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-tipo">Tipo</label>
+                    <select id="art-fm-tipo">${tipOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-categoria">Categoría</label>
+                    <select id="art-fm-categoria">${catOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-moneda">Moneda de compra</label>
+                    <select id="art-fm-moneda">${monOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-visibilidad">Visibilidad</label>
+                    <select id="art-fm-visibilidad">${visOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-habilitado">Estado</label>
+                    <select id="art-fm-habilitado">${habOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-precio">Precio</label>
+                    <select id="art-fm-precio">${preOpts}</select>
+                    <div class="form-nota">"Con cotización anterior" son los que cambiarían al recalcular.</div>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-limit">Límite</label>
+                    <input type="number" id="art-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-orden">Ordenar por</label>
+                    <select id="art-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="art-fm-dir">Dirección</label>
+                    <select id="art-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            wide: true,
+            onApply(modal) {
+                state.codigo      = modal.querySelector('#art-fm-codigo').value.trim();
+                state.texto       = modal.querySelector('#art-fm-texto').value.trim();
+                state.tipo        = modal.querySelector('#art-fm-tipo').value;
+                state.categoria   = modal.querySelector('#art-fm-categoria').value;
+                state.moneda      = modal.querySelector('#art-fm-moneda').value;
+                state.visibilidad = modal.querySelector('#art-fm-visibilidad').value;
+                state.habilitado  = modal.querySelector('#art-fm-habilitado').value;
+                state.precio      = modal.querySelector('#art-fm-precio').value;
+                state.orden       = modal.querySelector('#art-fm-orden').value;
+                state.dir         = modal.querySelector('#art-fm-dir').value;
+                state.limit       = readLimit(modal.querySelector('#art-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = articulosDefaults();
+                modal.querySelector('#art-fm-codigo').value      = d.codigo;
+                modal.querySelector('#art-fm-texto').value       = d.texto;
+                modal.querySelector('#art-fm-tipo').value        = d.tipo;
+                modal.querySelector('#art-fm-categoria').value   = d.categoria;
+                modal.querySelector('#art-fm-moneda').value      = d.moneda;
+                modal.querySelector('#art-fm-visibilidad').value = d.visibilidad;
+                modal.querySelector('#art-fm-habilitado').value  = d.habilitado;
+                modal.querySelector('#art-fm-precio').value      = d.precio;
+                modal.querySelector('#art-fm-orden').value       = d.orden;
+                modal.querySelector('#art-fm-dir').value         = d.dir;
+                modal.querySelector('#art-fm-limit').value       = String(d.limit);
+            },
+        });
+    }
+
+    function openArticuloViewModal(a) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        const oVacio = (v, glosa) => v ? escape(v) : `<span class="muted">${escape(glosa)}</span>`;
+
+        // El precio de compra dice de dónde sale: en dólares es la importación
+        // por la cotización con la que quedó valorizado, en pesos es un dato que
+        // se cargó. Sin esa glosa el número no se puede verificar contra nada.
+        const cotizacionAplicada = a.moneda === 'D' && a.importacion > 0
+            ? moneda(a.compra / a.importacion)
+            : '';
+
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar artículo</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del artículo">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${/* 26 tarjetas: 22 `half` + 4 `full` (§25 de DESIGN.md).
+                        `.view-grid` es flex con `flex-grow`, así que los `half`
+                        tienen que ser PARES y cada `full` tiene que caer después
+                        de un renglón cerrado, o la tarjeta suelta se estira y se
+                        lee como un destaque que nadie decidió. Acá: 2 half ·
+                        Nombre full · 20 half (diez renglones) · Web, Descripción
+                        y Metadatos full, que son los tres campos anchos de
+                        verdad. Agregar o quitar un campo obliga a rehacer esta
+                        cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código',  `<code>#${a.id}</code>`),
+                        viewCardHalf('Estado',  articuloHabilitadoBadge(a)),
+                        viewCardFull('Nombre',  escape(a.nombre)),
+                        viewCardHalf('Tipo',    a.tipo
+                            ? `<span class="badge badge-info">${escape(a.tipo_texto || a.tipo)}</span> <code>${escape(a.tipo)}</code>`
+                            : `<span class="muted">Sin tipo</span>`),
+                        viewCardHalf('Visibilidad', articuloVisibilidadBadge(a)),
+                        viewCardHalf('Categoría',   refValue(a.categoria, a.categoria_nombre)),
+                        viewCardHalf('Marca',       oVacio(a.marca, 'Sin marca')),
+                        viewCardHalf('Código SKU',  a.sku ? `<code>${escape(a.sku)}</code>` : `<span class="muted">Sin SKU</span>`),
+                        viewCardHalf('Código EAN',  a.ean ? `<code>${escape(a.ean)}</code>` : `<span class="muted">Sin EAN</span>`),
+                        viewCardHalf('Stock actual',      escape(numero(a.actual))),
+                        viewCardHalf('Stock mínimo',      escape(numero(a.minimo))),
+                        viewCardHalf('Stock recomendado', escape(numero(a.recomendado))),
+                        viewCardHalf('IVA',               escape(numero(a.iva)) + ' %'),
+                        viewCardHalf('Moneda de compra',  a.moneda
+                            ? `<span class="badge badge-info">${escape(a.moneda_texto || a.moneda)}</span>`
+                            : `<span class="muted">Sin moneda</span>`),
+                        viewCardHalf('Precio de importación', a.moneda === 'D'
+                            ? `USD ${escape(numero(a.importacion))}`
+                            : `<span class="muted">No aplica · la compra está en pesos</span>`),
+                        viewCardHalf('Margen',               escape(numero(a.margen)) + ' %'),
+                        viewCardHalf('Precio de compra',     escape(moneda(a.compra)) +
+                            (cotizacionAplicada
+                                ? ` <span class="muted">· cotización ${escape(cotizacionAplicada)}</span>`
+                                : '')),
+                        viewCardHalf('Precio de venta',      escape(moneda(a.venta)) +
+                            ` <span class="muted">· compra + ${escape(numero(a.margen))} %</span>`),
+                        viewCardHalf('Precio al día', a.desalineado
+                            ? `<span class="badge badge-warn">Con cotización anterior</span>
+                               <div class="muted">Recalcular lo deja en ${escape(moneda(a.venta_recalculada))}</div>`
+                            : `<span class="badge badge-success">Al día</span>`),
+                        viewCardHalf('Planes que lo facturan', `<span class="badge badge-info">${a.planes_count}</span>`),
+                        viewCardHalf('Renglones de comprobantes', `<span class="badge badge-info">${a.renglones_count}</span>`),
+                        viewCardHalf('Chips',   `<span class="badge badge-info">${a.chips_count}</span>`),
+                        viewCardHalf('Ítems en carritos', `<span class="badge badge-info">${a.carritos_count}</span>`),
+                        viewCardFull('Web',     a.web ? escape(a.web) : `<span class="muted">Sin web</span>`),
+                        viewCardFull('Descripción', a.descripcion
+                            ? escape(a.descripcion).replace(/\n/g, '<br>')
+                            : `<span class="muted">Sin descripción</span>`),
+                        /* `metadatos` son los bloques que lee la tienda pública
+                           (<resumen>, <especificaciones>): se muestran
+                           monoespaciados y con los saltos tal cual, porque el
+                           formato es parte del dato. */
+                        viewCardFull('Metadatos', a.metadatos
+                            ? `<pre class="art-metadatos">${escape(a.metadatos)}</pre>`
+                            : `<span class="muted">Sin metadatos</span>`),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
+            const items = [
+                { act: 'edit', label: 'Editar artículo', icon: 'fa-pencil',
+                  onSelect: () => { close(); openArticuloModal(a); } },
+                { divider: true },
+                { act: 'recalcular', label: 'Recalcular precios', icon: 'fa-calculator',
+                  onSelect: () => { close(); pedirRecalcularArticulo(a); } },
+            ];
+            if (a.planes_count > 0) {
+                items.push({ act: 'planes', label: 'Listar planes', icon: 'fa-layer-group',
+                             onSelect: () => { close(); pedirFiltroCampo('planes', 'articulo', a.id); } });
+            }
+            items.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(a.nombre) });
+            items.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(a.id)) });
+            items.push({ divider: true });
+            items.push({ act: 'delete', label: 'Eliminar artículo', icon: 'fa-trash', danger: true,
+                         onSelect: () => { close(); pedirImpactoArticulo(a); } });
+            return items;
+        });
+    }
+
+    function openArticuloModal(a) {
+        const isEdit = !!a;
+        const cat    = CATALOGOS_ARTICULOS;
+
+        /* Un `<select>` que no tenga opción para el valor guardado lo borra en
+           silencio al guardar: el navegador cae en la primera opción. Por eso,
+           cuando el valor actual no figura en el catálogo, se le agrega su
+           propia opción marcada. El backend hace la contraparte. Es el mismo
+           helper que ya usa Talonarios. */
+        const selectOpts = (items, valorSel, vacio, mapear) => {
+            const sel  = String(valorSel ?? '');
+            const opts = items.map(mapear);
+            const huerfano = sel !== '' && !opts.some(o => o.valor === sel);
+            if (huerfano) opts.unshift({ valor: sel, texto: sel + ' (fuera de catálogo)' });
+            return ['<option value="">' + escape(vacio) + '</option>'].concat(
+                opts.map(o =>
+                    `<option value="${escape(o.valor)}"${o.valor === sel ? ' selected' : ''}>${escape(o.texto)}</option>`)
+            ).join('');
+        };
+
+        const tipOpts = selectOpts(cat.tipos,      a?.tipo,      'Sin tipo',      x => x);
+        const catOpts = selectOpts(cat.categorias, a?.categoria, 'Sin categoría',
+                                   c => ({ valor: String(c.id), texto: articuloCategoriaLabel(c) }));
+
+        // `moneda` y `visibilidad` no llevan opción vacía: la primera porque sin
+        // ella la cuenta de precios no existe, y la segunda porque las 106 filas
+        // tienen una de las dos. En el alta arrancan como el `nuevo()` del
+        // sistema histórico — dólar, público, habilitado, IVA 21 %.
+        const monActual = isEdit ? (a.moneda || 'D') : 'D';
+        const visActual = isEdit ? (a.visibilidad || '1') : '1';
+        const habActual = isEdit ? String(a.habilitado) : '1';
+        const sinVacia = (items, actual, fallback) =>
+            (items.length ? items : fallback)
+                .map(o => `<option value="${escape(o.valor)}"${o.valor === actual ? ' selected' : ''}>${escape(o.texto)}</option>`)
+                .join('');
+        const monOpts = sinVacia(cat.monedas,     monActual, [{ valor: 'D', texto: 'Dolar' },   { valor: 'P', texto: 'Peso' }]);
+        const visOpts = sinVacia(cat.visibilidad, visActual, [{ valor: '1', texto: 'Público' }, { valor: '0', texto: 'Privado' }]);
+        const habOpts = [{ valor: '1', texto: 'Habilitado' }, { valor: '0', texto: 'Deshabilitado' }]
+            .map(o => `<option value="${o.valor}"${o.valor === habActual ? ' selected' : ''}>${o.texto}</option>`).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar artículo' : 'Nuevo artículo'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">Identificación</div>
+                        <div class="form-group">
+                            <label for="art-nombre">Nombre *</label>
+                            <input type="text" id="art-nombre" maxlength="100" value="${escape(a?.nombre ?? '')}"
+                                   placeholder="CE-M1OC | Control de Encendido Minibox 1 Canal">
+                            <div class="field-error" id="art-nombre-err" style="display:none"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="art-tipo">Tipo</label>
+                                <select id="art-tipo">${tipOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-categoria">Categoría</label>
+                                <select id="art-categoria">${catOpts}</select>
+                            </div>
+                        </div>
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="art-marca">Marca</label>
+                                <input type="text" id="art-marca" maxlength="100" value="${escape(a?.marca ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="art-sku">Código SKU</label>
+                                <input type="text" id="art-sku" maxlength="50" value="${escape(a?.sku ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="art-ean">Código EAN</label>
+                                <input type="text" id="art-ean" maxlength="50" value="${escape(a?.ean ?? '')}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Stock</div>
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="art-actual">Actual</label>
+                                <input type="number" id="art-actual" step="1" value="${escape(String(a?.actual ?? 0))}">
+                                <div class="field-error" id="art-actual-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-minimo">Mínimo</label>
+                                <input type="number" id="art-minimo" step="1" value="${escape(String(a?.minimo ?? 0))}">
+                                <div class="field-error" id="art-minimo-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-recomendado">Recomendado</label>
+                                <input type="number" id="art-recomendado" step="1" value="${escape(String(a?.recomendado ?? 0))}">
+                                <div class="field-error" id="art-recomendado-err" style="display:none"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Precios</div>
+                        ${/* Los dos precios de abajo son DERIVADOS y por eso van
+                             `readonly` con vista previa en vivo: la cuenta la
+                             hace el backend en cada guardado (es la de
+                             `cArticulo::recalcular()`), así que si la calculara
+                             también el front habría dos fórmulas que se pueden
+                             desincronizar. Lo único que hace este JS es
+                             MOSTRARLA antes de mandar. */''}
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="art-moneda">
+                                    Moneda de compra
+                                    ${ayudaDeCampo('<strong>Dólar</strong>: el precio de compra sale de la importación por la cotización. <strong>Peso</strong>: el precio de compra se carga a mano.')}
+                                </label>
+                                <select id="art-moneda">${monOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-importacion">Importación (USD)</label>
+                                <input type="number" id="art-importacion" min="0" step="0.01"
+                                       value="${escape(String(a?.importacion ?? 0))}">
+                                <div class="field-error" id="art-importacion-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-iva">IVA (%)</label>
+                                <input type="number" id="art-iva" min="0" max="100" step="0.01"
+                                       value="${escape(String(a?.iva ?? 21))}">
+                                <div class="field-error" id="art-iva-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="art-compra">Precio de compra (ARS)</label>
+                                <input type="number" id="art-compra" min="0" step="0.01"
+                                       value="${escape(String(a?.compra ?? 0))}">
+                                <div class="field-error" id="art-compra-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-margen">Margen (%)</label>
+                                <input type="number" id="art-margen" min="0" step="0.01"
+                                       value="${escape(String(a?.margen ?? 0))}">
+                                <div class="field-error" id="art-margen-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-venta">Precio de venta (ARS)</label>
+                                <input type="number" id="art-venta" readonly value="${escape(String(a?.venta ?? 0))}">
+                            </div>
+                        </div>
+                        <div class="form-nota" id="art-precios-nota"></div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Publicación</div>
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="art-visibilidad">
+                                    Visibilidad
+                                    ${ayudaDeCampo('Decide si el artículo se publica en la tienda. Es independiente de <strong>Estado</strong>, que decide si se puede usar.')}
+                                </label>
+                                <select id="art-visibilidad">${visOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-habilitado">Estado</label>
+                                <select id="art-habilitado">${habOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="art-web">Web</label>
+                                <input type="text" id="art-web" maxlength="255" value="${escape(a?.web ?? '')}">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="art-descripcion">Descripción</label>
+                            <textarea id="art-descripcion" rows="4" placeholder="Opcional">${escape(a?.descripcion ?? '')}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="art-metadatos">Metadatos</label>
+                            <textarea id="art-metadatos" rows="6" class="art-metadatos-input"
+                                      placeholder="&lt;resumen&gt;…&lt;/resumen&gt;">${escape(a?.metadatos ?? '')}</textarea>
+                            <div class="form-nota">
+                                Bloques que lee la tienda pública (<code>&lt;oferta&gt;</code>,
+                                <code>&lt;resumen&gt;</code>, <code>&lt;especificaciones&gt;</code>).
+                                Los saltos de línea son parte del dato: se guardan tal cual.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el      = id => backdrop.querySelector('#art-' + id);
+        const val     = id => el(id).value.trim();
+        const num     = id => { const n = Number(val(id)); return Number.isFinite(n) ? n : 0; };
+        const saveBtn = backdrop.querySelector('[data-act="save"]');
+
+        // Vista previa de los dos precios derivados. Reproduce la cuenta del
+        // backend para MOSTRARLA; lo que se guarda lo calcula él.
+        function refrescarPrecios() {
+            const enDolares = val('moneda') === 'D';
+            const compraEl  = el('compra');
+
+            if (enDolares) {
+                // La compra la manda la cotización: el campo pasa a sólo lectura
+                // y se pinta con el resultado. Dejarlo editable prometería un
+                // valor que el guardado descarta.
+                compraEl.readOnly = true;
+                compraEl.value = (num('importacion') * (cat.cotizacion || 0)).toFixed(2);
+            } else {
+                compraEl.readOnly = false;
+            }
+
+            const compra = Number(compraEl.value) || 0;
+            el('venta').value = (compra + (compra * num('margen') / 100)).toFixed(2);
+
+            el('precios-nota').innerHTML = enDolares
+                ? `El <strong>precio de compra</strong> se recalcula al guardar con la cotización vigente
+                   (<strong>${escape(moneda(cat.cotizacion))}</strong>${cat.cotizacion_fecha
+                       ? ', del ' + escape(formatDateOnly(cat.cotizacion_fecha)) : ''}),
+                   y el <strong>de venta</strong> sale siempre de compra + margen. Por eso no se editan.`
+                : `Con la moneda en pesos el <strong>precio de compra</strong> se carga a mano.
+                   El <strong>de venta</strong> sale siempre de compra + margen, así que no se edita.`;
+        }
+        ['moneda', 'importacion', 'compra', 'margen'].forEach(id => {
+            el(id).addEventListener('input',  refrescarPrecios);
+            el(id).addEventListener('change', refrescarPrecios);
+        });
+        refrescarPrecios();
+
+        el('nombre').focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const campos = ['nombre', 'actual', 'minimo', 'recomendado', 'importacion', 'compra', 'margen', 'iva'];
+            campos.forEach(id => {
+                el(id + '-err').style.display = 'none';
+                el(id).classList.remove('input-invalid');
+            });
+
+            const marcar = (campo, msg) => {
+                const e = el(campo + '-err');
+                e.textContent = msg;
+                e.style.display = 'block';
+                el(campo).classList.add('input-invalid');
+                return el(campo);
+            };
+
+            let firstInvalid = null;
+
+            // El backend valida lo mismo; marcarlo acá evita el viaje y deja el
+            // error pegado al campo en vez de en un toast.
+            if (val('nombre') === '') firstInvalid = marcar('nombre', 'El nombre es obligatorio');
+
+            ['actual', 'minimo', 'recomendado'].forEach(id => {
+                if (!/^-?\d+$/.test(val(id) || '0')) {
+                    firstInvalid = firstInvalid || marcar(id, 'Tiene que ser un número entero');
+                }
+            });
+            ['importacion', 'compra', 'margen', 'iva'].forEach(id => {
+                const v = val(id) || '0';
+                if (!/^\d+(\.\d+)?$/.test(v)) {
+                    firstInvalid = firstInvalid || marcar(id, 'Tiene que ser un número de 0 o más');
+                }
+            });
+            if (num('iva') > 100) firstInvalid = firstInvalid || marcar('iva', 'El IVA no puede superar 100 %');
+
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            // `venta` no viaja: la deriva el backend. `compra` sí, porque en
+            // pesos es un dato que se carga — en dólares la descarta él.
+            const payload = {
+                tipo:        val('tipo'),
+                categoria:   val('categoria'),
+                marca:       val('marca'),
+                nombre:      val('nombre'),
+                descripcion: el('descripcion').value,
+                metadatos:   el('metadatos').value,
+                sku:         val('sku'),
+                ean:         val('ean'),
+                actual:      val('actual') || '0',
+                minimo:      val('minimo') || '0',
+                recomendado: val('recomendado') || '0',
+                iva:         val('iva') || '0',
+                moneda:      val('moneda'),
+                importacion: val('importacion') || '0',
+                compra:      val('compra') || '0',
+                margen:      val('margen') || '0',
+                web:         val('web'),
+                visibilidad: val('visibilidad'),
+                habilitado:  val('habilitado'),
+            };
+
+            saveBtn.disabled = true;
+            try {
+                const res = isEdit
+                    ? await api('articulos', { method: 'PUT',  body: { id: a.id, ...payload } })
+                    : await api('articulos', { method: 'POST', body: payload });
+                toast((isEdit ? 'Artículo actualizado' : 'Artículo creado') +
+                      (res && res.venta != null ? ' — venta ' + moneda(res.venta) : ''));
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    // Las cuatro FK que apuntan a `articulos` son RESTRICT y las cuatro
+    // bloquean, así que la baja usa el modal con desglose (ABM.md, "Eliminar";
+    // DESIGN.md §15.1). Las cantidades las pide el backend.
+    async function pedirImpactoArticulo(a) {
+        try {
+            const impacto = await api('articulos?impacto=1&id=' + encodeURIComponent(a.id));
+            openArticuloDeleteModal(a, impacto);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openArticuloDeleteModal(a, impacto) {
+        const bloqueos  = impacto.bloqueos || [];
+        const bloqueado = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const avisoBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Reasigná esas filas a otro artículo antes de borrarlo.
+                </div>
+            </div>`;
+
+        const sinDatos = bloqueado ? '' : `
+            <div class="del-empty">No lo factura ningún plan ni aparece en comprobantes, chips o carritos.</div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar artículo</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar artículo
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el artículo
+                        <strong>${escape(a.nombre)}</strong>
+                        <code>#${a.id}</code>
+                    </div>
+                    ${avisoBloqueo}
+                    ${sinDatos}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                await api('articulos?id=' + encodeURIComponent(a.id), { method: 'DELETE' });
+                close();
+                toast('Artículo eliminado');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    // `Recalcular precios` escribe dos columnas de plata, así que la
+    // confirmación muestra lo que va a escribir (DESIGN.md §15.2): el `GET`
+    // previsualiza y el `POST` ejecuta, y los dos resuelven la MISMA función del
+    // backend.
+    async function pedirRecalcularArticulo(a) {
+        try {
+            const previo = await api('articulos_accion?accion=recalcular&id=' + encodeURIComponent(a.id));
+            openArticuloRecalcularModal(previo);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openArticuloRecalcularModal(p) {
+        const bloqueos  = p.bloqueos || [];
+        const avisos    = p.avisos   || [];
+        const bloqueado = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                ${it.cantidad ? `<span class="badge ${badge}">${it.cantidad}</span>` : ''}
+            </li>`;
+
+        const cajaBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede recalcular.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                </div>
+            </div>`;
+
+        const cajaAvisos = !avisos.length ? '' : `
+            <div class="del-blocker del-aviso">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <div>
+                    <strong>Antes de confirmar.</strong>
+                    <ul class="del-list">${avisos.map(b => linea(b, 'badge-warn')).join('')}</ul>
+                </div>
+            </div>`;
+
+        const delta = (antes, despues) => {
+            if (Math.abs(despues - antes) <= 0.01) return `<span class="muted">sin cambio</span>`;
+            const sube = despues > antes;
+            return `<span class="badge ${sube ? 'badge-warn' : 'badge-info'}">${sube ? '▲' : '▼'} ${
+                escape(moneda(Math.abs(despues - antes)))}</span>`;
+        };
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Recalcular precios</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del recálculo">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-primary" data-act="ok">
+                        <i class="fa-solid fa-calculator"></i> Recalcular precios
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se van a reescribir el precio de compra y el de venta de
+                        <strong>${escape(p.articulo.nombre)}</strong> <code>#${p.articulo.id}</code>
+                        con la cotización vigente.
+                    </div>
+                    ${cajaBloqueo}
+                    ${cajaAvisos}
+                    ${/* Seis tarjetas media: tres renglones que cierran de a dos
+                         (§25). Agregar o quitar una obliga a rehacer la cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Moneda', p.articulo.moneda
+                            ? `<span class="badge badge-info">${escape(p.articulo.moneda_texto || p.articulo.moneda)}</span>`
+                            : `<span class="muted">Sin moneda</span>`),
+                        viewCardHalf('Cotización vigente', escape(moneda(p.cotizacion)) +
+                            (p.cotizacion_fecha ? ` <span class="muted">· ${escape(formatDateOnly(p.cotizacion_fecha))}</span>` : '')),
+                        viewCardHalf('Precio de compra',
+                            `${escape(moneda(p.antes.compra))} → <strong>${escape(moneda(p.despues.compra))}</strong>
+                             ${delta(p.antes.compra, p.despues.compra)}`),
+                        viewCardHalf('Precio de venta',
+                            `${escape(moneda(p.antes.venta))} → <strong>${escape(moneda(p.despues.venta))}</strong>
+                             ${delta(p.antes.venta, p.despues.venta)}`),
+                        viewCardHalf('Importación', p.articulo.moneda === 'D'
+                            ? `USD ${escape(numero(p.articulo.importacion))}`
+                            : `<span class="muted">No aplica</span>`),
+                        viewCardHalf('Margen', escape(numero(p.articulo.margen)) + ' %'),
+                    ])}
+                    ${!p.planes.length ? '' : `
+                    <div class="form-nota">
+                        Lo facturan como abono:
+                        ${p.planes.map(pl => `<code>#${pl.id}</code> ${escape(pl.nombre)}${
+                            pl.contratos_count ? ` <span class="muted">(${pl.contratos_count} contrato/s)</span>` : ''}`).join(' · ')}
+                    </div>`}
+                    <div class="form-nota">
+                        La cuenta la rehace el servidor al confirmar, con la fila bloqueada: si entre esta
+                        pantalla y el botón cambia la cotización o alguien edita el artículo, se guarda lo
+                        que dé con los datos de ese momento.
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                const res = await api('articulos_accion?accion=recalcular&id=' + encodeURIComponent(p.articulo.id),
+                                      { method: 'POST' });
+                close();
+                toast('Precios recalculados — venta ' + moneda(res.venta));
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    /* ---------- Views: Planes ----------
+     * ABM de `planes`: lo que un dominio tiene contratado — cuánto puede usar y
+     * cuánto paga por eso. `contratos`.`plan` y `utilizaciones`.`plan` cuelgan
+     * de acá.
+     *
+     * EL PRECIO DEL PLAN NO ESTÁ EN ESTA TABLA: está en `articulos`. La columna
+     * `articulo` apunta al artículo que se factura y el abono es su `venta` —
+     * es de ahí que lo cobra `cContrato::facturar()`. Por eso el listado y la
+     * ficha muestran el abono como un dato DEL ARTÍCULO, con su id a la vista y
+     * el atajo al módulo Artículos: cambiarlo se hace allá, y allá es donde un
+     * recálculo por cotización mueve la plata de todos los contratos que cobran
+     * este plan.
+     *
+     * `-1` SIGNIFICA ILIMITADO en los tres cupos, y no es un centinela raro: es
+     * lo que escribe `cPlan::nuevo()` y lo que tienen 31 de los 33 planes en al
+     * menos uno. Se guarda tal cual —traducirlo a NULL rompería
+     * `cPlan::detectar()`, que compara `<= usuarios` contra la columna— pero se
+     * MUESTRA como "Ilimitado": un `-1` en una grilla de cupos se lee como un
+     * error de carga.
+     *
+     * ONCE FILAS NO TIENEN `tipo` (cadena vacía): son los planes viejos
+     * —Edificio / Ciudad / Casa Inteligente, Anónimo, Reactor Ilimitado—, todos
+     * deshabilitados y con contratos todavía colgados (el 118 tiene 9). El
+     * select lleva opción "Sin tipo" por eso.
+     *
+     * EL ORDEN POR DEFECTO ES `orden`, ASCENDENTE, y no `id` descendente como
+     * en el resto de los listados: la columna existe justamente para que los
+     * planes se lean de menor a mayor capacidad, que es como los ofrece la app.
+     */
+    const ORDEN_PLANES = [
+        { value: 'orden',           label: 'Orden'    },
+        { value: 'id',              label: 'Código'   },
+        { value: 'nombre',          label: 'Nombre'   },
+        { value: 'abono',           label: 'Abono'    },
+        { value: 'contratos_count', label: 'Contratos'},
+    ];
+
+    // Catálogos que deja el render del listado para los modales.
+    let CATALOGOS_PLANES = { articulos: [], tipos: [] };
+
+    function planesDefaults() {
+        return {
+            codigo: '', texto: '', tipo: '', articulo: '', habilitado: '',
+            orden: 'orden', dir: 'asc', limit: 100,
+        };
+    }
+
+    async function renderPlanes(root) {
+        try {
+            const data = await api('planes');
+            const r      = data.resumen;
+            const planes = data.planes;
+            CATALOGOS_PLANES = data.catalogos;
+
+            const state = tomarEstadoVista('planes', planesDefaults());
+            // "Listar planes" desde Artículos deja pedido el filtro `Artículo`.
+            const pedido = tomarFiltroCampo('planes');
+            if (pedido) state[pedido.campo] = pedido.valor;
+
+            root.innerHTML = `
+                ${moduleHeader('Planes', 'Lo que cada dominio tiene contratado: los cupos que puede usar y el artículo con el que se le factura el abono.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Habilitados</span>
+                        <span class="stat-value green">${r.habilitados}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Deshabilitados</span>
+                        <span class="stat-value muted">${r.deshabilitados}</span>
+                    </div>
+                    <div class="stat-card" title="Planes con al menos un contrato colgado">
+                        <span class="stat-label">Contratados</span>
+                        <span class="stat-value orange">${r.contratados}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'pla',
+                    quickPlaceholder: 'Buscar nombre, descripción o artículo…',
+                    newLabel:         'Nuevo plan',
+                })}
+                <div class="table-card" id="pla-table"></div>
+            `;
+
+            wirePlanesView(state, planes);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    function planHabilitadoBadge(p) {
+        return p.habilitado === 1
+            ? `<span class="badge badge-success">Habilitado</span>`
+            : `<span class="badge badge-danger">Deshabilitado</span>`;
+    }
+
+    // `-1` es "sin tope". En la columna del listado va el símbolo y en la ficha
+    // la palabra: el número crudo se leería como un error de carga en las dos.
+    function planCupoCorto(v) {
+        return v === -1 ? '∞' : numero(v);
+    }
+    function planCupoLargo(v) {
+        return v === -1 ? `<span class="muted">Ilimitado</span>` : escape(numero(v));
+    }
+
+    function planesTableBody(planes) {
+        if (!planes.length) {
+            return `<div class="table-empty">No hay planes que coincidan. Creá el primero con "Nuevo plan".</div>`;
+        }
+
+        const rows = planes.map(p => `
+            <tr class="row-clickable" data-id="${p.id}">
+                <td><span class="td-id">#${p.id}</span></td>
+                <td>${p.tipo
+                    ? `<span class="badge badge-info">${escape(p.tipo_texto || p.tipo)}</span>`
+                    : '<span class="muted">—</span>'}</td>
+                <td>
+                    <div class="td-nombre">${escape(p.nombre)}</div>
+                    ${p.descripcion ? `<div class="muted">${escape(p.descripcion)}</div>` : ''}
+                </td>
+                <td class="td-num">${escape(planCupoCorto(p.usuarios))}</td>
+                <td class="td-num">${escape(planCupoCorto(p.dispositivos))}</td>
+                <td class="td-num">${escape(planCupoCorto(p.usos))}</td>
+                <td class="td-num">${p.abono == null
+                    ? '<span class="muted">Sin artículo</span>'
+                    : escape(moneda(p.abono))}</td>
+                <td class="td-num">${escape(numero(p.contratos_count))}</td>
+                <td class="td-num"><span class="td-id">${escape(numero(p.orden))}</span></td>
+                <td>${planHabilitadoBadge(p)}</td>
+                ${actionCells()}
+            </tr>
+        `).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Tipo</th>
+                        <th>Nombre</th>
+                        <th class="td-num">Usuarios</th>
+                        <th class="td-num">Dispositivos</th>
+                        <th class="td-num">Usos</th>
+                        <th class="td-num">Abono</th>
+                        <th class="td-num">Contratos</th>
+                        <th class="td-num">Orden</th>
+                        <th>Estado</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    function wirePlanesView(state, allPlanes) {
+        const tableWrap = document.getElementById('pla-table');
+        const quick     = document.getElementById('pla-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('pla-filters');
+        const btnNew    = document.getElementById('pla-new');
+
+        function applyAndRender() {
+            const codigo = parseInt(state.codigo, 10);
+
+            const filtered = allPlanes.filter(p => {
+                if (Number.isFinite(codigo) && p.id !== codigo) return false;
+                if (state.tipo       && p.tipo !== state.tipo) return false;
+                if (state.articulo   && String(p.articulo)   !== state.articulo)   return false;
+                if (state.habilitado && String(p.habilitado) !== state.habilitado) return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = planesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(p) {
+            const extra = [];
+            if (p.contratos_count > 0) {
+                extra.push({ act: 'contratos', label: 'Ver contratos', icon: 'fa-file-contract',
+                             onSelect: () => pedirFiltroCampo('contratos', 'plan', p.id) });
+            }
+            if (p.articulo) {
+                extra.push({ act: 'articulo', label: 'Ver artículo', icon: 'fa-box',
+                             onSelect: () => pedirFiltroCampo('articulos', 'codigo', p.articulo) });
+            }
+            extra.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(p.nombre) });
+            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(p.id)) });
+
+            return standardRowMenuItems({
+                view:   true, onView:   () => openPlanViewModal(p),
+                edit:   true, onEdit:   () => openPlanModal(p),
+                delete: true, onDelete: () => pedirImpactoPlan(p),
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const p  = allPlanes.find(x => x.id === id);
+                if (!p) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(p), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> acción por defecto: Consultar.
+                tr.addEventListener('click', () => openPlanViewModal(p));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(p), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('planes?q=' + encodeURIComponent(q)).then(d => d.planes),
+            alLlegar: filas => { allPlanes = filas; applyAndRender(); },
+        });
+
+        btnFilt.addEventListener('click', () => openPlanesFiltersModal(state, recargar));
+        btnNew.addEventListener('click',  () => openPlanModal(null));
+        wireRefresh('pla', 'planes', state);
+
+        if (state.texto) recargar(); else applyAndRender();
+    }
+
+    // Etiqueta de un artículo en los desplegables: nombre + abono, y el aviso de
+    // deshabilitado — mismo criterio que los planes deshabilitados de Contratos.
+    function planArticuloLabel(a) {
+        const base = `${a.nombre || ('#' + a.id)} · ${moneda(a.venta)}`;
+        return a.habilitado === 1 ? base : base + ' (deshabilitado)';
+    }
+
+    function openPlanesFiltersModal(state, onApply) {
+        const cat = CATALOGOS_PLANES;
+
+        const opciones = (items, valorSel, todos, mapear) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === valorSel ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const tipOpts = opciones(cat.tipos,     state.tipo,     'Todos los tipos', t => t);
+        const artOpts = opciones(cat.articulos, state.articulo, 'Todos los artículos',
+                                 a => ({ valor: String(a.id), texto: planArticuloLabel(a) }));
+        const habOpts = opciones(
+            [{ valor: '1', texto: 'Habilitado' }, { valor: '0', texto: 'Deshabilitado' }],
+            state.habilitado, 'Todos', t => t);
+        const ordOpts = ORDEN_PLANES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="pla-fm-codigo">Código</label>
+                    <input type="number" id="pla-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-texto">Buscar (nombre / descripción / artículo)</label>
+                    <input type="search" id="pla-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-tipo">Tipo</label>
+                    <select id="pla-fm-tipo">${tipOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-articulo">Artículo</label>
+                    <select id="pla-fm-articulo">${artOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-habilitado">Estado</label>
+                    <select id="pla-fm-habilitado">${habOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-limit">Límite</label>
+                    <input type="number" id="pla-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-orden">Ordenar por</label>
+                    <select id="pla-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="pla-fm-dir">Dirección</label>
+                    <select id="pla-fm-dir">
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            onApply(modal) {
+                state.codigo     = modal.querySelector('#pla-fm-codigo').value.trim();
+                state.texto      = modal.querySelector('#pla-fm-texto').value.trim();
+                state.tipo       = modal.querySelector('#pla-fm-tipo').value;
+                state.articulo   = modal.querySelector('#pla-fm-articulo').value;
+                state.habilitado = modal.querySelector('#pla-fm-habilitado').value;
+                state.orden      = modal.querySelector('#pla-fm-orden').value;
+                state.dir        = modal.querySelector('#pla-fm-dir').value;
+                state.limit      = readLimit(modal.querySelector('#pla-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = planesDefaults();
+                modal.querySelector('#pla-fm-codigo').value     = d.codigo;
+                modal.querySelector('#pla-fm-texto').value      = d.texto;
+                modal.querySelector('#pla-fm-tipo').value       = d.tipo;
+                modal.querySelector('#pla-fm-articulo').value   = d.articulo;
+                modal.querySelector('#pla-fm-habilitado').value = d.habilitado;
+                modal.querySelector('#pla-fm-orden').value      = d.orden;
+                modal.querySelector('#pla-fm-dir').value        = d.dir;
+                modal.querySelector('#pla-fm-limit').value      = String(d.limit);
+            },
+        });
+    }
+
+    function openPlanViewModal(p) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar plan</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del plan">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${/* 13 tarjetas: 10 `half` + 3 `full` (§25 de DESIGN.md).
+                        Los `half` van de a pares y cada `full` cae después de un
+                        renglón cerrado: 2 half · Nombre full · 8 half (cuatro
+                        renglones) · Artículo y Descripción full. Agregar o
+                        quitar un campo obliga a rehacer esta cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código', `<code>#${p.id}</code>`),
+                        viewCardHalf('Estado', planHabilitadoBadge(p)),
+                        viewCardFull('Nombre', escape(p.nombre)),
+                        viewCardHalf('Tipo', p.tipo
+                            ? `<span class="badge badge-info">${escape(p.tipo_texto || p.tipo)}</span> <code>${escape(p.tipo)}</code>`
+                            : `<span class="muted">Sin tipo</span>`),
+                        viewCardHalf('Orden', `<code>${escape(numero(p.orden))}</code>`),
+                        viewCardHalf('Cupo de usuarios',     planCupoLargo(p.usuarios)),
+                        viewCardHalf('Cupo de dispositivos', planCupoLargo(p.dispositivos)),
+                        viewCardHalf('Cupo de usos',         planCupoLargo(p.usos)),
+                        viewCardHalf('Abono', p.abono == null
+                            ? `<span class="muted">Sin artículo, no se factura</span>`
+                            : `${escape(moneda(p.abono))} <span class="muted">· del artículo</span>`),
+                        viewCardHalf('Contratos',     `<span class="badge badge-info">${p.contratos_count}</span>`),
+                        viewCardHalf('Utilizaciones', `<span class="badge badge-info">${p.utilizaciones_count}</span>`),
+                        viewCardFull('Artículo que factura el abono', p.articulo
+                            ? `${refValue(p.articulo, p.articulo_nombre)}${p.articulo_habilitado === 0
+                                ? ` <span class="badge badge-warn">Deshabilitado</span>` : ''}`
+                            : `<span class="muted">Sin artículo</span>`),
+                        viewCardFull('Descripción', p.descripcion
+                            ? escape(p.descripcion)
+                            : `<span class="muted">Sin descripción</span>`),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
+            const items = [
+                { act: 'edit', label: 'Editar plan', icon: 'fa-pencil',
+                  onSelect: () => { close(); openPlanModal(p); } },
+                { divider: true },
+            ];
+            if (p.contratos_count > 0) {
+                items.push({ act: 'contratos', label: 'Ver contratos', icon: 'fa-file-contract',
+                             onSelect: () => { close(); pedirFiltroCampo('contratos', 'plan', p.id); } });
+            }
+            if (p.articulo) {
+                items.push({ act: 'articulo', label: 'Ver artículo', icon: 'fa-box',
+                             onSelect: () => { close(); pedirFiltroCampo('articulos', 'codigo', p.articulo); } });
+            }
+            items.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(p.nombre) });
+            items.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(p.id)) });
+            items.push({ divider: true });
+            items.push({ act: 'delete', label: 'Eliminar plan', icon: 'fa-trash', danger: true,
+                         onSelect: () => { close(); pedirImpactoPlan(p); } });
+            return items;
+        });
+    }
+
+    function openPlanModal(p) {
+        const isEdit = !!p;
+        const cat    = CATALOGOS_PLANES;
+
+        const selectOpts = (items, valorSel, vacio, mapear) => {
+            const sel  = String(valorSel ?? '');
+            const opts = items.map(mapear);
+            const huerfano = sel !== '' && !opts.some(o => o.valor === sel);
+            if (huerfano) opts.unshift({ valor: sel, texto: sel + ' (fuera de catálogo)' });
+            return ['<option value="">' + escape(vacio) + '</option>'].concat(
+                opts.map(o =>
+                    `<option value="${escape(o.valor)}"${o.valor === sel ? ' selected' : ''}>${escape(o.texto)}</option>`)
+            ).join('');
+        };
+
+        const tipOpts = selectOpts(cat.tipos,     p?.tipo,     'Sin tipo',     x => x);
+        const artOpts = selectOpts(cat.articulos, p?.articulo, 'Sin artículo',
+                                   a => ({ valor: String(a.id), texto: planArticuloLabel(a) }));
+
+        const habActual = isEdit ? String(p.habilitado) : '1';
+        const habOpts = [{ valor: '1', texto: 'Habilitado' }, { valor: '0', texto: 'Deshabilitado' }]
+            .map(o => `<option value="${o.valor}"${o.valor === habActual ? ' selected' : ''}>${o.texto}</option>`).join('');
+
+        // En el alta los tres cupos arrancan en -1, que es lo que hace
+        // `cPlan::nuevo()`: un plan nace sin topes y se le ponen los que tenga.
+        const cupo = v => String(v ?? -1);
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar plan' : 'Nuevo plan'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">El plan</div>
+                        <div class="form-group">
+                            <label for="pla-nombre">Nombre *</label>
+                            <input type="text" id="pla-nombre" maxlength="255" value="${escape(p?.nombre ?? '')}"
+                                   placeholder="Plan Standard | de 11 a 20 usuarios">
+                            <div class="field-error" id="pla-nombre-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="pla-descripcion">Descripción</label>
+                            <input type="text" id="pla-descripcion" maxlength="255" value="${escape(p?.descripcion ?? '')}"
+                                   placeholder="Opcional">
+                        </div>
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="pla-tipo">Tipo</label>
+                                <select id="pla-tipo">${tipOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="pla-habilitado">Estado</label>
+                                <select id="pla-habilitado">${habOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="pla-orden">
+                                    Orden
+                                    ${ayudaDeCampo('Con qué número se ordena el plan en el listado y en la app. Los planes se leen de menor a mayor capacidad.')}
+                                </label>
+                                <input type="number" id="pla-orden" min="0" step="1" value="${escape(String(p?.orden ?? 0))}">
+                                <div class="field-error" id="pla-orden-err" style="display:none"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Cupos</div>
+                        <div class="form-row form-row-3">
+                            <div class="form-group">
+                                <label for="pla-usuarios">Usuarios</label>
+                                <input type="number" id="pla-usuarios" min="-1" step="1" value="${escape(cupo(p?.usuarios))}">
+                                <div class="form-nota" id="pla-usuarios-nota"></div>
+                                <div class="field-error" id="pla-usuarios-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="pla-dispositivos">Dispositivos</label>
+                                <input type="number" id="pla-dispositivos" min="-1" step="1" value="${escape(cupo(p?.dispositivos))}">
+                                <div class="form-nota" id="pla-dispositivos-nota"></div>
+                                <div class="field-error" id="pla-dispositivos-err" style="display:none"></div>
+                            </div>
+                            <div class="form-group">
+                                <label for="pla-usos">Usos</label>
+                                <input type="number" id="pla-usos" min="-1" step="1" value="${escape(cupo(p?.usos))}">
+                                <div class="form-nota" id="pla-usos-nota"></div>
+                                <div class="field-error" id="pla-usos-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-nota">
+                            <code>-1</code> significa <strong>ilimitado</strong> y es el valor que el sistema
+                            usa para "sin tope": 31 de los 33 planes lo tienen en al menos un cupo.
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Abono</div>
+                        <div class="form-group">
+                            <label for="pla-articulo">Artículo que factura el abono</label>
+                            <select id="pla-articulo">${artOpts}</select>
+                            <div class="form-nota" id="pla-abono-nota"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el      = id => backdrop.querySelector('#pla-' + id);
+        const val     = id => el(id).value.trim();
+        const saveBtn = backdrop.querySelector('[data-act="save"]');
+
+        // El precio no se edita acá: es del artículo. La nota lo dice y muestra
+        // cuál va a ser el abono, para que elegir el artículo no sea a ciegas.
+        function refrescarAbono() {
+            const art = cat.articulos.find(a => String(a.id) === val('articulo'));
+            el('abono-nota').innerHTML = art
+                ? `El abono va a ser <strong>${escape(moneda(art.venta))}</strong>, que es el precio de venta
+                   del artículo <code>#${art.id}</code>. Se cambia desde <em>Artículos</em>, no acá.`
+                : `Sin artículo el plan no tiene abono: facturar un contrato con este plan no emitiría
+                   el renglón del abono.`;
+        }
+        el('articulo').addEventListener('change', refrescarAbono);
+        refrescarAbono();
+
+        // Glosa en vivo del `-1`, pegada a cada cupo: la regla general está
+        // abajo, pero el que está tipeando necesita ver qué quedó en ESE campo.
+        function refrescarCupos() {
+            ['usuarios', 'dispositivos', 'usos'].forEach(id => {
+                el(id + '-nota').textContent = val(id) === '-1' ? 'Ilimitado' : '';
+            });
+        }
+        ['usuarios', 'dispositivos', 'usos'].forEach(id => {
+            el(id).addEventListener('input',  refrescarCupos);
+            el(id).addEventListener('change', refrescarCupos);
+        });
+        refrescarCupos();
+
+        el('nombre').focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const campos = ['nombre', 'orden', 'usuarios', 'dispositivos', 'usos'];
+            campos.forEach(id => {
+                el(id + '-err').style.display = 'none';
+                el(id).classList.remove('input-invalid');
+            });
+
+            const marcar = (campo, msg) => {
+                const e = el(campo + '-err');
+                e.textContent = msg;
+                e.style.display = 'block';
+                el(campo).classList.add('input-invalid');
+                return el(campo);
+            };
+
+            let firstInvalid = null;
+
+            if (val('nombre') === '') firstInvalid = marcar('nombre', 'El nombre es obligatorio');
+            if (!/^\d+$/.test(val('orden') || '0')) {
+                firstInvalid = firstInvalid || marcar('orden', 'El orden va de 0 para arriba');
+            }
+            ['usuarios', 'dispositivos', 'usos'].forEach(id => {
+                const v = val(id) || '-1';
+                if (!/^-?\d+$/.test(v) || Number(v) < -1) {
+                    firstInvalid = firstInvalid || marcar(id, 'Sólo -1 (ilimitado) o un número de 0 para arriba');
+                }
+            });
+
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = {
+                tipo:         val('tipo'),
+                nombre:       val('nombre'),
+                descripcion:  val('descripcion'),
+                habilitado:   val('habilitado'),
+                articulo:     val('articulo'),
+                usuarios:     val('usuarios')     || '-1',
+                dispositivos: val('dispositivos') || '-1',
+                usos:         val('usos')         || '-1',
+                orden:        val('orden')        || '0',
+            };
+
+            saveBtn.disabled = true;
+            try {
+                const res = isEdit
+                    ? await api('planes', { method: 'PUT',  body: { id: p.id, ...payload } })
+                    : await api('planes', { method: 'POST', body: payload });
+                toast((isEdit ? 'Plan actualizado' : 'Plan creado') +
+                      (res && res.nombre ? ' — ' + res.nombre : ''));
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    // Las dos FK que apuntan a `planes` son RESTRICT y las dos bloquean, así que
+    // la baja usa el modal con desglose (ABM.md, "Eliminar"; DESIGN.md §15.1).
+    async function pedirImpactoPlan(p) {
+        try {
+            const impacto = await api('planes?impacto=1&id=' + encodeURIComponent(p.id));
+            openPlanDeleteModal(p, impacto);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openPlanDeleteModal(p, impacto) {
+        const bloqueos  = impacto.bloqueos || [];
+        const bloqueado = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const avisoBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Pasá esos contratos a otro plan antes de borrarlo.
+                </div>
+            </div>`;
+
+        const sinDatos = bloqueado ? '' : `
+            <div class="del-empty">No tiene contratos ni utilizaciones registradas.</div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar plan</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar plan
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el plan
+                        <strong>${escape(p.nombre)}</strong>
+                        <code>#${p.id}</code>
+                    </div>
+                    ${avisoBloqueo}
+                    ${sinDatos}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                await api('planes?id=' + encodeURIComponent(p.id), { method: 'DELETE' });
+                close();
+                toast('Plan eliminado');
                 navigate();
             } catch (err) {
                 btn.disabled = false;
@@ -18363,9 +21213,37 @@
     }
 
     /* ---------- Utils ---------- */
+    /* Parseo único de las fechas que manda el backend, y la razón por la que hay
+       un helper en vez de un `new Date()` suelto en cada formateador:
+
+       `new Date('2026-10-01')` —una fecha SIN hora— la spec obliga a leerla como
+       MEDIANOCHE UTC, mientras que `'2026-10-01 09:42:54'` (con hora y sin `Z`)
+       se lee en hora LOCAL. O sea que las dos formas que llegan de la base se
+       interpretan en husos distintos. Al bajarla a Buenos Aires (UTC−3), la
+       primera retrocede tres horas y cae el día anterior: `2026-10-01` se
+       dibujaba **30/9/2026**.
+
+       SOBRE CONTRATOS ESO NO ERA COSMÉTICO. `contratos`.`facturar` ES el mes que
+       se va a facturar, y el comprobante rotula el período con ese mes
+       (`api/contratos_accion.php`). Con el corrimiento, una ficha que decía
+       `Facturar 30/9/2026` emitía "Período 2026-10": el operador leía septiembre
+       en pantalla y salía octubre. Las 49 filas con fecha real tienen día 1, así
+       que el corrimiento las cruzaba TODAS de mes.
+
+       Por eso la fecha sin hora se arma con los componentes, que es la única
+       forma de fijarla al huso local. La que trae hora no se toca: ya se lee
+       bien. */
+    function parseFecha(s) {
+        const t = String(s);
+        const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+        return iso
+            ? new Date(+iso[1], +iso[2] - 1, +iso[3])
+            : new Date(t.replace(' ', 'T'));
+    }
+
     function formatDate(s) {
         if (!s) return '—';
-        const d = new Date(String(s).replace(' ', 'T'));
+        const d = parseFecha(s);
         if (isNaN(d)) return escape(s);
         return d.toLocaleString('es-AR');
     }
@@ -18373,7 +21251,7 @@
     // Variante compacta para el feed en vivo del dashboard: sólo HH:MM:SS.
     function formatTime(s) {
         if (!s) return '—';
-        const d = new Date(String(s).replace(' ', 'T'));
+        const d = parseFecha(s);
         if (isNaN(d)) return String(s);
         return d.toLocaleTimeString('es-AR', { hour12: false });
     }
@@ -18381,7 +21259,7 @@
     // Sólo la fecha (dd/MM/aaaa) — usado en el feed en vivo arriba de la hora.
     function formatDateOnly(s) {
         if (!s) return '—';
-        const d = new Date(String(s).replace(' ', 'T'));
+        const d = parseFecha(s);
         if (isNaN(d)) return String(s);
         return d.toLocaleDateString('es-AR');
     }

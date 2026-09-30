@@ -157,6 +157,20 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                     <a href="#/talonarios" data-route="talonarios" class="nav-item nav-sub-item">
                         <i class="fa-solid fa-receipt nav-icon"></i> Talonarios
                     </a>
+                    <?php
+                    // Artículos y Planes van al final del grupo y no antes de
+                    // Contratos aunque sean el catálogo del que éste cuelga:
+                    // Contratos / Comprobantes / Talonarios es el circuito que
+                    // el operador recorre todos los días, y el catálogo se toca
+                    // de vez en cuando. Planes queda pegado a Artículos porque
+                    // su abono ES el precio de venta de un artículo.
+                    ?>
+                    <a href="#/articulos" data-route="articulos" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-box nav-icon"></i> Artículos
+                    </a>
+                    <a href="#/planes" data-route="planes" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-layer-group nav-icon"></i> Planes
+                    </a>
                 </div>
             </div>
 

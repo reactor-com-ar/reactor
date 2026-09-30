@@ -418,6 +418,16 @@ son CSS y no hay nada que cablear.
   un globito que sube por encima del primer renglón queda recortado contra el
   borde del modal. Y se ancla al borde **izquierdo** del ícono en vez de
   centrarse, para que crezca hacia adentro del formulario.
+- **En la ÚLTIMA COLUMNA del `.form-row` se ancla al borde derecho**
+  (`.form-row > *:last-child .field-help-tip { left: auto; right: 0 }`), y eso
+  no es estética: anclado a la izquierda el globito mide hasta 280 px y se sale
+  del modal, que al ser `overflow-y: auto` se vuelve contenedor de scroll en los
+  **dos** ejes — o sea que aparece una **barra horizontal** en un formulario que
+  entra holgado. Pasó con `Orden` en la tercera columna de *Editar plan*
+  (`scrollWidth` 831 contra 760 de ancho). La regla mira la **posición en la
+  grilla** y no una clase que ponga quien llama: un campo se mueve de columna al
+  reordenar el formulario y nadie se acordaría de cambiarle el modificador. Con
+  `:last-child` la misma línea cubre `.form-row`, `.form-row-3` y `.form-row-4`.
 - **`pointer-events: none` en el globito**: cae encima del campo de abajo y sin
   eso se come sus clicks.
 - **Lleva `tabindex="0"`** y el CSS engancha `:focus-visible` además de `:hover`:
@@ -494,6 +504,9 @@ No hay chips de filtro inline en listados ABM nuevos (`.filter-chip` queda como 
   - El cableado sale del helper compartido `wireBuscadorSql()`: debounce de 300 ms, token de carrera para descartar la respuesta que llega tarde, y **la `stats-bar` no se repinta** (los KPIs son del universo, no de la consulta — ver abajo).
 - El resto de los filtros sí se aplica al `input`/`change` event sin re-fetch (filtrado client-side por defecto). Señales y Registros son casos mixtos: filtran client-side sobre la última página descargada, pero re-fetchean cuando cambian los parámetros `?dispositivo=` o `?limit=` server-side.
 - El botón `Filtros` es secundario, no primario — la acción primaria del listado es siempre `+ Nuevo <entidad>`, una sola por pantalla (ver §6).
+- **`Listar` es el desplegable de filtros rápidos, y va ANTES de `Filtros`** (`abmToolbar({ listar: true })` + `wireListarMenu(idPrefix, itemsFn)`). Mismo `btn btn-secondary btn-sm` que `Filtros`, con `fa-list` y el `fa-caret-down .menubar-caret` que ya usa el desplegable de la barra de acciones del modal (§21-bis); el menú lo abre `openRowMenu()`, así flota en vez de quedar recortado. **Ofrece exactamente los mismos atajos que las stat cards (§12.1) y los aplica por la misma función** — no una copia del criterio: con dos, tocar el mismo atajo en la tarjeta y en el menú podría dar listas distintas y la tarjeta quedaría desmintiendo al menú. Lo lleva **el módulo que tiene atajos**, hoy sólo Contratos.
+  - **No reemplaza a las tarjetas ni ellas a él.** La tarjeta dice *cuántos hay* y se toca sabiendo el número; el menú se abre sin apuntarle a nada y nombra los atajos en una lista. Un módulo con atajos merece los dos: llegar al subconjunto no puede depender de acertarle a una tarjeta, ni de abrir `Filtros` y armarlo campo por campo, que es lo que el desplegable viene a sacar del medio.
+  - **El orden y los separadores son los del menú `Listar` del back office viejo** (`reactor-admin/contratos/listar.php`): *Todos* — *Habilitados / Deshabilitados* — *Facturables / Remisibles*. Se respetan porque es el agrupamiento con el que la gente ya trabaja, no por nostalgia: los dos pares separados son "por estado" y "por lo que hay que hacerles".
 - **`Refrescar` va inmediatamente a la derecha de `Filtros`, sin texto** (`btn-icon-only` con `fa-rotate`, `title` + `aria-label` "Refrescar listado"). No lleva rótulo porque el ícono de recarga es universal y porque en la zona izquierda compite con la búsqueda rápida, que es lo que el usuario tiene que encontrar primero; comparte variante con `Filtros` para que se lean como un par y no como una acción suelta.
 - **Refrescar re-renderiza el módulo entero, no sólo las filas.** Vuelve a pedir todos los `fetch` del `render*()` —listado, catálogos y **stat cards**—: refrescar sólo la tabla dejaría los KPIs contando lo viejo arriba de datos nuevos, que es peor que no refrescar. Por eso está implementado como `navigate()` y no como un re-fetch local del `applyAndRender()`.
 - **Y conserva los filtros y la búsqueda rápida vigentes.** `navigate()` arranca cada vista de cero, así que el módulo se deja su propio `state` preparado antes de re-renderizar (`refrescarVista(route, state)` → `tomarEstadoVista(route, defaults)` en el `render*()`; mismo criterio de un solo uso y misma-ruta que `pendingDominioFilter`, §21-bis.1). Un refresh que limpia los filtros no refresca: cambia de pantalla.
@@ -611,6 +624,13 @@ rápido de ese subconjunto.** En **Contratos** las cinco —Total, Habilitados,
 Deshabilitados, Facturables, Remisibles— dejan el listado en lo que anuncian.
 Son las mismas cinco entradas del menú `Listar` del back office viejo
 (`reactor-admin/contratos/listar.php`), que es de donde sale la idea.
+
+**Los mismos atajos tienen un segundo acceso: el desplegable `Listar` de la
+toolbar** (§9). La tarjeta y el ítem del menú son el mismo atajo por dos
+caminos, y se aplican por **una sola función** (`aplicarAtajo()`): el catálogo
+del menú (`MENU_LISTAR_CONTRATOS`) dice qué se dibuja y en qué orden, pero el
+estado de cada atajo sale siempre de `ATAJOS_CONTRATOS`, que es lo que leen
+también las tarjetas.
 
 ```html
 <div class="stat-card dash-link" data-atajo="habilitados" role="button" tabindex="0"
@@ -2852,6 +2872,169 @@ El módulo **no aporta componentes nuevos salvo las burbujas del diálogo**. Tod
 
 ---
 
+## 41. Comercial · Artículos
+
+ABM de `articulos`: el catálogo del que cuelga toda la plata del sistema — el abono de cada plan (`planes`.`articulo`), lo que se factura (`comprobantesrenglones`.`articulo`), lo que se le cobra a un chip y lo que publica la tienda. Cuelga de **Comercial**, debajo de `Talonarios`, con `fa-box`.
+
+Reemplaza a `reactor-admin/articulos/` del sistema histórico, que está fuera de este repositorio.
+
+**Va al final del grupo y no antes de Contratos** aunque sea el catálogo del que éste cuelga: `Contratos / Comprobantes / Talonarios` es el circuito que el operador recorre todos los días y el catálogo se toca de vez en cuando. `Planes` queda pegado a `Artículos` porque su abono **es** el precio de venta de un artículo.
+
+### 41.1 Componentes propios
+
+Casi todo sale de piezas ya documentadas — `moduleHeader()` (§23), `abmToolbar()` (§9), tabla estándar (§10), badges (§11), secciones de formulario (§8.1), Modal de Filtros compartido (§23-bis), tarjetas de consulta (§25) y confirmación con previsualización (§15.2). Lo propio son dos cosas:
+
+```css
+/* Marca de "este precio salió con otra cotización", pegada al importe en pesos.
+   Misma métrica que `.plan-modo-icon` —es un atributo del número de al lado, no
+   una columna— pero en `--warn` y no en `--muted`, y ahí está la diferencia:
+   aquélla DESCRIBE un atributo (el modo del plan, que siempre vale algo) y ésta
+   AVISA que el número que se está leyendo no es el que da la cuenta de hoy. Por
+   eso además sólo se dibuja cuando corresponde: un ícono siempre presente deja
+   de avisar nada. */
+.precio-viejo-icon     { color: var(--warn); font-size: .75rem; margin-left: 6px; }
+
+/* Los `metadatos` son los bloques que lee la tienda pública (`<oferta>`,
+   `<resumen>`, `<especificaciones>`), y su formato es parte del dato: los
+   saltos separan secciones y `||` separa columnas. Por eso se muestran y se
+   editan monoespaciados y con los saltos intactos —`pre-wrap` y no un párrafo
+   reflowado—, igual que el cuerpo de una difusión (§37.3). */
+.art-metadatos         { white-space: pre-wrap; word-break: break-word;
+                         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                         font-size: .8rem; line-height: 1.45; margin: 0; }
+.art-metadatos-input   { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                         font-size: .8rem; line-height: 1.45; }
+```
+
+### 41.2 Reglas
+
+- **DOS COLUMNAS SON DERIVADAS Y NO SE TIPEAN.** Es la cuenta de `cArticulo::recalcular()`:
+
+  ```
+  compra = importacion × cotización        (sólo cuando la moneda es Dólar)
+  venta  = compra + compra × margen / 100  (siempre)
+  ```
+
+  Verificado contra la base: las 106 filas cumplen la segunda al centavo. Por eso `Precio de venta` va **siempre** `readonly` y `Precio de compra` lo va **cuando la moneda es Dólar** — dejarlo editable ahí prometería un valor que el guardado descarta. Los dos llevan vista previa en vivo y una `.form-nota` que dice de qué se arman, porque un campo que no se puede editar y no dice por qué se lee como un error (§8, y el mismo trato que `talonarios`.`nombre`).
+- **LA CUENTA LA HACE EL BACKEND; EL FRONT SÓLO LA MUESTRA.** Vive en `api/articulos_lib.php` y la aplican por igual el `PUT` del ABM y la acción de recalcular. El JS del modal reproduce la fórmula **para la vista previa** y nada más: lo que se guarda no sale de ahí.
+- **LOS PRECIOS SE RECALCULAN EN CADA GUARDADO, y eso sorprende: hay que decirlo.** Es lo que hace el back office viejo (`editar.php` llama a `recalcular()` antes de `agregar()` y de `modificar()`) y es la lectura correcta de la columna — `compra` en pesos **es** `importacion` por la cotización. La consecuencia es que corregirle el nombre a un artículo en dólares le actualiza el precio; la nota del formulario lo anuncia **antes** de guardar, que es la única diferencia con el legacy.
+- **LA COTIZACIÓN NO ES UNA COLUMNA: vive en `parametros`.`articulos.dolar.cotizacion`** y la mueve una tarea del sistema histórico (`reactor-api/robot/articulosActualizar.php`). Por eso cada fila arrastra la cotización del día en que se la tocó: al 30/09/2026 conviven cinco (1370, 1375, 1380, 1415, 1450) y **70 de las 106 filas están con una anterior a la vigente**. Eso **no es un error de datos**, es el estado normal entre dos corridas — y por eso el módulo lo cuenta en la stat card `Precio viejo`, lo marca en la fila con `.precio-viejo-icon`, lo filtra desde el modal (`Precio`) y ofrece `Recalcular precios` como acción con nombre.
+- **La cotización vigente se muestra bajo las KPIs, con su fecha y con de dónde sale.** Un precio derivado de un parámetro que la pantalla no muestra no se puede verificar contra nada.
+- **`Recalcular precios` es una ACCIÓN DE NEGOCIO, no un `PUT`.** Vive en `api/articulos_accion.php?accion=recalcular`, `GET` previsualiza y `POST` ejecuta, y los dos resuelven la misma función (§15.2, ABM.md). Es el `Actualizar` del menú `Acciones` del back office viejo. Va **primera dentro del bloque de extras** del menú de fila, antes de las navegaciones y las copias (ABM.md §1.3).
+  - **La confirmación muestra los cuatro números** —compra y venta, antes y después, con el delta— y **los planes que facturan ese artículo con sus contratos** en el recuadro ámbar de avisos: tocar el precio les cambia el abono a todos. Es plata, va dicho antes de confirmar.
+  - **El `POST` rehace la cuenta dentro de la transacción y con la fila bloqueada** (`SELECT … FOR UPDATE`): entre la previsualización y el click alguien pudo editar el artículo o mover la cotización. La `.form-nota` al pie lo dice.
+  - **Sin cotización cargada hay bloqueo, no un recálculo a cero**: el botón de confirmar no se dibuja y el endpoint corta igual con 409. Esconder el botón no es el control (`CLAUDE.md`).
+  - **No hay "recalcular todos".** El robot del legacy sigue siendo el que lo hace en masa; un botón que reescriba el precio de los 106 artículos desde un menú de fila no es la misma decisión.
+- **VISIBILIDAD NO ES `habilitado`: son dos preguntas y van dos badges.** `habilitado` dice si el artículo se puede usar (95 de 106) y `visibilidad` si además se publica en la tienda (38). Un artículo público y deshabilitado es posible y no es una inconsistencia. `visibilidad` es `varchar(10)` con los códigos `'0'`/`'1'` de `combos`, así que **no** se toca con `esHabilitado()` / `valorHabilitado()` — se compara como string, la misma excepción que `aprobacion` en Técnicos (§38).
+- **Marca y categoría van de glosa bajo el nombre, no en columnas propias.** Son cómo se identifica el artículo, no datos que se comparen entre filas. La categoría sí es columna del Modal de Filtros, y en los desplegables se muestra con su **jerarquía** (`Monitores de Corriente · 001.003`), que es lo que dice de qué cuelga.
+- **La columna `USD` sólo trae número cuando la moneda es Dólar.** En pesos la importación no participa de ninguna cuenta: mostrar un `0,00` la haría leer como un precio.
+- **Veintiséis tarjetas en Consultar: veintidós `half` y cuatro `full`** — `Nombre` en la ranura 3 y `Web`, `Descripción` y `Metadatos` al final, que son los campos anchos de verdad. Agregar o quitar un campo obliga a rehacer esa cuenta (§25).
+- **La baja va con el modal de desglose** (§15.1): las cuatro FK que apuntan acá son `RESTRICT` y las cuatro **bloquean** — planes (31 filas), chips (20), renglones de comprobantes (3.135) y ítems de carrito (1). No hay nada que se borre en cascada ni que quede sin referencia, así que las dos secciones del modal viajan vacías y sólo se dibuja el recuadro rojo.
+
+---
+
+## 42. Comercial · Planes
+
+ABM de `planes`: lo que un dominio tiene contratado — cuántos cupos puede usar y cuánto paga por eso. `contratos`.`plan` y `utilizaciones`.`plan` cuelgan de acá. Cuelga de **Comercial**, debajo de `Artículos`, con `fa-layer-group`.
+
+Reemplaza a `reactor-admin/planes/` del sistema histórico. El módulo **no aporta componentes nuevos**: sale entero de las piezas ya documentadas.
+
+**Reglas:**
+
+- **EL PRECIO DEL PLAN NO ESTÁ EN ESTA TABLA: está en `articulos`.** La columna `articulo` apunta al artículo que se factura y el abono es su `venta` — es de ahí que lo cobra `cContrato::facturar()`. Por eso el listado y la ficha muestran el abono como un dato **del artículo**, con su id a la vista, con el atajo `Ver artículo` en el menú y con una `.form-nota` en el formulario que dice cuál va a ser el abono y que se cambia en *Artículos*. Poner un campo de precio acá sería inventar un segundo lugar donde vive el mismo número.
+- **`-1` SIGNIFICA ILIMITADO en los tres cupos, se guarda tal cual y se muestra traducido.** Es lo que escribe `cPlan::nuevo()` y lo que tienen 31 de los 33 planes en al menos uno. Traducirlo a `NULL` rompería `cPlan::detectar()`, que compara `<= usuarios` contra la columna. Pero **un `-1` en una grilla de cupos se lee como un error de carga**, así que la columna del listado muestra `∞`, la ficha dice `Ilimitado` y el formulario —que sí trabaja con el número, porque es lo que vuelve a la base— lleva la glosa `Ilimitado` en vivo bajo el campo que esté en `-1`, más la regla general al pie del bloque.
+- **CADA CUPO TIENE SU PROPIA COLUMNA** — `Usuarios`, `Dispositivos` y `Usos`, las tres numéricas y alineadas a la derecha. Hasta el 30/09/2026 iban apiladas en una sola celda `Usu. / Disp. / Usos` con el tooltip que desplegaba la abreviatura: tres números separados por barras **no se leen en columna** —el ojo no puede comparar el cupo de usuarios de dos planes sin contar las barras primero—, y el encabezado abreviado obligaba a pasar el mouse para saber cuál era cuál. Separadas, el listado ordena y compara como cualquier otra columna numérica y el `∞` queda bajo el rótulo que le corresponde.
+- **Un cupo menor que `-1` se rechaza.** No significa nada y `cPlan::detectar()` lo leería como "ningún usuario entra".
+- **ONCE FILAS NO TIENEN `tipo`** (cadena vacía): son los planes viejos —Edificio / Ciudad / Casa Inteligente, Anónimo, Reactor Ilimitado—, todos deshabilitados y con contratos todavía colgados (el 118 tiene 9). El select lleva opción `Sin tipo` y acepta además el código heredado aunque no esté en `combos`, igual que `talonarios`.`tipo` con el talonario 35 (ABM.md).
+- **`tipo` y `descripcion` vacíos se guardan como cadena vacía, no como `NULL`.** Las 33 filas usan la cadena vacía y ninguna tiene `NULL`: mandar `NULL` estrenaría una segunda forma de decir lo mismo (mismo criterio que `talonarios`.`terminos`).
+- **EL ORDEN POR DEFECTO ES `orden` ASCENDENTE**, y no `id` descendente como el resto de los listados. La columna existe justamente para que los planes se lean de menor a mayor capacidad, que es como los ofrece la app — y es el orden del listado del back office viejo (`order by orden, id`).
+- **El desplegable de artículos lista TODOS, no sólo los habilitados.** Hay planes vivos cuyo artículo está deshabilitado; con el filtro puesto, abrir uno y guardarlo lo dejaría sin artículo, o sea sin abono. Es el mismo criterio con el que Contratos lista todos los planes. El deshabilitado se marca en la etiqueta (`(deshabilitado)`) y en la ficha con un badge.
+- **`Ver contratos` y `Ver artículo` son navegación cruzada y sólo se dibujan cuando hay a dónde ir.** Dejan el pedido en el scope de la app y saltan al listado destino, que lo vuelca en un filtro que **existe como campo de su Modal de Filtros** — `Plan` en Contratos, `Código` en Artículos (allá el artículo es la fila y no una FK, igual que Contratos → "Ver dominio"). Lo resuelve el par genérico `pedirFiltroCampo()` / `tomarFiltroCampo()`, que lleva el **campo** destino con el pedido; los tres pares viejos (`Dominio`, `Usuario`, `Contrato`) siguen existiendo porque están cableados en once módulos.
+- **Trece tarjetas en Consultar: diez `half` y tres `full`** — `Nombre` en la ranura 3, `Artículo` y `Descripción` al final. Agregar o quitar un campo obliga a rehacer esa cuenta (§25).
+- **La baja va con el modal de desglose** (§15.1): las dos FK que apuntan acá son `RESTRICT` y las dos **bloquean** — contratos (50 filas) y utilizaciones (98).
+
+## 43. Inventario · Dispositivos: asistente de alta ("fabricar")
+
+El `+ Nuevo dispositivo` del listado abre un **asistente de tres pasos**, no el
+formulario de 35 columnas de §14. Lo dibuja `openDeviceWizard()` y lo resuelve
+`api/dispositivos_accion.php?accion=fabricar`.
+
+Es el porte de `reactor-admin/dispositivos/nuevo.php` — el alta del back office
+viejo, que llama a `cDispositivo::crear()`. Ahí el alta pide **cuatro cosas**
+(modelo, producto y las tres credenciales) y con eso escribe el dispositivo
+**y sus canales**, uno por cada canal que declara el modelo.
+
+**Por qué el alta no es el formulario del ABM.** Es la excepción que `ABM.md`
+declara para las entidades con ciclo de vida, y acá se cumple entera:
+
+- **La mitad de lo que se guarda es derivado.** El identificador ES la serie, el
+  nombre sale de `modelo | serie`, y el nombre de cada canal sale del nombre del
+  dispositivo. Nada de eso se escribe a mano.
+- **El alta toca DOS tablas.** Cuántos canales se crean y con qué módulo lo
+  decide el modelo elegido, no el formulario. Un alta que crea filas en otra
+  tabla no se confirma con un botón `Guardar` y una frase.
+- **Las otras 30 columnas son telemetría**, y un equipo recién fabricado no la
+  tiene. Ofrecerlas vacías en el alta es pedir que se completen.
+
+**Los tres pasos, y qué contesta cada uno:**
+
+| paso | pregunta | campos |
+|---|---|---|
+| 1 · Equipo | qué equipo es | `Modelo` *, `Producto` *, `Dominio` |
+| 2 · Credenciales | con qué nace | `Serie` *, `Identidad` *, `Llave` * + los dos derivados |
+| 3 · Confirmación | qué se va a escribir | nada: es la previsualización del backend |
+
+**Reglas:**
+
+- **El indicador de pasos (`.wizard-steps`, §14-bis) NO es clickeable.** No es una
+  variante de `.modal-tabs`: las pestañas se recorren en cualquier orden y acá
+  cada paso valida antes de dejar pasar. Saltar al 3 sin modelo mostraría una
+  confirmación de nada. Se avanza con los botones de la barra, que validan.
+- **La barra de acciones agrega `Atrás` y `Siguiente` a §21-bis**, que es lo
+  único que este modal cambia del patrón. Se respeta el resto —salida primero y
+  en `btn-ghost`, todo lo demás en `btn-primary`, sin footer— y el avance va a
+  la derecha con `.modal-menubar-end`: en un asistente el sentido de la lectura
+  **es** la navegación, y `Siguiente` pegado a `Cancelar` los deja a un píxel.
+  En el último paso el mismo botón pasa a `Crear dispositivo`.
+- **LAS CREDENCIALES LAS GENERA EL SERVIDOR** (`?accion=fabricar&credenciales=1`),
+  no el navegador. El largo, el alfabeto (16 mayúsculas, el
+  `cCadena::aleatoria(16, '1A')` del legacy) y sobre todo **que la serie no esté
+  ya tomada como identificador** son reglas de la base. `Regenerar` vuelve a
+  pedirlas. Los campos quedan editables para el equipo que ya viene grabado.
+- **El identificador y el nombre son campos derivados**: `readonly`, se recomponen
+  en vivo al cambiar la serie o el modelo, y **no viajan en el payload** — los
+  calcula el backend. Es la regla de `ABM.md` para `talonarios`.`nombre`.
+- **Elegir un modelo muestra sus canales en el acto**, en el paso 1
+  (`.wizard-canales`). Vienen ya resueltos en el catálogo y por el **mismo**
+  parseo que después usa el `POST`, así que lo que se ve es lo que se escribe.
+  Un modelo que dejaría canales sin módulo lo dice ahí con un badge.
+- **El paso 3 lo arma el backend, no el front.** `GET ?accion=fabricar&…`
+  devuelve el dispositivo derivado, la tabla de canales con su módulo y
+  componente, los `avisos` y los `bloqueos`; el `POST` ejecuta lo mismo por la
+  misma función. Es el reparto de §15.2 y de `contratos_accion.php`.
+- **Un bloqueo esconde `Crear dispositivo`**, y el endpoint lo vuelve a chequear.
+  Un aviso se muestra y deja seguir: el caso típico es un modelo cuyos `canalN`
+  no nombran un módulo válido — el canal se crea igual porque el equipo físico
+  tiene esa entrada, pero con `modulo` en `NULL` y hay que asignárselo después.
+- **Agente y transceptor son fijos** (Reactor / Principal, los que hardcodea
+  `cDispositivo::nuevo()`) y el asistente **los muestra igual** en el paso 3.
+  Un campo ausente sin explicación se lee como un olvido; abajo del dominio hay
+  una `.form-nota` que dice que se cambian desde la ficha.
+- **El dominio por defecto es `Reactor`, el de stock.** Es lo único que el
+  asistente agrega a `nuevo.php`, que lo tenía hardcodeado: acá se puede fabricar
+  directo en el dominio del cliente sin pasar por la ficha.
+- **Al crear, la ficha se abre sola** — el alta pidió lo mínimo y el resto se
+  completa ahí (`ABM.md`).
+- **`openDeviceModal()` sigue existiendo** para la edición y para el alta manual
+  con las 35 columnas: reparar un dato o cargar un equipo que no responde a
+  ningún modelo del catálogo es lo que ese formulario resuelve, y por eso el
+  `POST` de `dispositivos.php` no se tocó. **Y tiene entrada en la pantalla** —
+  una `.nota-link` al pie del paso 1. Sin ella el asistente le sacaría al
+  operador algo que el back office viejo sí permitía, y eso no es reemplazar un
+  alta: es recortarla.
+
+---
+
 ## Reglas duras (criterios de aceptación)
 
 1. **Ningún color hardcodeado** en el HTML/CSS final. Todo sale de las variables.
@@ -2863,5 +3046,5 @@ El módulo **no aporta componentes nuevos salvo las burbujas del diálogo**. Tod
 7. **Densidad**: padding `10–14px` en celdas; gaps `12–20px` entre cards.
 8. **Mobile**: `<768px` colapsa sidebar a overlay; grids `form-row*` a una columna.
 9. **Sin librerías UI pesadas** (Bootstrap / Tailwind / Material). CSS plano + variables.
-10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los dieciocho módulos. Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
+10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los veinte módulos, más el desplegable `Listar` intercalado entre el buscador y `Filtros` en el módulo que tiene filtros rápidos (§9, §12.1). Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
 11. **Si dudás, mirá los componentes de arriba antes de crear uno nuevo.**

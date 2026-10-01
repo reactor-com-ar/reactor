@@ -973,6 +973,20 @@ SET character_set_client = @saved_cs_client;
 --
 -- Table structure for table `contratos`
 --
+-- `promo` ES UN PORCENTAJE DE DESCUENTO, NO UNA REFERENCIA. El sistema
+-- historico la lee asi -- `cContrato::facturar()` calcula
+-- `($articulo->venta * $promo) / 100` -- y el ABM de cloud la escribe con un
+-- campo numerico de 1 a 100 que valida ese rango. Llego a estar declarada FK,
+-- primero contra `articulos` (lectura que nunca se pudo usar: ningun valor del
+-- combo legacy existe en esa tabla) y despues contra una tabla `promociones`
+-- sembrada con el porcentaje de PK; las dos se fueron el 30/09/2026
+-- (cloud/sql/migrations/20260930_1000_promo_porcentaje_sin_promociones.sql)
+-- porque la columna no necesita un catalogo para decir "15 %".
+--
+-- "SIN PROMOCION" ES `NULL` y no `0`: es lo que tienen las 50 filas y la regla
+-- del resto del esquema -- el `0` del sistema historico es un centinela, no un
+-- dato. El descuento ademas solo se aplica entre `desde` y `hasta`.
+--
 
 DROP TABLE IF EXISTS `contratos`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -985,7 +999,7 @@ CREATE TABLE `contratos` (
   `tipo` varchar(3) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `plan` int DEFAULT NULL,
   `plan_modo` enum('dinamico','fijo') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'fijo' COMMENT 'que se hace con el plan cuando el dominio crece',
-  `promo` int DEFAULT NULL,
+  `promo` int DEFAULT NULL COMMENT 'porcentaje de descuento sobre el abono del plan: 1 a 100, NULL = sin promocion',
   `desde` date DEFAULT NULL,
   `hasta` date DEFAULT NULL,
   `registro` datetime DEFAULT NULL,
@@ -1002,11 +1016,9 @@ CREATE TABLE `contratos` (
   KEY `fk_contratos_cliente` (`cliente`),
   KEY `fk_contratos_dominio` (`dominio`),
   KEY `fk_contratos_plan` (`plan`),
-  KEY `fk_contratos_promo` (`promo`),
   CONSTRAINT `fk_contratos_cliente` FOREIGN KEY (`cliente`) REFERENCES `clientes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_contratos_dominio` FOREIGN KEY (`dominio`) REFERENCES `dominios` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_contratos_plan` FOREIGN KEY (`plan`) REFERENCES `planes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_contratos_promo` FOREIGN KEY (`promo`) REFERENCES `promociones` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `fk_contratos_plan` FOREIGN KEY (`plan`) REFERENCES `planes` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2586,39 +2598,6 @@ CREATE TABLE `productos` (
   `manual` int DEFAULT NULL,
   `articulo` int DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `promociones`
---
--- El catalogo de descuentos que puede llevar un contrato (`contratos`.`promo`).
---
--- EL `id` ES EL PORCENTAJE: la fila del 15 % tiene `id = 15`. No es una
--- casualidad ni una comodidad, es lo que permite que la columna exista. El
--- sistema historico lee `contratos`.`promo` como un porcentaje --
--- `cContrato::facturar()` calcula `($articulo->venta * $promo) / 100` -- mientras
--- que el esquema la declaraba FK contra `articulos`, y las dos lecturas no
--- podian convivir. Con la PK sembrada a mano y sin AUTO_INCREMENT la columna
--- satisface las dos: guarda el numero que el legacy espera y apunta a una fila
--- que existe. Un id correlativo (1, 2, 3...) le haria facturar 1 %, 2 % y 3 % de
--- descuento sin que nadie lo note. Agregar un 12 % es insertar `id = 12`.
---
--- "SIN PROMOCION" ES `NULL` y no una fila `id = 0`: el `0` del sistema historico
--- es un centinela, no una referencia.
---
--- Sembrada del 5 % al 100 % de 5 en 5 por
--- cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql.
---
-
-DROP TABLE IF EXISTS `promociones`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `promociones` (
-  `id` int NOT NULL COMMENT 'ES el porcentaje de descuento: la fila del 15 % tiene id 15',
-  `nombre` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `habilitado` tinyint(1) NOT NULL DEFAULT '0',
-  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 

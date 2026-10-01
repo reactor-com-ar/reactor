@@ -1587,7 +1587,7 @@
     function dispositivosDefaults() {
         return {
             codigo: '', texto: '', dominio: '', estado: '',
-            orden:  'last_seen_at', dir: 'desc', limit: 100,
+            orden:  'id', dir: 'desc', limit: 100,
         };
     }
 
@@ -3697,7 +3697,12 @@
 
     // Catálogos que deja el render del listado para los modales (mismo patrón
     // que `sembrarCatalogosPerfiles`): el GET del listado ya los trae.
-    let CATALOGOS_CONTRATOS = { clientes: [], dominios: [], planes: [], tipos: [], promos: [], remitir: [] };
+    // `promo` no es una lista sino los límites del campo numérico: el descuento
+    // es un porcentaje y no un ítem de catálogo (ver api/contratos.php).
+    let CATALOGOS_CONTRATOS = {
+        clientes: [], dominios: [], planes: [], tipos: [], remitir: [],
+        promo: { max: 100, paso: 5 },
+    };
 
     function contratosDefaults() {
         return {
@@ -4318,9 +4323,11 @@
                             viewCardHalf('Modo del plan',  `<span class="badge ${c.plan_modo === 'dinamico' ? 'badge-warn' : 'badge-info'}">${
                                 escape(c.plan_modo_texto || c.plan_modo || 'Fijo')}</span>`),
                             viewCardHalf('Abono',          abono),
+                            // `promo` es el porcentaje pelado: no hay texto que
+                            // resolver, se dibuja con el signo.
                             viewCardHalf('Promo',          c.promo == null
                                 ? `<span class="muted">Sin promoción</span>`
-                                : `${escape(c.promo_texto || c.promo)}${aplicaPromo ? '' : ' <span class="muted">· fuera de vigencia</span>'}`),
+                                : `${escape(String(c.promo))} %${aplicaPromo ? '' : ' <span class="muted">· fuera de vigencia</span>'}`),
                             viewCardHalf('Vigencia promo', c.desde || c.hasta
                                 ? `${contratoFecha(c.desde)} <span class="muted">a</span> ${contratoFecha(c.hasta)}`
                                 : `<span class="muted">Sin vigencia</span>`),
@@ -4406,11 +4413,12 @@
                                    p => ({ valor: String(p.id), texto: contratoPlanLabel(p) }));
         const tipOpts = selectOpts(cat.tipos, c?.tipo, 'Sin tipo',
                                    t => ({ valor: t.valor, texto: t.texto }));
-        // `promo` ya no es de sólo lectura: sale de la tabla `promociones`, cuyo
-        // id ES el porcentaje de descuento (ver api/contratos.php). "Sin
-        // promoción" es la opción vacía, que el endpoint guarda como NULL.
-        const proOpts = selectOpts(cat.promos || [], c?.promo, 'Sin promoción',
-                                   p => ({ valor: String(p.id), texto: (p.nombre || ('#' + p.id)) + (p.habilitado === 1 ? '' : ' (deshabilitada)') }));
+        // `promo` es un PORCENTAJE y se escribe como tal: un campo numérico de 0
+        // a 100 (ver api/contratos.php). Los límites los manda el endpoint que
+        // después los valida, para no tenerlos escritos dos veces; el fallback
+        // es por si el listado se dibujó con un catálogo viejo en cache.
+        const promoMax  = Number(cat.promo?.max  ?? 100);
+        const promoPaso = Number(cat.promo?.paso ?? 5);
 
         // `plan_modo` es NOT NULL con default `fijo`: no lleva opción vacía y en
         // el alta arranca donde están hoy las 50 filas.
@@ -4560,19 +4568,31 @@
                                     <select id="con-plan-modo">${modOpts}</select>
                                 </div>
                             </div>
-                            ${/* Promoción va a TODO EL ANCHO y por eso sale del
-                                 `.form-row`, que es un grid de dos columnas
-                                 fijas: un hijo solo ocuparía nada más que la
-                                 primera. Suelto dentro de la sección —que es
-                                 flex column con el mismo gap— ocupa el 100 %. */''}
-                            <div class="form-group">
-                                <label for="con-promo">
-                                    Promoción
-                                    ${ayudaDeCampo('El descuento se aplica al abono del plan, y sólo dentro de la vigencia de abajo.')}
-                                </label>
-                                <select id="con-promo">${proOpts}</select>
-                            </div>
-                            <div class="form-row">
+                            ${/* LOS TRES CAMPOS DE LA PROMOCIÓN EN UN RENGLÓN DE
+                                 A TRES (`.form-row-3`, un tercio cada uno). Son
+                                 un solo dato partido en tres controles: un
+                                 descuento sin las dos fechas no se aplica nunca
+                                 —`contratos_accion.php` exige `desde <= hoy <=
+                                 hasta` para sacar el renglón—, así que leerlos
+                                 juntos es lo que dice si está vigente. El
+                                 porcentaje ocupaba el ancho entero cuando era un
+                                 desplegable con el texto de cada promo; ahora
+                                 son tres dígitos. */''}
+                            <div class="form-row form-row-3">
+                                <div class="form-group">
+                                    <label for="con-promo">
+                                        Promoción (%)
+                                        ${ayudaDeCampo('El descuento se aplica al abono del plan, y sólo entre las dos fechas de al lado. Vacío o <strong>0</strong> es sin promoción.')}
+                                    </label>
+                                    ${/* Las flechitas saltan de a `paso` (5), que
+                                         es como se pactan los descuentos, pero
+                                         `min`/`max` son el único límite: tipear
+                                         un 7 a mano vale y el endpoint lo acepta
+                                         —no valida que sea múltiplo. */''}
+                                    <input type="number" id="con-promo" min="0" max="${promoMax}" step="${promoPaso}"
+                                           placeholder="Sin promoción" value="${escape(String(c?.promo ?? ''))}">
+                                    <div class="field-error" id="con-promo-err" style="display:none"></div>
+                                </div>
                                 <div class="form-group">
                                     <label for="con-desde">Promo vigente desde</label>
                                     <input type="date" id="con-desde" value="${escape(c?.desde ?? '')}">
@@ -4666,6 +4686,8 @@
         const saveBtn = backdrop.querySelector('[data-act="save"]');
         const uuidEl  = backdrop.querySelector('#con-uuid');
         const uuidErr = backdrop.querySelector('#con-uuid-err');
+        const promoEl  = backdrop.querySelector('#con-promo');
+        const promoErr = backdrop.querySelector('#con-promo-err');
         const desdeEl = backdrop.querySelector('#con-desde');
         const hastaEl = backdrop.querySelector('#con-hasta');
         const desdeErr = backdrop.querySelector('#con-desde-err');
@@ -4690,8 +4712,8 @@
         });
 
         saveBtn.addEventListener('click', async () => {
-            [uuidErr, desdeErr, bajaErr].forEach(el => { el.style.display = 'none'; });
-            [uuidEl, desdeEl, bajaEl].forEach(el => el.classList.remove('input-invalid'));
+            [uuidErr, promoErr, desdeErr, bajaErr].forEach(el => { el.style.display = 'none'; });
+            [uuidEl, promoEl, desdeEl, bajaEl].forEach(el => el.classList.remove('input-invalid'));
 
             // Devuelve el campo junto con la pestaña en la que vive: sin eso el
             // `focus()` caería sobre un panel oculto.
@@ -4712,6 +4734,21 @@
                 firstInvalid = marcar(uuidEl, uuidErr, 'El identificador debe tener exactamente 8 dígitos', 'general');
             } else if (isEdit && uuid === '') {
                 firstInvalid = marcar(uuidEl, uuidErr, 'El identificador es obligatorio', 'general');
+            }
+
+            // El porcentaje de descuento. `type=number` devuelve `''` cuando lo
+            // tipeado no se puede leer como número ("12a", "-", "1,5"), así que
+            // mirar sólo el `value` guardaría "sin promoción" con el campo a la
+            // vista lleno: `badInput` es lo único que distingue los dos casos.
+            // El resto —rango y parte decimal— se mira sobre el texto, porque
+            // `min`/`max`/`step` del input no frenan nada (no hay submit nativo
+            // que dispare la validación del navegador) y el endpoint los
+            // rechaza igual: acá se avisa sin el viaje.
+            const promo = val('promo');
+            if (promoEl.validity.badInput || (promo !== '' && !/^[0-9]{1,3}$/.test(promo))) {
+                firstInvalid = firstInvalid || marcar(promoEl, promoErr, 'La promoción es un porcentaje entero de 0 a ' + promoMax, 'facturacion');
+            } else if (promo !== '' && Number(promo) > promoMax) {
+                firstInvalid = firstInvalid || marcar(promoEl, promoErr, 'La promoción no puede superar el ' + promoMax + ' %', 'facturacion');
             }
 
             const desde = val('desde');
@@ -4743,7 +4780,7 @@
                 tipo:       val('tipo'),
                 plan:       val('plan'),
                 plan_modo:  val('plan-modo'),
-                promo:      val('promo'),
+                promo,
                 desde,
                 hasta,
                 registro:   val('registro'),
@@ -5491,7 +5528,7 @@
         });
     }
 
-    /* ---- Ficha: cabecera + renglones + pagos ---- */
+    /* ---- Ficha: cabecera + renglones ---- */
 
     async function openComprobanteViewModal(id, onCambio) {
         let detalle;
@@ -5638,8 +5675,8 @@
 
     /* Cuerpo de la ficha, en formato comprobante (DESIGN.md §25-quater):
        encabezado con la identidad del documento y su total, y el resto repartido
-       en cuatro pestañas —General (fiscal + cliente), Cuerpo (los renglones con
-       sus totales), Detalles (el resto de los campos) y Pagos—.
+       en tres pestañas —General (fiscal + cliente), Cuerpo (los renglones con
+       sus totales) y Detalles (el resto de los campos)—.
 
        Por qué no es la grilla de tarjetas de §25 como el resto de los Consultar:
        un comprobante pasa los veinte campos, y con veinte tarjetas iguales las
@@ -5657,8 +5694,6 @@
         // líneas serían siempre "Sin dato" y sólo agregarían ruido. Es la misma
         // condición que usa el consultar del sistema viejo.
         const esFiscal = c.fiscal === '1';
-
-        const pagos = detalle.pagos || [];
 
         return `
             <div class="ficha-hero">
@@ -5695,10 +5730,6 @@
                 </button>
                 <button type="button" class="modal-tab" data-tab="detalles" role="tab">
                     <i class="fa-solid fa-note-sticky"></i> Detalles
-                </button>
-                <button type="button" class="modal-tab" data-tab="pagos" role="tab">
-                    <i class="fa-solid fa-hand-holding-dollar"></i> Pagos
-                    ${pagos.length ? `<span class="badge badge-info">${pagos.length}</span>` : ''}
                 </button>
             </div>
 
@@ -5747,10 +5778,6 @@
                         ? escape(c.comentarios).replace(/\n/g, '<br>')
                         : `<span class="muted">Sin comentarios</span>`),
                 ])}
-            </div>
-
-            <div class="modal-tabpanel" data-panel="pagos" hidden>
-                ${comprobantePagosHtml(detalle)}
             </div>
         `;
     }
@@ -5883,44 +5910,6 @@
                 cambia — no se escriben a mano. El IVA se <em>desagrega</em> del monto (los
                 renglones van con IVA incluido), que es como los tiene calculados el sistema
                 histórico.
-            </div>
-        `;
-    }
-
-    function comprobantePagosHtml(detalle) {
-        const ps = detalle.pagos || [];
-
-        const filas = !ps.length
-            ? `<tr><td colspan="6" class="muted" style="text-align:center">Sin pagos registrados.</td></tr>`
-            : ps.map(p => `
-                <tr>
-                    <td><span class="td-id">#${p.id}</span></td>
-                    <td>${p.fecha ? escape(formatDate(p.fecha)) : '<span class="muted">—</span>'}</td>
-                    <td>${p.medio_nombre ? escape(p.medio_nombre) : '<span class="muted">—</span>'}</td>
-                    <td>${p.operacion ? escape(p.operacion) : '<span class="muted">—</span>'}</td>
-                    <td class="td-num">${p.monto == null ? '—' : escape(moneda(p.monto))}</td>
-                    <td><span class="badge ${p.estado === '2' ? 'badge-success' : p.estado === '0' ? 'badge-danger' : 'badge-warn'}">${
-                        escape(p.estado_texto || p.estado || '—')}</span></td>
-                </tr>`).join('');
-
-        return `
-            <div class="ficha-bloque">
-                <div class="ficha-bloque-head">
-                    <span><i class="fa-solid fa-hand-holding-dollar"></i> Pagos registrados</span>
-                    <span class="muted">${ps.length}</span>
-                </div>
-                <table class="ficha-tabla">
-                    <thead>
-                        <tr><th>Código</th><th>Fecha</th><th>Medio</th><th>Operación</th>
-                            <th class="td-num">Monto</th><th>Estado</th></tr>
-                    </thead>
-                    <tbody>${filas}</tbody>
-                </table>
-            </div>
-            <div class="form-nota">
-                Los pagos se registran desde <strong>Acciones → Registrar pago</strong>, y sólo
-                mientras el comprobante esté Pendiente. Un pago imputado no cambia el total del
-                comprobante: lo cancela.
             </div>
         `;
     }
@@ -6254,6 +6243,20 @@
 
         const clientes = cat.clientes || [];
 
+        /* Qué queda escrito en el campo `Cliente` al elegir uno. Es UNA función
+           y no dos expresiones iguales porque `wireCombo()` compara lo tipeado
+           contra `textoDe(seleccion)` para saber si la selección sigue en pie:
+           si el texto con el que abre el campo se armara distinto, el combo
+           leería un cambio que nadie hizo. */
+        const clienteTexto = cl => cl.nombre || cl.razon || `Cliente #${cl.id}`;
+
+        /* El cliente que el comprobante ya tiene, para que el campo abra con su
+           nombre escrito. Sale del catálogo y no de `c.cliente_nombre` porque
+           tiene que ser el MISMO objeto que `wireCombo()` reconoce como
+           selección; que esté siempre lo garantizan las dos puntas: el catálogo
+           viaja entero y la FK `comprobantes.cliente` es `ON DELETE RESTRICT`. */
+        const clienteActual = clientes.find(cl => String(cl.id) === String(c.cliente ?? '')) || null;
+
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML = `
@@ -6306,62 +6309,55 @@
                                     <div class="field-error" id="cpb-cotizacion-err" style="display:none"></div>
                                 </div>
                             </div>
-                            <div class="form-nota">
-                                El talonario, el número, el CAE, los totales y el estado no se editan acá:
-                                el número lo asigna <strong>Autorizar</strong>, los totales salen de los
-                                renglones y el CAE viene de AFIP.
-                            </div>
-                        </div>
-
-                        <div class="form-section">
-                            <div class="form-section-title">
-                                Cliente
-                                <button type="button" class="btn btn-sm btn-secondary form-section-btn"
-                                        data-act="elegir-cliente"
-                                        ${clientes.length ? '' : 'disabled title="No hay clientes cargados"'}>
-                                    <i class="fa-solid fa-address-book"></i> Elegir de clientes
-                                </button>
-                            </div>
-                            <div class="form-group" id="cpb-cliente-picker" hidden>
-                                <label for="cpb-cliente-combo-q">Buscar un cliente</label>
+                            ${/* El campo "Cliente" va acá adentro y no bajo un rótulo propio: es el
+                                 que rellena los seis de abajo, así que una barra de sección entre
+                                 medio partía en dos lo que se completa de un solo movimiento.
+                                 VA COMO COMENTARIO DE JS Y NO COMO `<!-- -->` DE HTML: esto es un
+                                 template literal, así que un backtick adentro del comentario lo
+                                 CIERRA y el archivo entero deja de parsear. */''}
+                            <div class="form-group">
+                                <label for="cpb-cliente-q">
+                                    Cliente
+                                    ${ayudaDeCampo(
+                                        'Se busca por <strong>nombre, razón social, CUIT o correo</strong>. ' +
+                                        'Al elegirlo se copian razón social, domicilio, correo, celular, ' +
+                                        'CUIT y condición en los campos de abajo. Después se pueden ' +
+                                        'corregir a mano: lo que se guarda en el comprobante es lo que ' +
+                                        'quede acá.')}
+                                </label>
                                 ${comboHtml({
-                                    id: 'cpb-cliente-combo',
+                                    id:          'cpb-cliente',
                                     placeholder: 'Nombre, razón social o CUIT…',
+                                    valor:       c.cliente ?? '',
+                                    texto:       clienteActual ? clienteTexto(clienteActual) : '',
                                 })}
-                                <div class="form-nota">
-                                    Al elegirlo se copian razón social, domicilio, correo, celular, CUIT y
-                                    condición en los campos de abajo. Después se pueden corregir a mano:
-                                    lo que se guarda en el comprobante es lo que quede acá.
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="cpb-cliente">Cliente (ID)</label>
-                                <input type="number" id="cpb-cliente" min="1"
-                                       value="${escape(String(c.cliente ?? ''))}" placeholder="Opcional">
-                                <div class="form-nota" id="cpb-cliente-nota">${
-                                    c.cliente_nombre ? escape(c.cliente_nombre) : ''}</div>
-                            </div>
-                            <div class="form-group">
-                                <label for="cpb-razon">Razón social</label>
-                                <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}"
-                                       placeholder="Razón social del cliente">
-                                <div class="field-error" id="cpb-razon-err" style="display:none"></div>
-                                <div class="form-nota">Sin razón social el comprobante no se puede autorizar.</div>
-                            </div>
-                            <div class="form-group">
-                                <label for="cpb-domicilio">Domicilio</label>
-                                <input type="text" id="cpb-domicilio" maxlength="250"
-                                       value="${escape(c.domicilio ?? '')}" placeholder="Calle, número, localidad">
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="cpb-correo">Correo</label>
+                                    <label for="cpb-razon">
+                                        Razón social
+                                        ${ayudaDeCampo('Sin razón social el comprobante <strong>no se puede ' +
+                                                       'autorizar</strong>.')}
+                                    </label>
+                                    <input type="text" id="cpb-razon" maxlength="250" value="${escape(c.razon ?? '')}"
+                                           placeholder="Razón social del cliente">
+                                    <div class="field-error" id="cpb-razon-err" style="display:none"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpb-domicilio">Domicilio</label>
+                                    <input type="text" id="cpb-domicilio" maxlength="250"
+                                           value="${escape(c.domicilio ?? '')}" placeholder="Calle, número, localidad">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cpb-correo">
+                                        Correo
+                                        ${ayudaDeCampo('Es a donde va el comprobante cuando se envía por correo.')}
+                                    </label>
                                     <input type="email" id="cpb-correo" maxlength="100"
                                            value="${escape(c.correo ?? '')}" placeholder="cliente@ejemplo.com">
                                     <div class="field-error" id="cpb-correo-err" style="display:none"></div>
-                                    <div class="form-nota">
-                                        Es a donde va el comprobante cuando se envía por correo.
-                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <label for="cpb-celular">Celular</label>
@@ -6442,10 +6438,13 @@
 
                     <div class="modal-tabpanel" data-panel="detalles" hidden>
                         <div class="form-group">
-                            <label for="cpb-comentarios">Comentarios</label>
+                            <label for="cpb-comentarios">
+                                Comentarios
+                                ${ayudaDeCampo('Son <strong>internos</strong>: no salen impresos ni se envían ' +
+                                               'al cliente.')}
+                            </label>
                             <textarea id="cpb-comentarios" rows="8" maxlength="2000"
                                       placeholder="Notas internas">${escape(c.comentarios ?? '')}</textarea>
-                            <div class="form-nota">Son internos: no salen impresos ni se envían al cliente.</div>
                         </div>
                     </div>
                 </div>
@@ -6663,42 +6662,41 @@
             tr.querySelector('.lin-detalle').focus();
         });
 
-        /* ---- Elegir de clientes ---- */
+        /* ---- Cliente ---- */
 
-        /* El picker es el combo con buscador de §34-bis y no un modal aparte:
-           son 64 clientes que ya viajan con el listado, así que no hay nada que
-           ir a buscar al servidor, y un segundo modal encima del editor tapa
-           los campos que el cliente está por completar. Arranca plegado para
-           que el formulario no abra con un campo de búsqueda arriba de todo. */
-        const picker = el('cliente-picker');
-        backdrop.querySelector('[data-act="elegir-cliente"]').addEventListener('click', () => {
-            if (!clientes.length) return;
-            picker.hidden = !picker.hidden;
-            if (picker.hidden) return;
+        /* El campo `Cliente` ES el combo con buscador de §34-bis: se escribe
+           ahí y las coincidencias salen mientras se tipea. Son 64 clientes que
+           ya viajan en `catalogos`, así que la búsqueda es en memoria y no hay
+           un request por tecla.
 
-            if (!clienteCtrl) {
-                clienteCtrl = wireCombo(backdrop, 'cpb-cliente-combo', {
-                    items:    clientes,
-                    clavesDe: cl => [cl.nombre, cl.razon, cl.cuit, cl.correo],
-                    textoDe:  cl => cl.nombre || cl.razon || `Cliente #${cl.id}`,
-                    filaDe:   cl => ({
-                        titulo:  cl.nombre || cl.razon || `Cliente #${cl.id}`,
-                        detalle: [cl.razon && cl.razon !== cl.nombre ? cl.razon : '', cl.cuit]
-                            .filter(Boolean).join(' · '),
-                    }),
-                    vacio:    'Ningún cliente coincide con esa búsqueda.',
-                    onChange: cl => { if (cl) volcarCliente(cl); },
-                });
-            }
-            clienteCtrl.focus();
+           Se cablea al abrir el modal y no a demanda porque ya no hay un botón
+           que lo despliegue: antes el dato eran DOS controles —un `Cliente (ID)`
+           numérico más un `Elegir de clientes` que abría este mismo combo
+           aparte—, o sea el id pelado arriba del nombre que lo resolvía. */
+        clienteCtrl = wireCombo(backdrop, 'cpb-cliente', {
+            items:    clientes,
+            clavesDe: cl => [cl.nombre, cl.razon, cl.cuit, cl.correo],
+            textoDe:  clienteTexto,
+            filaDe:   cl => ({
+                titulo:  clienteTexto(cl),
+                detalle: [cl.razon && cl.razon !== cl.nombre ? cl.razon : '', cl.cuit]
+                    .filter(Boolean).join(' · '),
+            }),
+            vacio:    'Ningún cliente coincide con esa búsqueda.',
+            /* Sólo vuelca al ELEGIR. `wireCombo()` también avisa con `null`
+               —cuando se tipea encima o se limpia con la ×—, y ahí los seis
+               campos se dejan como están: el comprobante puede facturarse a
+               alguien que no está en `clientes`, así que soltar el id no es
+               motivo para borrarle la razón social. */
+            onChange: cl => { if (cl) volcarCliente(cl); },
         });
 
-        /* Copia el cliente a los campos del comprobante. PISA lo que haya: el
-           botón se aprieta justo para eso, y un volcado parcial dejaría media
-           ficha de un cliente y media de otro — que es peor que rehacerla. */
+        /* Copia el cliente a los campos del comprobante. PISA lo que haya: se
+           lo elige justo para eso, y un volcado parcial dejaría media ficha de
+           un cliente y media de otro — que es peor que rehacerla. El id lo
+           escribe el propio combo en su `<input type="hidden">`, que es el
+           `#cpb-cliente` que lee el Guardar. */
         function volcarCliente(cl) {
-            el('cliente').value   = cl.id;
-            el('cliente-nota').textContent = cl.nombre || '';
             el('razon').value     = cl.razon || cl.nombre || '';
             el('domicilio').value = cl.domicilio || '';
             el('correo').value    = cl.correo || '';
@@ -6723,8 +6721,12 @@
                       'comprobante. Elegila a mano.', { duration: 7000 });
             }
 
-            picker.hidden = true;
-            el('razon').focus();
+            /* El foco se queda en `Cliente`. Mandarlo a `Razón social` —que es
+               lo que hacía el picker, porque se cerraba al elegir— ahora sacaría
+               del campo a quien está eligiendo: el combo es un control
+               permanente del formulario y volver a abrir la lista exigiría
+               desandar con Shift+Tab. El Tab siguiente ya cae en `Razón
+               social`. */
         }
 
         el('razon').focus();
@@ -9070,6 +9072,56 @@
         return v === -1 ? `<span class="muted">Ilimitado</span>` : escape(numero(v));
     }
 
+    /* El artículo de la ficha es una PASTILLA CLICKEABLE que abre Consultar
+       artículo apilado encima (§25 de DESIGN.md), igual que `Usuario` y
+       `Dominio` en Consultar perfil.
+
+       Va en azul porque en la ficha el azul es el enlace y nada más: el resto de
+       las píldoras del modal quedaron en verde justamente para que la única
+       azul sea la que lleva a algún lado. Sin artículo no hay a dónde ir, así
+       que el campo se degrada a texto en `muted` en vez de dejar un botón
+       muerto.
+
+       El `#id` queda AFUERA de la pastilla —como el `<code>S</code>` que
+       acompaña al tipo— porque es el código del artículo y no su nombre: dentro
+       del botón se leería como parte del rótulo del enlace.
+
+       OJO CON LOS SALTOS DE LÍNEA: `.view-card-value` es `white-space:
+       pre-wrap`, así que un salto del template literal se dibuja tal cual. Los
+       únicos que hay acá van DENTRO del `<button …>`, donde son separación entre
+       atributos; entre las tres piezas va un espacio y nada más. */
+    function planArticuloFicha(p) {
+        if (!p.articulo) return `<span class="muted">Sin artículo</span>`;
+
+        // Sin nombre el `#id` pasa a ser el rótulo del enlace y el `<code>` de
+        // al lado se cae: repetido sería `#7 #7`. El caso no debería darse —el
+        // nombre lo trae el LEFT JOIN contra una fila que existe— pero es la
+        // misma degradación que hace `badgeFicha()` en la ficha de perfil.
+        const nombre   = (p.articulo_nombre || '').trim();
+        const pastilla = `<button type="button" class="badge badge-info badge-link"
+                                  data-act="ver-articulo" data-id="${p.articulo}"
+                                  title="Ver ficha del artículo">${escape(nombre) || '#' + p.articulo}</button>`;
+        const codigo   = nombre ? ` <code>#${p.articulo}</code>` : '';
+        const aviso    = p.articulo_habilitado === 0
+            ? ` <span class="badge badge-warn">Deshabilitado</span>`
+            : '';
+
+        return `${pastilla}${codigo}${aviso}`;
+    }
+
+    /* La fila COMPLETA del artículo, que es lo que `openArticuloViewModal()`
+       necesita: los cuatro contadores y el recálculo de precios los arma el GET
+       del listado y no están en `CATALOGOS_PLANES.articulos`, que trae sólo el
+       id y el nombre del desplegable.
+
+       SIN CACHE a propósito: es un click esporádico y guardarse el listado
+       dejaría la ficha mostrando el precio viejo después de editar el artículo
+       en el módulo de al lado. */
+    async function planArticuloFila(id) {
+        const data = await api('articulos');
+        return (data.articulos || []).find(a => a.id === id) || null;
+    }
+
     function planesTableBody(planes) {
         if (!planes.length) {
             return `<div class="table-empty">No hay planes que coincidan. Creá el primero con "Nuevo plan".</div>`;
@@ -9324,7 +9376,7 @@
                         viewCardHalf('Estado', planHabilitadoBadge(p)),
                         viewCardFull('Nombre', escape(p.nombre)),
                         viewCardHalf('Tipo', p.tipo
-                            ? `<span class="badge badge-info">${escape(p.tipo_texto || p.tipo)}</span> <code>${escape(p.tipo)}</code>`
+                            ? `<span class="badge badge-success">${escape(p.tipo_texto || p.tipo)}</span> <code>${escape(p.tipo)}</code>`
                             : `<span class="muted">Sin tipo</span>`),
                         viewCardHalf('Orden', `<code>${escape(numero(p.orden))}</code>`),
                         viewCardHalf('Cupo de usuarios',     planCupoLargo(p.usuarios)),
@@ -9333,12 +9385,9 @@
                         viewCardHalf('Abono', p.abono == null
                             ? `<span class="muted">Sin artículo, no se factura</span>`
                             : `${escape(moneda(p.abono))} <span class="muted">· del artículo</span>`),
-                        viewCardHalf('Contratos',     `<span class="badge badge-info">${p.contratos_count}</span>`),
-                        viewCardHalf('Utilizaciones', `<span class="badge badge-info">${p.utilizaciones_count}</span>`),
-                        viewCardFull('Artículo que factura el abono', p.articulo
-                            ? `${refValue(p.articulo, p.articulo_nombre)}${p.articulo_habilitado === 0
-                                ? ` <span class="badge badge-warn">Deshabilitado</span>` : ''}`
-                            : `<span class="muted">Sin artículo</span>`),
+                        viewCardHalf('Contratos',     `<span class="badge badge-success">${p.contratos_count}</span>`),
+                        viewCardHalf('Utilizaciones', `<span class="badge badge-success">${p.utilizaciones_count}</span>`),
+                        viewCardFull('Artículo que factura el abono', planArticuloFicha(p)),
                         viewCardFull('Descripción', p.descripcion
                             ? escape(p.descripcion)
                             : `<span class="muted">Sin descripción</span>`),
@@ -9355,6 +9404,24 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        /* La pastilla del artículo abre su ficha APILADA y no cierra ésta: los
+           `.modal-backdrop` comparten z-index, así que el último montado queda
+           arriba y al cerrarlo se vuelve al plan (§25). El botón vive dentro del
+           `.modal`, pero el `stopPropagation` está igual que en la ficha de
+           perfil para que un cambio en el cierre por backdrop no lo alcance. */
+        backdrop.querySelectorAll('[data-act="ver-articulo"]').forEach(b => {
+            b.addEventListener('click', async e => {
+                e.stopPropagation();
+                try {
+                    const art = await planArticuloFila(Number(b.dataset.id));
+                    if (!art) return toast('Ese artículo ya no existe', { error: true });
+                    openArticuloViewModal(art);
+                } catch (err) {
+                    toast(err.message, { error: true });
+                }
+            });
+        });
 
         wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
             const items = [

@@ -232,7 +232,7 @@ function resumen(): array
 }
 
 /**
- * Ficha completa: la cabecera, sus renglones y los pagos que tiene registrados.
+ * Ficha completa: la cabecera y sus renglones.
  *
  * Los renglones NO viajan en el listado -- son 6.694 filas para 2.320
  * comprobantes y solo se miran de a uno. Se piden al abrir la ficha.
@@ -258,42 +258,7 @@ function handleDetalle(): void
     json_ok([
         'comprobante' => comprobanteSalida($fila),
         'renglones'   => comprobanteRenglones($id),
-        'pagos'       => comprobantePagos($id),
     ]);
-}
-
-/** Pagos registrados contra el comprobante. */
-function comprobantePagos(int $id): array
-{
-    $stmt = db()->prepare(
-        'SELECT p.id, p.fecha, p.dominio, p.contrato, p.monto, p.medio,
-                p.operacion, p.estado,
-                me.nombre  AS medio_nombre,
-                dom.nombre AS dominio_nombre
-         FROM pagos p
-         LEFT JOIN medios   me  ON me.id  = p.medio
-         LEFT JOIN dominios dom ON dom.id = p.dominio
-         WHERE p.comprobante = :id
-         ORDER BY p.id DESC'
-    );
-    $stmt->execute([':id' => $id]);
-
-    return array_map(static function (array $r): array {
-        $estado = trim((string) ($r['estado'] ?? ''));
-        return [
-            'id'             => (int) $r['id'],
-            'fecha'          => $r['fecha'],
-            'dominio'        => idOrNull($r['dominio']),
-            'dominio_nombre' => trim((string) ($r['dominio_nombre'] ?? '')),
-            'contrato'       => idOrNull($r['contrato']),
-            'monto'          => $r['monto'] === null ? null : (float) $r['monto'],
-            'medio'          => idOrNull($r['medio']),
-            'medio_nombre'   => trim((string) ($r['medio_nombre'] ?? '')),
-            'operacion'      => trim((string) ($r['operacion'] ?? '')),
-            'estado'         => $estado,
-            'estado_texto'   => combo(COMBO_PAGO_ESTADO)[$estado] ?? '',
-        ];
-    }, $stmt->fetchAll());
 }
 
 /** Catalogos de los desplegables de Filtros, Alta y las acciones. */
@@ -323,8 +288,8 @@ function catalogos(): array
         'habilitado' => (int) $r['estado'] === 1 ? 1 : 0,
     ], db()->query('SELECT id, nombre, estado FROM medios ORDER BY estado DESC, nombre ASC')->fetchAll());
 
-    // El catalogo entero de clientes, para el "Elegir de clientes" del editor
-    // (DESIGN.md §25-quinquies). VIAJA COMPLETO a proposito: son 64 filas, asi
+    // El catalogo entero de clientes, para el autocompletar del campo `Cliente`
+    // del editor (DESIGN.md §25-quinquies). VIAJA COMPLETO a proposito: son 64 filas, asi
     // que un endpoint de busqueda aparte seria un request por tecla para datos
     // que ya caben en memoria -- el mismo criterio del combo con buscador
     // (§34-bis). Van los seis campos que el editor copia al comprobante, no
@@ -421,6 +386,12 @@ function handleImpacto(): void
  * El resto de la cabecera nace con los defaults de `cComprobante::nuevo()`:
  * emision hoy, vencimiento a 10 dias, estado `Preparacion` y serie 0 -- la
  * serie la asigna recien `autorizar`, asi que un borrador no consume numero.
+ *
+ * Y con la cotizacion del dia sellada si el talonario es Prefactura o Factura
+ * (`cotizacionAlCrear()`). El legacy la dejaba en 0 y la cargaba a mano desde
+ * la ficha: la emision es hoy, asi que el numero correcto es el de hoy y
+ * pedirselo a quien da de alta es pedirle que vaya a buscar un dato que el
+ * sistema ya tiene.
  */
 function handleCreate(): void
 {
@@ -438,13 +409,14 @@ function handleCreate(): void
          VALUES
              (:uuid, :talonario, 0, '', '', '', :emision, :vencimiento,
               NULL, NULL, '', '', '', '', '', '',
-              0, 0, 0, 0, '', '', NULL, '1')"
+              0, 0, 0, :cotizacion, '', '', NULL, '1')"
     );
     $stmt->execute([
         ':uuid'        => comprobanteUuidLibre(),
         ':talonario'   => $talonario,
         ':emision'     => $hoy->format('Y-m-d'),
         ':vencimiento' => $hoy->modify('+10 days')->format('Y-m-d'),
+        ':cotizacion'  => cotizacionAlCrear($talonario),
     ]);
 
     json_ok(['id' => (int) db()->lastInsertId()], 201);

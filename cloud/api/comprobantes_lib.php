@@ -314,6 +314,116 @@ function comprobanteUuidLibre(): string
     json_error('No se pudo generar un identificador libre, reintenta', 500);
 }
 
+/* ------------------------------------------------------- cotizacion sellada */
+
+/**
+ * `parametros`.`variable` con la cotizacion del dolar.
+ *
+ * Es LA MISMA fila que valoriza `articulos` en dolares (`articulos_lib.php`) y
+ * la que mueve la tarea `dolar_actualizar` todos los dias a las 6. Que el
+ * comprobante y el articulo que factura salgan del mismo numero no es un
+ * detalle: con dos fuentes, el renglon diria un precio calculado con una
+ * cotizacion y la cabecera mostraria otra.
+ *
+ * Se llama igual que la de `articulos_lib.php` y eso NO colisiona: los dos lib
+ * ya declaran `COMBOS_FALLBACK`, `combo()`, `idOrNull()` y `readJson()` con los
+ * mismos nombres, asi que son excluyentes por construccion -- ningun endpoint
+ * puede requerir los dos. El nombre repetido es lo que hace evidente que son la
+ * misma fila.
+ */
+const PARAMETRO_COTIZACION = 'articulos.dolar.cotizacion';
+
+/**
+ * Los `talonarios`.`tipo` que nacen con la cotizacion sellada.
+ *
+ * `F` Prefactura y `T` Factura. No es toda la tabla de tipos -- estan ademas
+ * `P` Presupuesto, `D` Pedido, `R` Recibo, `M` Remito y `N` Nota de Credito --
+ * porque la cotizacion es la referencia del dia en que se le puso precio a lo
+ * que se factura, y eso pasa al emitir el documento de la deuda.
+ */
+const TIPOS_CON_COTIZACION = ['F', 'T'];
+
+/**
+ * Cotizacion del dolar de hoy, la que se sella en el comprobante.
+ *
+ * SALE DEL PARAMETRO Y NO DE UN GET A DATABOX. La tarea `dolar_actualizar`
+ * corre todos los dias y deja ahi la ultima cotizacion de venta; pedirsela al
+ * microservicio en cada alta metería una llamada HTTP con 15 segundos de
+ * timeout adentro del camino de creacion -- y con Databox caido no se podria
+ * crear un comprobante, que es peor que crearlo con la cotizacion de ayer.
+ *
+ * NO convierte nada: el comprobante factura `articulos`.`venta` tal cual y
+ * guarda la cotizacion al lado como referencia de cuando se emitio.
+ *
+ * Sin el parametro cargado devuelve 0, que es lo que devolvia
+ * `cParametro::valorLeer()` del legacy y lo que ya tenian las 1.908 filas sin
+ * cotizacion. Un 0 se lee como "no se sello"; inventar un numero, no.
+ */
+function cotizacionDelDia(): float
+{
+    $stmt = db()->prepare('SELECT valor FROM parametros WHERE variable = :v ORDER BY id ASC LIMIT 1');
+    $stmt->execute([':v' => PARAMETRO_COTIZACION]);
+    $valor = $stmt->fetchColumn();
+
+    return $valor === false ? 0.0 : round((float) str_replace(',', '.', (string) $valor), 2);
+}
+
+/**
+ * Si los comprobantes de ese talonario nacen con la cotizacion sellada.
+ *
+ * Se resuelve CONTRA LA BASE y no contra lo que mande el front: el tipo lo
+ * decide el talonario, y el front no manda ninguno en los dos caminos que
+ * llaman aca (el alta manda el id del talonario y Duplicar no manda nada).
+ */
+function talonarioSellaCotizacion(?int $talonario): bool
+{
+    if ($talonario === null) return false;
+
+    $stmt = db()->prepare('SELECT tipo FROM talonarios WHERE id = :id');
+    $stmt->execute([':id' => $talonario]);
+    $tipo = trim((string) ($stmt->fetchColumn() ?: ''));
+
+    return in_array($tipo, TIPOS_CON_COTIZACION, true);
+}
+
+/**
+ * La cotizacion con la que nace un comprobante de ese talonario.
+ *
+ * Los tres caminos que crean un comprobante la sellan AL CREARLO -- el alta de
+ * `comprobantes.php`, el Duplicar de `comprobantes_accion.php` y el facturar de
+ * `contratos_accion.php` --, y en los tres al INSERT y no despues: la cotizacion
+ * es la del dia en que se emitio, asi que tomarla al autorizar (o peor, al
+ * imprimir) la volveria la de otro dia.
+ */
+function cotizacionAlCrear(?int $talonario): float
+{
+    return talonarioSellaCotizacion($talonario) ? cotizacionDelDia() : 0.0;
+}
+
+/**
+ * La cotizacion del duplicado de `$com`.
+ *
+ * EN PREFACTURA Y FACTURA SE RE-SELLA, NO SE HEREDA: el duplicado tiene emision
+ * de HOY, asi que copiarle la del original -- que puede ser de hace meses --
+ * le dejaria al lado un numero que no fue el de ninguno de sus dos dias. Es el
+ * mismo criterio con el que ya no hereda ni el numero ni el CAE: se copia QUE
+ * se factura, no cuando se facturo la vez pasada.
+ *
+ * EN LOS DEMAS TIPOS SE COPIA TAL CUAL, que es lo que Duplicar hacia antes de
+ * que existiera este sellado. Mandarlos a `0` por no estar en
+ * `TIPOS_CON_COTIZACION` seria BORRAR un dato que el original tenia cargado --
+ * hay 190 Recibos con cotizacion, todos emitidos facturando un contrato -- y
+ * eso no es lo que este cambio vino a hacer.
+ */
+function cotizacionAlDuplicar(array $com): float
+{
+    if (talonarioSellaCotizacion(idOrNull($com['talonario'] ?? null))) {
+        return cotizacionDelDia();
+    }
+
+    return $com['cotizacion'] === null ? 0.0 : (float) $com['cotizacion'];
+}
+
 /* ------------------------------------------------------------- utilidades */
 
 /** Tabla plana valor -> texto de un combo del sistema historico. */

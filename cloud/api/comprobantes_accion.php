@@ -193,6 +193,14 @@ function accionAnular(): void
  *
  * `caenro` / `caevto` / `caeres` NO se copian: el CAE es de la autorizacion de
  * AFIP del comprobante original y no vale para otro.
+ *
+ * LA COTIZACION TAMPOCO SE COPIA en Prefactura y Factura: se vuelve a sellar
+ * con la del dia (`cotizacionAlDuplicar()`). El duplicado tiene emision de HOY,
+ * asi que heredar la del original -- que puede ser de hace meses -- le dejaria
+ * al lado un numero que no fue el de ninguno de sus dos dias. Es el mismo
+ * criterio con el que ya no hereda ni el numero ni el CAE: lo que se copia es
+ * QUE se factura, no cuando se facturo la vez pasada. En los demas tipos se
+ * copia tal cual, como siempre.
  */
 function accionDuplicar(): void
 {
@@ -232,7 +240,7 @@ function accionDuplicar(): void
             ':domicilio'     => (string) ($com['domicilio']     ?? ''),
             ':correo'        => (string) ($com['correo']        ?? ''),
             ':celular'       => (string) ($com['celular']       ?? ''),
-            ':cotizacion'    => $com['cotizacion'] === null ? 0 : (float) $com['cotizacion'],
+            ':cotizacion'    => cotizacionAlDuplicar($com),
             ':observaciones' => (string) ($com['observaciones'] ?? ''),
             ':comentarios'   => (string) ($com['comentarios']   ?? ''),
             ':medio'         => idOrNull($com['medio']),

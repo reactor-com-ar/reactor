@@ -11,6 +11,11 @@ require __DIR__ . '/bootstrap.php';
 $sHelper = __DIR__ . '/lib/sucesos.php';
 if (is_file($sHelper)) require_once $sHelper;
 
+// Resolucion de `tareas`.`script` a ruta absoluta, compartida con el tick
+// minutal de `jobs/_scheduler.php`: las dos puertas tienen que lanzar el mismo
+// archivo.
+require_once __DIR__ . '/lib/tareas_script.php';
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'OPTIONS') exit;
 if ($method !== 'POST') json_error('metodo_no_soportado', 405);
@@ -61,8 +66,7 @@ try {
     );
     @file_put_contents($logPath, $encabezado);
 
-    $repoRoot  = realpath(__DIR__ . '/../..');
-    $scriptAbs = $repoRoot . '/' . $tarea['script'];
+    $scriptAbs = tareaScriptAbs((string) $tarea['script'], __DIR__);
 
     $cmd = sprintf(
         'EJECUCION_ID=%d timeout --signal=TERM --kill-after=10s %ds ' .

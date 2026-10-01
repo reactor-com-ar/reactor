@@ -358,12 +358,25 @@ rótulo con ícono.
   padding-bottom: 8px; border-bottom: 1px solid var(--border);
 }
 .form-section-title i { font-size: .8rem; opacity: .8; }
+.form-section-btn {
+  margin-left: auto;
+  text-transform: none; letter-spacing: normal;
+}
 ```
 
 ```html
 <div class="form-section">
   <div class="form-section-title"><i class="fa-solid fa-sitemap"></i>Asignación</div>
   <div class="form-row"> … </div>
+</div>
+
+<!-- Con acción en el rótulo -->
+<div class="form-section">
+  <div class="form-section-title">
+    <i class="fa-solid fa-key"></i>Credenciales
+    <button class="btn btn-sm btn-secondary form-section-btn">Regenerar</button>
+  </div>
+  …
 </div>
 ```
 
@@ -379,6 +392,22 @@ rótulo con ícono.
 - **La misma agrupación se usa en Consultar y en Editar** del mismo recurso,
   para que los dos modales se lean igual y el ojo encuentre cada campo en el
   mismo lugar.
+- **La acción de la sección va DENTRO del rótulo, con `.form-section-btn`** —
+  no en una fila propia arriba de los campos. `margin-left: auto` la manda
+  contra el borde derecho y las dos reglas tipográficas se cancelan porque el
+  rótulo va en versalitas y un botón no. La usa el *Regenerar* de las
+  credenciales del asistente de Dispositivos (§43). **Es una sola clase y no
+  una por módulo** —la acción que rellena los campos de esa sección—, aunque
+  hoy tenga un solo usuario: con un nombre por módulo, el segundo que la
+  necesite copia el que encuentre primero.
+- **Sólo para la acción que llena la sección.** Un botón que hace otra cosa
+  —navegar, borrar, abrir otro módulo— compite con el rótulo y no va acá.
+- **Y antes de agregar el botón, ver si el campo no lo resuelve solo.** El
+  *Elegir de clientes* del editor de Comprobantes (§25-quinquies) vivía acá
+  hasta que el campo `Cliente` pasó a ser el autocompletar de §34-bis: con el
+  combo en el formulario, el rótulo, el botón y el campo de id sobraban los
+  tres. Un botón que rellena campos es la salida cuando el dato **no** tiene
+  un campo propio donde elegirlo; cuando lo tiene, es un rodeo.
 
 ### 8.2 Ayuda del campo (el `?` con globito)
 
@@ -389,13 +418,13 @@ rótulo** y el texto en un globito que se abre al pasar el mouse — no una
 ```html
 <div class="form-group">
   <label for="con-promo">
-    Promoción
+    Promoción (%)
     <span class="field-help" tabindex="0" role="note">
       <i class="fa-regular fa-circle-question"></i>
       <span class="field-help-tip">El descuento se aplica al abono del plan…</span>
     </span>
   </label>
-  <select id="con-promo">…</select>
+  <input type="number" id="con-promo" min="0" max="100" step="5" placeholder="Sin promoción">
 </div>
 ```
 
@@ -434,17 +463,54 @@ son CSS y no hay nada que cablear.
   sin eso la ayuda no existe para quien no usa mouse.
 - **El texto es literal del código.** `ayudaDeCampo()` inyecta el HTML tal cual
   —lleva `<strong>`—, así que nunca se le pasa un dato de la base.
+- **Y por eso mismo un DATO nunca va en un globito.** El globito es para lo que
+  **explica** el campo, no para lo que lo **completa**: un dato cambia con el
+  campo y hay que poder mirarlo sin ir a buscarlo con el mouse, así que va como
+  `.form-nota` debajo. El caso que lo fijó fue el nombre del cliente bajo
+  `Cliente (ID)` en el editor de Comprobantes (§25-quinquies) — y la salida
+  mejor terminó siendo otra: el campo pasó a ser el autocompletar de §34-bis,
+  que escribe el nombre **adentro** del propio campo y no necesita ninguna
+  línea de apoyo. Un dato que hay que explicar debajo del campo suele ser señal
+  de que el control muestra el id y no la cosa.
 
 ### 8.3 Un campo a todo el ancho
 
 `.form-row` es un **grid de dos columnas fijas**: un único hijo ocupa nada más
 que la primera y deja la mitad derecha vacía. Un campo que tiene que ocupar el
 100 % **sale del `.form-row`** y va suelto dentro de la `.form-section`, que es
-flex column con el mismo `gap`. Hoy lo usa `Promoción` en Editar contrato.
+flex column con el mismo `gap`. Lo usa `Nombre` en Editar artículo, que lleva un
+texto largo (`CE-M1OC | Control de Encendido Minibox 1 Canal`).
 
 El `<div class="form-group"></div>` vacío como relleno es lo contrario: sirve
 cuando el campo **sí** ocupa media fila y se quiere dejar el hueco a la derecha
-(`Tipo` en la misma pantalla).
+(`Tipo` en Editar contrato).
+
+**El ancho sale de lo que el campo ADMITE, no de lo que significa.** `Promoción`
+estuvo a todo el ancho mientras fue un desplegable con el texto de cada promo
+("Descuento 15 %"); desde que es un campo numérico de tres dígitos pasó a un
+tercio de renglón, junto a las dos fechas de vigencia (§8.4). Un campo
+importante y corto se lee peor estirado: el cursor queda a quince centímetros
+del rótulo.
+
+### 8.4 Campos que son un solo dato: van en el mismo renglón
+
+Cuando dos o tres controles **no se entienden por separado**, van juntos en un
+`.form-row` (dos) o `.form-row-3` (tres) aunque el formulario tenga lugar de
+sobra para apilarlos. El caso canónico es **`Promoción (%)` + `Promo vigente
+desde` + `Promo vigente hasta`** en Editar contrato, un tercio cada uno:
+
+- **El criterio es que uno sin los otros no hace nada.** `contratos_accion.php`
+  sólo agrega el renglón del descuento si `desde <= hoy <= hasta`, así que un
+  porcentaje sin fechas es un campo cargado que no se aplica nunca. Puestos en
+  renglones distintos hay que acordarse de mirar el de abajo; en el mismo
+  renglón la fila entera se lee de una.
+- **No es "agrupar lo parecido".** `Registro` y `Firma` son dos fechas y van de
+  a dos por otro motivo (entran holgadas), pero cada una vale por sí sola. Lo de
+  acá es más fuerte: el renglón es **el dato**, partido en los controles que
+  hacen falta para escribirlo.
+- **Hasta tres por renglón**, que es lo que `.form-row-3` deja legible en el
+  ancho del modal; con cuatro los rótulos se cortan. `Actual` / `Mínimo` /
+  `Recomendado` —el stock en Editar artículo— es el otro ejemplo vivo.
 
 ## 9. Toolbar (filtros + búsqueda + acciones)
 
@@ -581,6 +647,26 @@ Los badges usan fondo translúcido sobre el rojo oscuro de la app — no fondos 
 .badge-danger  { background: rgba(230,42,42,.2);   color: #f5a8a8; }
 .badge-warn    { background: rgba(245,158,11,.18); color: #fcd34d; }
 ```
+
+**DENTRO DE UN MODAL DE CONSULTAR (§25) EL AZUL ES EL ENLACE Y NADA MÁS.** La
+pastilla `badge-info` de una ficha significa *esto lleva a otra ficha* —o sea
+que además es `.badge-link`, un `<button>`— y ninguna otra cosa. Todo lo que ahí
+es informativo y no lleva a ningún lado va en **`badge-success`**: el tipo, los
+contadores de filas relacionadas, cualquier píldora neutra.
+
+- **El motivo es que en una grilla de tarjetas todas las píldoras se ven a la
+  vez.** Con contadores, tipos y enlaces del mismo azul no hay forma de saber
+  cuál se puede clickear salvo pasando el mouse por todas; reservado el color,
+  la única azul de la ficha es la que se puede abrir.
+- **Los estados conservan su color, que es semántico y no decorativo**:
+  `Habilitado` sigue en `badge-success`, `Deshabilitado` en `badge-danger` y los
+  avisos en `badge-warn`. Pintarlos de verde por esta regla diría lo contrario
+  de lo que pasa.
+- **La regla vale de la ficha para adentro.** Fuera de los modales de Consultar
+  —el badge de la BD del Migrador, los chips de entorno, los estados de una
+  herramienta— el azul sigue siendo informativo: ahí no compite con ningún
+  enlace. Hoy la aplica **Consultar plan** (§42); el resto de las fichas todavía
+  tiene contadores en azul.
 
 ## 12. Stat cards (resúmenes numéricos)
 
@@ -1754,11 +1840,12 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 
 El cableado sale de **`wireModalTabs(scope, onShow)`**, el helper compartido: recibe el `.modal-backdrop`, alterna `active` y `hidden` por `data-tab` / `data-panel`, y devuelve `mostrar(nombre)`. El `onShow` opcional corre en cada cambio y es lo que usa Consultar usuario para cargar su solapa recién al abrirla.
 
-**Un campo de la ficha que nombra otra entidad se dibuja como pastilla clickeable** (`.badge.badge-link`, §11) y abre la ficha de esa entidad apilada encima. Hoy lo usan `Usuario` y `Dominio` en Consultar perfil. Tres reglas:
+**Un campo de la ficha que nombra otra entidad se dibuja como pastilla clickeable** (`.badge.badge-link`, §11) y abre la ficha de esa entidad apilada encima. Hoy lo usan `Usuario` y `Dominio` en Consultar perfil y `Artículo que factura el abono` en Consultar plan (§42). Cuatro reglas:
 
 - **Se dibuja con `<button>`, no con `<a>`**: no navega a ninguna URL, monta un modal. El `<a href="#">` obligaría a cancelar el evento y ensuciaría el historial.
+- **Es azul, y en la ficha el azul es sólo eso** (§11): las píldoras informativas del mismo modal —contadores, tipos— van en `badge-success`, o no hay forma de saber cuál se puede clickear sin pasar el mouse por todas.
 - **Sin id no hay pastilla.** Un perfil puede apuntar a un usuario borrado o traer el centinela `0`; ahí el campo se degrada a texto plano —o a un guión si tampoco hay nombre— en vez de dejar un botón que no lleva a ningún lado.
-- **El objeto sale del catálogo ya cargado**, y si no está se pide (`catalogosPerfiles()`). Por eso el handler es async: quien llega desde Consultar usuario → solapa Perfiles no pasó por el módulo Perfiles y todavía no tiene los catálogos.
+- **El objeto se resuelve al clickear, no al dibujar la ficha, y por eso el handler es async.** En Perfiles sale del catálogo ya cargado y si no está se pide (`catalogosPerfiles()`): quien llega desde Consultar usuario → solapa Perfiles no pasó por el módulo Perfiles. En Planes se pide siempre el listado de Artículos, porque la ficha del artículo necesita la fila completa y el catálogo del desplegable sólo trae id y nombre. **Si la fila ya no está se avisa con un `toast` y no se abre nada** — el id pudo borrarse entre que se abrió la ficha y se hizo el click.
 
 Las filas de una pestaña de relación son **clickeables** (`<tr class="row-clickable" data-id="…">`, §10): el click izquierdo abre el **modal de Consultar de la entidad relacionada**, apilado encima del modal actual (`.modal-backdrop` comparte `z-index:100`, así que el último montado queda arriba). Al cerrarlo, el modal de origen sigue abierto y con la pestaña activa. Se reutiliza el mismo `openXxxViewModal()` que usa el módulo de la relación — no se duplica el markup de tarjetas. Ejemplo vigente: Consultar usuario → pestaña `Perfiles` → click en una fila → **Consultar perfil**.
 
@@ -1841,7 +1928,7 @@ Así que la ficha tiene **encabezado + pestañas**, y las tarjetas de §25 sigue
       </div>
     </div>
 
-    <div class="modal-tabs" role="tablist">…General · Cuerpo · Detalles · Pagos…</div>
+    <div class="modal-tabs" role="tablist">…General · Cuerpo · Detalles…</div>
 
     <div class="modal-tabpanel" data-panel="general">
       <div class="ficha-panel-grid">
@@ -1864,12 +1951,43 @@ Así que la ficha tiene **encabezado + pestañas**, y las tarjetas de §25 sigue
 - **El total va en monoespaciado y en el color primario.** Es el único número de la pantalla que se lee sin buscarlo, y eso es deliberado.
 - **`.ficha-panel` es la contracara de §25, no su reemplazo.** Una tarjeta por campo sirve cuando los campos se miran de a uno; los datos fiscales y los del cliente se leen **como bloque** ("¿a quién se le facturó?", "¿con qué CAE?"), y ahí ocho tarjetas sueltas son ruido. El rótulo del bloque va **afuera**, arriba. Fuera de esos dos bloques —o sea en la pestaña Detalles, que son campos sueltos— se vuelve a §25.
 - **El vacío se dice, no se deja en blanco**: `Sin dato` en cursiva `--muted`, el mismo criterio de §25. Una etiqueta con nada al lado no distingue "no tiene" de "no se cargó".
-- **Las cuatro pestañas tienen un criterio, no son cajones**: *General* es a quién y con qué respaldo fiscal; *Cuerpo* es qué se cobra (renglones + totales + observaciones, que son el texto que se **imprime**); *Detalles* es el resto del expediente (cliente, contrato, medio, cotización, comentarios internos); *Pagos* es qué entró. Las cuatro existen siempre — una pestaña que aparece y desaparece según los datos hace dudar de dónde estaba lo que se vio recién. Pagos lleva su recuento en un `badge` cuando hay.
+- **Las tres pestañas tienen un criterio, no son cajones**: *General* es a quién y con qué respaldo fiscal; *Cuerpo* es qué se cobra (renglones + totales + observaciones, que son el texto que se **imprime**); *Detalles* es el resto del expediente (cliente, contrato, medio, cotización, comentarios internos). Las tres existen siempre — una pestaña que aparece y desaparece según los datos hace dudar de dónde estaba lo que se vio recién.
+- **La ficha NO tiene pestaña *Pagos*** (30/09/2026). La tuvo, y se sacó: es el **documento** lo que la ficha muestra —a quién se le emitió, qué dice y qué se imprime—, mientras que lo cobrado contra él es otra entidad, con su propio módulo. Un pago **no cambia nada de lo que la ficha muestra**: no mueve el total ni ninguno de los renglones, sólo cancela el comprobante, y eso ya lo dice el badge de estado del encabezado. Registrar uno sigue estando donde estaba —*Acciones → Registrar pago*, sólo con el comprobante Pendiente—, así que no se perdió ningún camino. **Y con la pestaña se fue también `pagos` de la respuesta de `comprobantes?detalle=1`**: era un `SELECT` por cada apertura de ficha que ya no lee nadie.
 - **La pestaña abierta sobrevive al repintado.** La ficha se redibuja entera tras cada cambio de renglón y los botones de renglón viven en *Cuerpo*: sin recordarla, agregar un renglón devolvería al operador a *General* cada vez.
 - **Los totales van a la derecha, en `.ficha-totales`**, no en el `tfoot` de la tabla. Es donde se busca un total en cualquier factura, y deja la grilla de renglones leyéndose como lo que es: el detalle. Las Observaciones van **al lado** y no en Detalles, porque son el texto que se imprime junto a los renglones.
 - **La respuesta del CAE se esconde detrás de un "Ver".** Es el XML del rechazo de AFIP cuando falla: adentro de una línea de panel taparía todo lo demás. El overlay que la muestra se monta **fuera** del backdrop de la ficha, para no destruirla al abrirlo.
-- **El Editar del módulo repite el chrome**: mismo `.modal-xwide`, mismo título con `<i class="fa-solid fa-file-invoice">` + `.modal-subtitle` con el `#id`, y pestañas *General* / *Detalles*. Es la regla de §14 —consultar y editar el mismo registro no se pueden ver como dos pantallas de sistemas distintos— aplicada también al ancho. **La validación salta a la pestaña del campo que falló** antes de enfocarlo: marcar un error en un campo invisible se lee como un Guardar que no responde.
-- **Los renglones NO se editan en el Editar**, y el modal lo dice. Se cargan de a uno desde la pestaña *Cuerpo* de la ficha porque cada alta, edición o baja recalcula `subtotal` / `iva` / `total` **en el servidor** (ver `comprobanteTotalizar()`); un editor de líneas que guarde todo junto al cerrar tendría que recalcular en el navegador y mandar totales, que es justo lo que el endpoint no acepta.
+- **El Editar del módulo repite el chrome**: mismo `.modal-xwide`, mismo título con `<i class="fa-solid fa-file-invoice">` + `.modal-subtitle` con el `#id`. Es la regla de §14 —consultar y editar el mismo registro no se pueden ver como dos pantallas de sistemas distintos— aplicada también al ancho. Sus pestañas y su grilla de líneas son §25-quinquies.
+- **La pestaña *Cuerpo* de la ficha sigue editando renglones de a uno** (`openRenglonModal()`), y eso **no** es un duplicado del editor: ahí se ven y se escriben el `orden` y el `artículo`, que la grilla del editor conserva pero no muestra. Es el camino para corregir un renglón suelto sin abrir el formulario entero.
+
+## 25-quinquies. Editor de comprobante: tres pestañas y la grilla de líneas
+
+**El editor del módulo Comprobantes** (`openComprobanteEditModal()`). Es un `.modal-xwide` con el chrome de §25-quater y **tres pestañas con un solo Guardar**:
+
+| pestaña | qué tiene | por qué ahí |
+|---|---|---|
+| *General* | la sección `Comprobante`: emisión / vencimiento / cotización, y abajo el cliente | son los datos del documento: se completan mirándose entre sí |
+| *Líneas* | la grilla editable de renglones, Observaciones y la caja de totales | Observaciones es el texto que se **imprime debajo de los renglones**, así que se escribe mirándolos — el mismo criterio con el que la ficha las pone al lado de los totales (§25-quater) |
+| *Detalles* | Comentarios | son internos, no salen impresos: mezclarlos con lo que se imprime es el error que la separación viene a evitar |
+
+- **La validación salta a la pestaña del campo que falló** antes de enfocarlo: marcar un error en un campo invisible se lee como un Guardar que no responde. En la grilla además el error dice **qué línea** (`Línea 3: el detalle es obligatorio`), porque un borde rojo entre ocho filas obliga a buscarlo.
+- **`Cotización USD/ARS` llega ya cargada y se puede corregir.** La sella el `INSERT` que creó el comprobante, con la cotización del día (§33-quater.1); el campo queda editable para el caso de una emisión que tiene que decir otra cosa, y lo que se tipee ahí es lo que se guarda. El editor **no la vuelve a sellar** al guardar — si lo hiciera, corregir un domicilio le pisaría la cotización al comprobante.
+- **Los campos del cliente van de a dos por renglón**, `Razón social` con `Domicilio` y `Correo` con `Celular` y `CUIT` con `Condición`. Sólo `Cliente` queda a todo el ancho (§8.3), porque arriba de los demás es el que los rellena. Con los seis apilados la sección medía dos pantallas y obligaba a scrollear para ver si faltaba algo.
+- **La ayuda de cada campo es el globito de §8.2, no una `.form-nota` debajo.** Es la regla general aplicada acá: con los campos de a dos, una nota bajo uno empuja sólo su mitad y deja los dos controles desalineados — que es exactamente lo que pasaba con `Sin razón social…` contra `Domicilio`. Llevan `?`: `Cliente`, `Razón social`, `Correo` y `Comentarios`.
+- **Los renglones se guardan CON la cabecera, no de a uno.** La grilla se sincroniza entera con un `PATCH` a `comprobantes_renglones`, que resuelve altas, bajas y cambios **en una transacción** y totaliza una sola vez al final. Con N llamadas sueltas, la tercera de ocho que falla deja el comprobante a medio guardar y los totales ya movidos por las dos que pasaron.
+- **Son dos requests, cabecera primero y grilla después**, porque son dos entidades con endpoints propios. El orden no es indistinto: si falla el `PATCH`, lo que quedó guardado es exactamente lo que se ve en pantalla y el toast dice que las líneas no se guardaron. Al revés —grilla primero— un fallo dejaría los totales movidos contra una cabecera vieja.
+- **El `orden` impreso es la posición en la grilla**, y no se manda aparte: los renglones se imprimen por `orden, id`, así que dejar que el número y la posición se elijan por separado permite que no coincidan. Se renumera 0..N al guardar — cambia el valor, no la secuencia.
+- **El `monto` no se deriva de cantidad × unitario**, que es la invariante del endpoint (los descuentos van en negativo y los encabezados en cero). La grilla lo resuelve así: **se autocompleta mientras nadie lo toque**, escribir en el campo lo vuelve manual para siempre, y un renglón que **llega** con un monto distinto de la multiplicación nace manual — si no, tocarle la cantidad a un descuento le borraría el signo. Cuando diverge aparece `.linea-sugerencia` en `--warn` —no en `--danger`, porque **no es un error**— que al clickearse lo iguala.
+- **Los totales se recalculan mientras se tipea, con la MISMA cuenta que el servidor**: total = Σ monto, y el IVA se **desagrega** de cada monto sólo en las alícuotas que `comprobanteTotalesDe()` desagrega (10,5 y 21). Cualquier otra fórmula haría que la caja anuncie un total y el Guardar persista otro.
+- **Guardar SIEMPRE retotaliza, aunque no se haya tocado una línea**, porque el `PATCH` sale igual y todo `PATCH` termina en `comprobanteTotalizar()`. Efecto práctico: un comprobante cuyos totales guardados no coincidan con sus renglones queda corregido al primer guardado, aunque sólo se haya editado el domicilio. **No es un caso teórico ni masivo**: de 2.332 comprobantes hay 4 con esa diferencia y **uno solo en Preparación**, que es el único estado editable. Corregirlo es lo que pide la invariante 2 de `comprobantes_renglones.php` — el total tiene que salir de sus renglones —, así que se deja pasar en vez de detectarlo y avisar.
+- **`Cliente` ES el combo con buscador de §34-bis — un campo, no un botón.** Se escribe ahí y las coincidencias salen mientras se tipea; al elegir una (con Enter o con el mouse) se vuelcan los seis campos de abajo. Son 64 clientes que ya viajan en `catalogos`, así que la búsqueda es en memoria y no hay un request por tecla.
+  - **Reemplazó a tres piezas, y las tres sobraban**: un `Cliente (ID)` numérico, su `.form-nota` con el nombre que resolvía ese id, y un botón `Elegir de clientes` en el rótulo de la sección que desplegaba este mismo combo aparte. Eran dos controles y una línea de apoyo para **un** dato, y el que se veía primero era el id — que no se lo sabe nadie. Con el combo, el nombre se escribe adentro del campo y el id queda en el `<input type="hidden">` que lee el Guardar (§34-bis).
+  - **Y por eso la sección `Cliente` desapareció**: su rótulo con la línea separadora no agrupaba nada que el campo no agrupe ya, y partía en dos lo que se completa de un solo movimiento. Los campos quedaron en la sección `Comprobante`, donde además es donde viven — `razon`, `domicilio`, `correo`, `celular`, `cuit` y `condicion` son **columnas de `comprobantes`**, no del cliente: son los datos **con los que se emitió**, copiados al emitir para que el documento no cambie si mañana el cliente se muda.
+  - **Escribir encima suelta el cliente pero NO borra los seis campos.** Es la regla de §34-bis (texto nuevo con id viejo es el estado que hace guardar algo distinto de lo que se lee) más la mitad de acá: un comprobante puede emitirse a alguien que no está en `clientes`, así que soltar el id no es motivo para borrarle la razón social.
+  - **El foco se queda en `Cliente` al elegir.** Lo mandaba a `Razón social` cuando era un picker que se cerraba solo; con el combo fijo en el formulario, saltar sacaría del campo a quien está eligiendo y volver exigiría Shift+Tab.
+- **El editor no explica los campos que no tiene.** Hubo una `.form-nota` bajo las fechas que aclaraba que el talonario, el número, el CAE, los totales y el estado no se editan ahí. Se sacó: el formulario ya lo dice no mostrándolos, y un párrafo sobre campos ausentes ocupa lugar permanente arriba de los que sí están. Dónde se asignan sigue dicho donde se hace — el número y el CAE los pone `Autorizar` contra AFIP, y los totales los recalcula el servidor con los renglones en cada guardado.
+- **La condición fiscal del cliente NO se copia a ciegas.** `clientes.condicion` y `comprobantes.condicion` son **dos catálogos distintos** —el del cliente tiene `EX` y el del comprobante `RE`—, así que un código que no está en el combo del comprobante se deja como estaba y se avisa por toast. Escribirlo igual guardaría una condición que después ninguna pantalla sabe mostrar.
+- **Quitar una línea no pregunta**; la baja desde la ficha sí. No es una inconsistencia: acá la fila no se borra de la base hasta el Guardar, así que Cancelar la trae de vuelta — en la ficha el botón escribe en el acto.
+- **La grilla vacía se dice con una fila de la tabla**, no con un bloque debajo del `<thead>`: con un `<div>` la tabla pierde el borde y se lee como si no hubiera cargado.
 
 ## 26. Editor JSON (textarea monoespaciado)
 
@@ -2278,6 +2396,13 @@ Utilidad de **Herramientas** que administra procesos automáticos programables. 
 
 **Infraestructura de jobs** (`cloud/jobs/`): `_scheduler.php` (tick minutal), `_bootstrap.php` (runtime común con `marcarEjecucionOk/Error`, `anotarLog`, `ejecucionId`), `_cleanup_logs.php` (cleanup nocturno por `retencion_dias`), `.htaccess` (`Require all denied`), `crontab` (versionado; se instala en `/etc/cron.d/reactor-cloud`). Cada ejecución tiene su propio `.log` en `/var/log/reactor/cloud/ejecuciones/<id>.log`.
 
+**Jobs de negocio**: `dolar_actualizar.php` (§33-quater).
+
+**Reglas de la infraestructura:**
+- **`cron_expr` SE EVALÚA EN HORA DE ARGENTINA.** `cronMatch()` compara contra `new DateTime('now')`, o sea contra el reloj de PHP, y **el contenedor corre en UTC** (`docker/Dockerfile` no fija `TZ`, a diferencia de `motor/Dockerfile`). Por eso los tres entrypoints de `cloud/jobs/` —`_scheduler.php`, `_bootstrap.php` y `_cleanup_logs.php`— abren con `date_default_timezone_set('America/Argentina/Buenos_Aires')`, igual que `api/bootstrap.php` para la web. Sin esa línea `0 6 * * *` dispara a las 03:00, y además `anotarLog()` estampa horas UTC en el `.log` mientras la base escribe `inicio` / `fin` en `-03:00` (`SET time_zone = '-03:00'`): el mismo evento con dos horas distintas según dónde se lo mire.
+- **La ruta del script la resuelve una sola función**, `tareaScriptAbs()` (`api/lib/tareas_script.php`), y la usan **las dos** puertas que lanzan un job: el tick minutal y el `Ejecutar ahora` de `api/tareas_ejecutar.php`. Si resolvieran distinto, una tarea andaría a mano y no por cron, o al revés. `tareas`.`script` guarda la ruta **relativa a la raíz del monorepo** (`cloud/jobs/x.php`, que es lo que lista `tareas_scripts_disponibles.php`) y eso sólo resuelve en producción, donde el repo entero vive en `/opt/app/reactor/`: **en desarrollo `docker-compose.yml` monta `./cloud` directamente como docroot** (`/var/www/html`), así que adentro del contenedor no existe la raíz del monorepo. De ahí el segundo intento contra la carpeta de `cloud`, la única que los dos entornos tienen. El síntoma de no tenerlo era un `.log` con `Could not open input file` y la fila colgada en `corriendo` hasta que la barría el watchdog — o sea **el Programador entero inutilizable en desarrollo**.
+- **`tareas`.`ultimo_error` sólo lleva texto cuando la corrida NO terminó bien.** `marcarEjecucionOk()` también recibe un mensaje —el resumen de lo que hizo— y volcarlo ahí dejaría una tarea sana mostrando `último error: dolar: 1420.00 -> 1540.00`. El resumen de una corrida buena vive en `tareas_ejecuciones`.`mensaje`, que es la columna que lo describe.
+
 **Requisitos de despliegue** (una sola vez al aprovisionar el server, ver `cloud/jobs/crontab`):
 1. `cronie` instalado.
 2. Extensión PHP `pcntl` habilitada (para el handler de SIGTERM del bootstrap).
@@ -2345,6 +2470,41 @@ Utilidad de **Herramientas** (§27) que compara la **estructura** de la base de 
 - **Sin persistencia**: no crea tablas, no cachea el resultado entre corridas, cada apertura del modal parte del placeholder.
 - **Diagnostica y nada más.** No propone `ALTER TABLE`, no sincroniza esquemas, no genera migraciones. Un drift se corrige con un `.sql` explícito y versionado en el Migrador DB (§29).
 - **CSS**: reusa la caja de `.terminal-log` (§38) con la variante `.terminal-log-diff` (§39), que cambia sólo lo que tiene que cambiar — neutro gris en vez del verde del sincronizador (en un diff casi todas las líneas son narrativas y pintarlas de verde dice "todo bien" sobre un log lleno de diferencias) y alto elástico hasta `52vh` en vez del alto fijo.
+
+## 33-quater. Job: cotización del dólar
+
+`cloud/jobs/dolar_actualizar.php`, que corre **todos los días a las 06:00** por el Programador de tareas (§33). Pide la cotización al microservicio de Databox (`GET https://api.databox.net.ar/v4/dolarhoy/cotizacion`, `Authorization: Bearer DATABOX_APIKEY` — la misma key del canal de correo) y escribe las dos filas de `parametros` que el sistema ya leía: `articulos.dolar.cotizacion` y `articulos.dolar.actualizado`. La tarea se da de alta con la migración `20260930_1100_tarea_dolar_actualizar.sql`.
+
+**Reemplaza a un robot del legacy que dejó de correr** (`reactor-api/robot/articulosActualizar.php`). No es una estimación: al 30/09/2026 producción seguía en `1530.00` con fecha `2026-09-05`, veinticinco días vieja, mientras con ese número se valorizaban los artículos importados, el cotizador de planes de `www` y la cotización que se sella en cada comprobante.
+
+- **SE GUARDA `venta`, NO `compra`, y está verificado contra el histórico.** Al 2026-05-19 el microservicio devuelve `compra 1370 / venta 1420` y la fila de `parametros` de esa misma fecha vale exactamente `1420.00`. Coincide además con la lectura del negocio: la columna valoriza artículos **importados** (`compra = importacion * cotizacion`, §15.2), o sea el precio al que se **compran** dólares, que es la punta `venta` del mercado. Elegir `compra` serían ~3 % menos en todos los precios en dólares.
+- **EL JOB NO RECALCULA LOS ARTÍCULOS, y el robot del legacy sí lo hacía.** Es deliberado: en cloud recalcular es una acción con nombre que muestra los cuatro números y los contratos afectados antes de confirmar, porque mueve el abono de contratos vivos. Mover la cotización es información; repreciar la tabla entera a las 6 de la mañana y sin que nadie lo mire es plata.
+- **Se pide SIN `?fecha=`.** Con la fecha de hoy el endpoint contesta **404** los sábados, domingos y feriados (verificado: `?fecha=2026-09-05` → *"Cotizacion no encontrada"*), así que el job fallaría dos de cada siete corridas por algo que no es una falla. Sin fecha devuelve la última registrada, que es la del último día hábil.
+- **Los dos parámetros se escriben en una transacción, o no se escribe ninguno.** Una cotización sin su fecha —o una fecha de hoy sobre el número de la semana pasada— es peor que no haber actualizado: las tres pantallas que la muestran dicen *"Cotización $X · actualizada el …"* y estarían afirmando algo falso.
+- **`actualizado` lo estampa el `NOW()` de la base, nunca el reloj de PHP**, sobre la misma conexión que fija `SET time_zone = '-03:00'`. Guarda **cuándo se corrió**, que es la semántica que ya tenían las filas del legacy (`09:00:03`, `20:00:04` son horas de corrida, no fechas de cotización).
+- **Se valida antes de tocar la base y se corta con excepción**: `venta` es nullable en el contrato del microservicio, y un `0` es el peor valor posible — `cotizacionDolar()` devuelve `0` cuando el parámetro no es numérico, y con eso **toda la tabla en dólares pasa a costar $ 0,00**. La banda `1..1000000` no es una regla de negocio: es el piso y el techo de lo físicamente posible.
+- **Es un `SELECT` del id y después un `UPDATE`, no un upsert.** `parametros` es la tabla del legacy y `variable` **no tiene UNIQUE**, así que un `INSERT ... ON DUPLICATE KEY` insertaría una fila duplicada en vez de pisar la que existe — y `parametroValor()` se queda con la primera, que sería la vieja para siempre.
+- **Deja rastro en el Visor de sucesos también cuando sale bien** (`cron/dolar_actualizar`), con el valor anterior, el nuevo y la fecha de la cotización. Sube a `alerta` —sin cortar: el número vino bien formado y el sistema está mejor con él que sin él— en los dos casos en que el dato puede ser correcto y aun así engañar a quien lo mira: **salto mayor al 10 %** contra el valor anterior, y **cotización devuelta de más de 7 días**. Lo segundo importa porque el endpoint sin `?fecha=` devuelve la última fila registrada: si Databox dejara de cargar cotizaciones seguiría contestando `200` con un número viejo y el job lo escribiría como si fuera de hoy.
+
+### 33-quater.1. Dónde se sella esa cotización: al crear el comprobante
+
+`comprobantes`.`cotizacion` es **la cotización del día en que se emitió el documento**, guardada al lado del total como referencia. No convierte nada — el comprobante factura `articulos`.`venta` tal cual.
+
+**Los tres caminos que crean un comprobante la sellan en el `INSERT`**, con los tres helpers de `api/comprobantes_lib.php` (`cotizacionDelDia()`, `cotizacionAlCrear()`, `cotizacionAlDuplicar()`):
+
+| camino | archivo | Prefactura / Factura | el resto de los tipos |
+|---|---|---|---|
+| Alta manual (*+ Nuevo comprobante*) | `api/comprobantes.php` | cotización del día | `0` |
+| **Duplicar** | `api/comprobantes_accion.php` | cotización del día | se copia la del original |
+| **Facturar un contrato** | `api/contratos_accion.php` | cotización del día | cotización del día |
+
+- **Al crear y no después.** Tomarla al *autorizar* —o peor, al imprimir— la volvería la cotización de otro día, y la fila ya dice `emision`. Editar el comprobante no la vuelve a sellar: el campo queda a mano en el editor (§25-quinquies) y lo que se tipea ahí manda.
+- **DUPLICAR NO LA HEREDA en Prefactura ni Factura.** El duplicado nace con emisión de **hoy**; copiarle la del original —que puede ser de hace meses— le dejaría al lado un número que no fue el de ninguno de sus dos días. Es el mismo criterio con el que ya no hereda ni el número ni el CAE: se copia **qué** se factura, no cuándo se facturó la vez pasada.
+- **En los demás tipos Duplicar la copia tal cual, y no es una inconsistencia: es no borrar.** Mandarlos a `0` por no estar en `TIPOS_CON_COTIZACION` le sacaría al duplicado un dato que el original **tenía cargado** — los 190 Recibos con cotización son reales, todos emitidos facturando un contrato. Sellar donde no había nada y borrar donde sí había son dos cosas distintas.
+- **Sale del parámetro, no de un GET a Databox.** El job de arriba lo deja fresco todos los días; pedírselo al microservicio en cada alta metería una llamada HTTP con 15 s de timeout dentro del camino de creación, y con Databox caído **no se podría crear un comprobante** — peor que crearlo con la cotización de ayer. Además es la misma fila que valorizó los artículos que se están facturando: con dos fuentes, el renglón diría un precio calculado con una cotización y la cabecera mostraría otra.
+- **Sólo Prefactura (`F`) y Factura (`T`) en los dos caminos manuales.** Los otros cinco tipos de `talonarios`.`tipo` —`P` Presupuesto, `D` Pedido, `R` Recibo, `M` Remito, `N` Nota de Crédito— nacen en `0`: la cotización es la referencia del día en que se le puso precio a lo que se factura, y eso pasa al emitir el documento de la deuda. El tipo se resuelve **contra la base**, por el talonario, y no contra lo que mande el front — que en esos dos caminos no manda ninguno.
+- **Facturar un contrato sella para cualquier tipo, y es a propósito.** Es lo que viene haciendo desde el legacy y lo que respaldan las 424 filas con cotización de la base: **234 Prefacturas y 190 Recibos, todas con `contrato`**. Hay clientes cuyo talonario de facturación es de Recibo; acotarlo ahora les sacaría la cotización a contratos vivos.
+- **Sin el parámetro cargado va `0`**, que es lo que devolvía `cParametro::valorLeer()` del legacy y lo que ya tienen las 1.908 filas sin cotización. Un `0` se lee como *"no se selló"*; inventar un número, no.
 
 ## 34. Selector de ids (Roles y Controladores)
 
@@ -2423,6 +2583,7 @@ Campo de texto que **filtra un catálogo mientras se escribe** y guarda el id de
 |---|---|---|---|
 | Perfiles (Alta) | Usuario | `usuarios` (~2.000) | nombre · correo · celular |
 | Perfiles (Alta) | Dominio | `dominios` (~700) | nombre · número · uuid |
+| Comprobantes (Editar) | Cliente | `clientes` (64) | nombre · razón social · CUIT · correo |
 
 ```html
 <div class="form-group">
@@ -2472,6 +2633,7 @@ Campo de texto que **filtra un catálogo mientras se escribe** y guarda el id de
 **Reglas:**
 
 - **No reemplaza al `<select>` en general.** Un catálogo corto y cerrado —`Tipo`, `Estado`, `Sentido`— se lee mejor desplegado: ahí un campo de texto obliga a escribir lo que se podía ver. El combo entra cuando el catálogo es largo **y** el nombre no alcanza para identificar la opción. Los ~2.000 usuarios de Perfiles cumplen las dos: hay homónimos, y un `<option>` sólo deja ver el nombre.
+- **Contra un campo de id, en cambio, entra siempre.** El `Cliente` de Comprobantes (§25-quinquies) son 64 filas —catálogo corto— y el combo igual es la salida: lo que reemplaza no es un `<select>` sino un `<input type="number">` donde había que tipear el id de memoria. La comparación no es "desplegado contra escrito", es "el nombre contra un número que no se sabe nadie".
 - **LOS TÉRMINOS SE CRUZAN CON `Y`; CADA UNO SE BUSCA EN TODOS LOS CAMPOS CON `O`.** Escribir `mari 264` pide las Marías/Marianos que **además** tengan `264` en alguno de sus campos (típicamente el celular), no la unión de las dos búsquedas. Es lo que hace que el control sirva para desambiguar entre homónimos, que es para lo que está. Con la `O` al revés el segundo término **agranda** el resultado en vez de acotarlo, y el buscador empeora justo cuando más se lo necesita.
 - **Las claves son las del buscador rápido del módulo dueño del catálogo**, no una lista nueva: Usuarios busca por correo + nombre + celular (§9) y Dominios por nombre + número + uuid. Si el combo buscara por otros campos, el mismo texto daría resultados distintos según la pantalla.
 - **El teléfono se compara también dígito contra dígito.** En la base un celular son diez dígitos y nada más (`CLAUDE.md`), pero quien busca lo escribe como lo tiene anotado: `264-412`, `(264) 412`. Si el término tiene dígitos, se lo compara además contra los dígitos de cada clave — **por clave y no concatenados**, que pegando `…12` con `34…` aparecería un `1234` que no está en ningún campo.
@@ -2950,6 +3112,11 @@ Reemplaza a `reactor-admin/planes/` del sistema histórico. El módulo **no apor
 - **EL ORDEN POR DEFECTO ES `orden` ASCENDENTE**, y no `id` descendente como el resto de los listados. La columna existe justamente para que los planes se lean de menor a mayor capacidad, que es como los ofrece la app — y es el orden del listado del back office viejo (`order by orden, id`).
 - **El desplegable de artículos lista TODOS, no sólo los habilitados.** Hay planes vivos cuyo artículo está deshabilitado; con el filtro puesto, abrir uno y guardarlo lo dejaría sin artículo, o sea sin abono. Es el mismo criterio con el que Contratos lista todos los planes. El deshabilitado se marca en la etiqueta (`(deshabilitado)`) y en la ficha con un badge.
 - **`Ver contratos` y `Ver artículo` son navegación cruzada y sólo se dibujan cuando hay a dónde ir.** Dejan el pedido en el scope de la app y saltan al listado destino, que lo vuelca en un filtro que **existe como campo de su Modal de Filtros** — `Plan` en Contratos, `Código` en Artículos (allá el artículo es la fila y no una FK, igual que Contratos → "Ver dominio"). Lo resuelve el par genérico `pedirFiltroCampo()` / `tomarFiltroCampo()`, que lleva el **campo** destino con el pedido; los tres pares viejos (`Dominio`, `Usuario`, `Contrato`) siguen existiendo porque están cableados en once módulos.
+- **EL ARTÍCULO DE LA FICHA ES UNA PASTILLA CLICKEABLE Y ABRE `Consultar artículo` APILADO ENCIMA** (`.badge.badge-link`, §25), igual que `Usuario` y `Dominio` en Consultar perfil. Es el único campo de esa ficha que lleva a otro lado, así que **es la única píldora azul del modal**: `Tipo`, `Contratos` y `Utilizaciones` pasaron a `badge-success` para que el azul se lea como enlace y no como decoración (§11). Cuatro consecuencias:
+  - **El `#id` queda AFUERA de la pastilla**, como el `<code>S</code>` que acompaña al tipo: es el código del artículo, no su nombre, y adentro del botón se leería como parte del rótulo del enlace. La excepción es el artículo **sin nombre**: ahí el `#id` pasa a ser el rótulo del enlace y el `<code>` de al lado se cae, o quedaría `#7 #7`. Es la misma degradación de `badgeFicha()`.
+  - **Sin artículo no hay pastilla** — el campo se degrada a `Sin artículo` en `muted`, en vez de dejar un botón que no lleva a ningún lado. Y si el artículo está deshabilitado, el badge `badge-warn` de siempre va **después** de la pastilla.
+  - **La ficha del artículo se pide en el momento y NO se cachea.** `openArticuloViewModal()` necesita la fila completa —los cuatro contadores y el recálculo de precios, que sólo arma el GET del listado—, y `CATALOGOS_PLANES.articulos` trae nada más el id y el nombre del desplegable. Guardarse el listado dejaría la ficha mostrando el precio viejo después de editar el artículo en el módulo de al lado; es un click esporádico y la vuelta se paga sola.
+  - **No reemplaza al `Ver artículo` del menú `Acciones`, que hace otra cosa**: la pastilla abre la ficha sin salir del plan, el ítem del menú salta al **listado** de Artículos filtrado por ese código. Es el mismo reparto que en Consultar perfil, donde las pastillas abren fichas y el menú `Listar` navega a los módulos.
 - **Trece tarjetas en Consultar: diez `half` y tres `full`** — `Nombre` en la ranura 3, `Artículo` y `Descripción` al final. Agregar o quitar un campo obliga a rehacer esa cuenta (§25).
 - **La baja va con el modal de desglose** (§15.1): las dos FK que apuntan acá son `RESTRICT` y las dos **bloquean** — contratos (50 filas) y utilizaciones (98).
 

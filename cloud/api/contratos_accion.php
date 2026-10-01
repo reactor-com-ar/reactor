@@ -55,8 +55,18 @@ require_once __DIR__ . '/comprobantes_lib.php';
 const FECHA_GENESIS     = '1500-01-01';
 const FECHA_APOCALIPSIS = '2500-01-01';
 
-/** `parametros`.`variable` con la cotizacion que se sella en el comprobante. */
-const PARAMETRO_COTIZACION = 'articulos.dolar.cotizacion';
+/* La cotizacion que se sella sale de `cotizacionDelDia()`, en
+   `comprobantes_lib.php`: es la MISMA fila de `parametros` y la misma lectura
+   que usan el alta manual y el Duplicar. Vivia duplicada aca -- con su propia
+   constante `PARAMETRO_COTIZACION` -- hasta que los tres caminos que crean un
+   comprobante pasaron a sellarla, que es cuando dos copias de la misma regla
+   empiezan a poder discrepar.
+
+   ACA SE SELLA PARA CUALQUIER TIPO DE TALONARIO y no solo para Prefactura y
+   Factura (`cotizacionAlCrear()`): es lo que viene haciendo desde el legacy y
+   lo que tienen las 424 filas con cotizacion de la base -- 234 Prefacturas y
+   190 Recibos, todas con `contrato`. Acotarlo ahora le sacaria la cotizacion a
+   los contratos que facturan contra un talonario de Recibo, que son reales. */
 
 /** Medio de pago con el que nace el comprobante del abono (`medios`.`id`). */
 const MEDIO_ABONO = 1;
@@ -421,10 +431,11 @@ function facturarContexto(array $con): array
         );
 
         // Renglon de la promocion. `contratos`.`promo` SE LEE COMO PORCENTAJE,
-        // que es lo que hace el legacy, y ESA CUENTA NO CAMBIO cuando la columna
-        // paso a ser FK contra `promociones` (migracion `20260929_1100`): el id
-        // de esa tabla ES el porcentaje, justamente para que esta linea siga
-        // valiendo. Ver PROMO en `contratos.php`.
+        // que es lo que hace el legacy, y ESA CUENTA NO CAMBIO NUNCA: ni cuando
+        // la columna paso a ser FK contra `promociones` (migracion
+        // `20260929_1100`, cuyo id ERA el porcentaje) ni cuando esa tabla se
+        // borro y la columna volvio a ser un numero pelado de 1 a 100
+        // (`20260930_1000`). Ver PROMO en `contratos.php`.
         // Desde que el ABM la escribe, este renglon SI puede salir -- hasta
         // entonces las 50 filas tenian `promo` en NULL y nunca aparecia.
         $promo = (int) ($con['promo'] ?? 0);
@@ -475,7 +486,7 @@ function facturarContexto(array $con): array
             : (new DateTimeImmutable($periodo))->add(new DateInterval('P1M'))->format('Y-m-d'),
         'emision'      => $hoy->format('Y-m-d'),
         'vencimiento'  => $hoy->modify('+' . VENCIMIENTO_DIAS . ' days')->format('Y-m-d'),
-        'cotizacion'   => cotizacion(),
+        'cotizacion'   => cotizacionDelDia(),
         'medio'        => medioAbono(),
         'renglones'    => $renglones,
         'bloqueos'     => $bloqueos,
@@ -585,22 +596,6 @@ function fechaReal(mixed $valor): ?string
     if ($v === FECHA_GENESIS || $v === FECHA_APOCALIPSIS) return null;
 
     return $v;
-}
-
-/**
- * Cotizacion del dolar que se sella en el comprobante.
- *
- * NO convierte nada: el legacy factura `articulos`.`venta` tal cual y guarda la
- * cotizacion al lado como referencia de cuando se emitio. Sin el parametro
- * cargado va 0, que es lo que devolvia `cParametro::valorLeer()`.
- */
-function cotizacion(): float
-{
-    $stmt = db()->prepare('SELECT valor FROM parametros WHERE variable = :v ORDER BY id ASC LIMIT 1');
-    $stmt->execute([':v' => PARAMETRO_COTIZACION]);
-    $valor = $stmt->fetchColumn();
-
-    return $valor === false ? 0.0 : round((float) str_replace(',', '.', (string) $valor), 2);
 }
 
 /**

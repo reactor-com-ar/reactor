@@ -28,6 +28,7 @@ comparación acá.
 | **La cookie `sesionToken`** | La tienen guardada todos los celulares, dura un año y `app/` la adopta | cuando caduque el parque instalado |
 | **El service worker `/serviceworker.js`** | Los celulares ya lo tienen registrado con scope `/` | idem |
 | **La cola `mensajes`** | **Nadie la consume desde el 2024-06-22** — ni el legacy. `app/` ya no depende de ella (ver "El código de verificación") y sólo le escribe el rastro | — |
+| **El robot de la cotización** (`reactor-api/robot/articulosActualizar.php`) | **Nada: dejó de correr.** Movía `parametros`.`articulos.dolar.cotizacion` y de paso recalculaba `articulos` entera. Al 30/09/2026 el parámetro de producción seguía en `1530.00` con fecha `2026-09-05` | ya se fue: lo reemplaza [cloud/jobs/dolar_actualizar.php](cloud/jobs/dolar_actualizar.php), que **sólo** escribe los dos parámetros |
 | **`control.reactor.com.ar`** | nginx lo redirige con 301 a `panel.` | al terminar la transición |
 
 ### Las consecuencias que hay que respetar al escribir código
@@ -502,41 +503,62 @@ canjeó) son columnas, y el uso único pasó a ser el **default**.
   en 1: ese enlace es para que una persona entre una vez, recién creada su
   cuenta.
 
-## `promociones`: el `id` ES el porcentaje de descuento
+## `contratos.promo`: un porcentaje de 1 a 100, y ninguna tabla detrás
 
-Tabla creada por
-[cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql](cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql),
-sembrada del 5 % al 100 % de 5 en 5. **La fila del 15 % tiene `id = 15`**, la PK
-va a mano y **no lleva `AUTO_INCREMENT`**.
+La columna es `int NULL` y guarda **el porcentaje de descuento sobre el abono
+del plan**, que es como la lee el legacy desde siempre: `cContrato::facturar()`
+calcula `($articulo->venta * $promo) / 100`. **No es una FK**, no hay catálogo
+de promociones y el ABM de `cloud` la escribe con un campo numérico que valida
+el rango ahí ([cloud/api/contratos.php](cloud/api/contratos.php),
+`promoEntrada()`).
 
-No es una comodidad: es lo único que permite que `contratos`.`promo` exista. El
-esquema la declaraba `FOREIGN KEY (promo) REFERENCES articulos (id)` mientras que
-el legacy la lee como un **porcentaje** — `cContrato::facturar()` calcula
-`($articulo->venta * $promo) / 100` —, y las dos lecturas no podían convivir:
-`articulos` tiene ids 1..279 y ninguno de los once valores del combo
-`$xContrato->promo` existe ahí, así que cualquier promo que se guardara violaba
-la FK. Por eso el ABM la mostraba de sólo lectura hasta el 29/09/2026.
+Llegó a estar declarada FK dos veces y ninguna sirvió, lo cual es justamente el
+argumento:
 
-- **Con la PK sembrada, la columna satisface las dos lecturas a la vez**: guarda
-  el número que el legacy espera y apunta a una fila que existe. Un id
-  correlativo (1, 2, 3…) daría una FK igual de válida y le haría facturar al
-  legacy 1 %, 2 % y 3 % de descuento sin que nadie lo note. **Es plata.**
-- **Agregar un 12 % es insertar `id = 12`.** No hay renumeración posible: cambiar
-  un id cambia el descuento de todos los contratos que lo usan, y por eso la FK
-  es `ON UPDATE RESTRICT` como el resto del esquema. Una promo que ya no se
-  ofrece se apaga con `habilitado = 0`, no se borra.
-- **"Sin promoción" es `NULL`**, no una fila `id = 0`: el `0` del sistema
-  histórico es un centinela y no una referencia, y es lo que ya tenían las 50
-  filas. Por eso el `0` = "Ninguna" del combo legacy no se migró como fila.
-- **El renglón de descuento de `cloud/api/contratos_accion.php` no cambió** —
-  sigue leyendo `promo` como porcentaje—, pero desde que el ABM la escribe **sí
+1. **Contra `articulos`** la columna **no se podía escribir**: `articulos` tiene
+   ids 1..279 y ninguno de los once valores del combo legacy `$xContrato->promo`
+   existe ahí, así que cualquier promo violaba la FK. Por eso el ABM la mostraba
+   de sólo lectura.
+2. **Contra la tabla `promociones`** (migración `20260929_1100`, que sembraba el
+   porcentaje **como PK**: la fila del 15 % con `id = 15`) sí se podía, pero el
+   catálogo no agregaba nada — veinte filas que eran los veinte números que ya
+   se podían escribir en la columna, con un `nombre` que era el `id` en
+   castellano y un `habilitado` que apagaba un número, no un dato.
+
+Las dos se fueron el 30/09/2026 con
+[cloud/sql/migrations/20260930_1000_promo_porcentaje_sin_promociones.sql](cloud/sql/migrations/20260930_1000_promo_porcentaje_sin_promociones.sql),
+que borra la FK, su índice y la tabla. **Las 50 filas tenían `promo` en `NULL`,
+así que no hubo nada que migrar.**
+
+- **"Sin promoción" es `NULL`**, no `0`: es lo que tienen las 50 filas y la regla
+  del resto del esquema — el `0` del sistema histórico es un centinela, no un
+  dato. **Un `0` que llegue del formulario se guarda `NULL`**: un descuento del
+  0 % es no tener promoción, y dejar las dos formas conviviendo en la columna es
+  exactamente lo que el centinela ya hizo una vez.
+- **Lo que se pasa de rango se rechaza, no se recorta.** Llevar un `150` a `100`
+  le regalaría al cliente el abono entero sin que nadie lo note. **Es plata.** Y
+  se valida con `ctype_digit()` sobre el texto, no con un cast: `"15.9"` y
+  `" 15\n"` entrarían como `15`, o sea un descuento distinto del que alguien
+  escribió. Mismo criterio que el celular de las invitaciones.
+- **El `step` de 5 del campo numérico es sólo el salto de las flechitas**, no una
+  regla: entre 1 y 100 se puede tipear cualquier entero y el endpoint lo acepta
+  — **no valida que sea múltiplo**. Los dos límites viajan desde el endpoint en
+  los catálogos (`promo: {max, paso}`) para no estar escritos dos veces.
+- **El renglón de descuento de `cloud/api/contratos_accion.php` nunca cambió** —
+  siempre leyó `promo` como porcentaje—, pero desde que el ABM la escribe **sí
   puede salir**: hasta entonces las 50 filas la tenían en `NULL` y el renglón no
-  aparecía nunca.
+  aparecía nunca. **El descuento sólo se aplica entre `desde` y `hasta`**, y por
+  eso los tres campos van en el mismo renglón del formulario (DESIGN.md §8.4):
+  un porcentaje sin fechas es un dato cargado que no se aplica jamás.
+- **El combo legacy `$xContrato->promo` sigue cargado en `combos`** porque lo
+  dibuja el back office viejo. No se lee desde acá.
 
 ### `contratos.plan_modo`: `dinamico` y `fijo`, y nace en `fijo`
 
-`ENUM('dinamico','fijo') NOT NULL DEFAULT 'fijo'`, de la misma migración: qué se
-hace con el plan cuando el dominio crece. El default **no es un valor cualquiera**
+`ENUM('dinamico','fijo') NOT NULL DEFAULT 'fijo'`, de la migración
+[cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql](cloud/sql/migrations/20260929_1100_contratos_plan_modo_y_promociones.sql)
+—la misma que creó `promociones`, que ya no existe—: qué se hace con el plan
+cuando el dominio crece. El default **no es un valor cualquiera**
 — es lo que hacen hoy las 50 filas, cuyo plan se eligió a mano y nada lo mueve.
 Sembrar `dinamico` les habría cambiado el comportamiento a todos los contratos
 vivos desde un `ALTER`. El modo se elige contrato por contrato, desde el ABM.

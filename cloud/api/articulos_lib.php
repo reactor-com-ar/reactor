@@ -25,14 +25,21 @@ declare(strict_types=1);
  * `venta = compra * (1 + margen/100)` al centavo.
  *
  * LA COTIZACION NO ES UNA CONSTANTE NI UNA COLUMNA: vive en
- * `parametros`.`articulos.dolar.cotizacion` y la mueve una tarea del sistema
- * historico (`reactor-api/robot/articulosActualizar.php`, que ademas recorre la
- * tabla entera llamando a `recalcular()`). Por eso las filas en dolares tienen
- * cotizaciones implicitas distintas entre si —1370, 1375, 1380, 1415 y 1450 al
- * 30/09/2026— segun cuando se las toco por ultima vez: NO estan desactualizadas
- * por error, es el estado normal de la tabla entre dos corridas. Recalcular es
- * justamente lo que las alinea, y por eso es una accion con nombre y no algo
- * que pase solo.
+ * `parametros`.`articulos.dolar.cotizacion` y la mueve la tarea
+ * `cloud/jobs/dolar_actualizar.php` todos los dias a las 06:00, con la punta
+ * `venta` del microservicio de Databox.
+ *
+ * ESA TAREA NO RECALCULA LOS ARTICULOS, y el robot del legacy al que reemplaza
+ * (`reactor-api/robot/articulosActualizar.php`) si lo hacia: recorria la tabla
+ * entera llamando a `recalcular()`. Acá mover la cotizacion y repreciar son dos
+ * cosas distintas a proposito — la segunda le cambia el abono a contratos vivos
+ * y por eso es una accion con nombre, que muestra los cuatro numeros y los
+ * planes afectados antes de confirmar.
+ *
+ * Consecuencia: las filas en dolares tienen cotizaciones implicitas distintas
+ * entre si —1370, 1375, 1380, 1415 y 1450 al 30/09/2026— segun cuando se las
+ * toco por ultima vez. NO estan desactualizadas por error, es el estado normal
+ * de la tabla entre dos recalculos.
  */
 
 /** Claves de `combos` con los textos de los codigos cortos de `articulos`. */

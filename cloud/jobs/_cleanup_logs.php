@@ -10,6 +10,10 @@ if (PHP_SAPI !== 'cli') {
     exit('cleanup: solo por CLI');
 }
 
+// Misma zona que el resto de cloud: la linea de resumen lleva `date('c')` y el
+// contenedor corre en UTC. Ver el comentario de `_scheduler.php`.
+date_default_timezone_set('America/Argentina/Buenos_Aires');
+
 require_once __DIR__ . '/../../env.php';
 
 $dsn = sprintf(

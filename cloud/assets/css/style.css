@@ -324,6 +324,12 @@ textarea { resize: vertical; min-height: 60px; }
 .form-row-3  { grid-template-columns: repeat(3, 1fr); }
 .form-row-4  { grid-template-columns: repeat(4, 1fr); }
 .form-group  { display: flex; flex-direction: column; gap: 5px; }
+/* Misma trampa que `.btn[hidden]`: el `display: none` que el navegador le da a
+ * `[hidden]` tiene especificidad de selector de tipo, asi que el `display:flex`
+ * de la linea de arriba lo pisa y el campo "oculto" se sigue dibujando (se vio
+ * con el buscador de clientes del editor de Comprobantes, que arranca plegado).
+ * Va aca una sola vez, no un `style.display` por llamador. */
+.form-group[hidden] { display: none; }
 .form-group label { font-size: .8rem; font-weight: 600; color: var(--muted); }
 .form-group input,
 .form-group select,
@@ -418,14 +424,14 @@ textarea { resize: vertical; min-height: 60px; }
 .form-section-title i { font-size: .8rem; opacity: .8; }
 
 /* Botón dentro del título de una sección: el "Regenerar" de las credenciales
- * del asistente de Dispositivos y el "Elegir de clientes" de la sección Cliente
- * del editor de Comprobantes. `margin-left: auto` lo manda contra el borde
+ * del asistente de Dispositivos. `margin-left: auto` lo manda contra el borde
  * derecho y las dos reglas tipográficas se cancelan porque
  * `.form-section-title` va en versalitas y un botón no.
  *
- * Es UNA clase y no una por módulo: los dos casos son la misma cosa —la acción
- * que rellena los campos de esa sección— y con dos nombres el segundo que la
- * necesite copia el que encuentre primero. */
+ * Es UNA clase y no una por módulo —la acción que rellena los campos de esa
+ * sección— aunque hoy la use un solo lugar: el "Elegir de clientes" del editor
+ * de Comprobantes también la usaba, hasta que ese campo pasó a ser el
+ * autocompletar de §34-bis y el botón dejó de existir. */
 .form-section-btn {
     margin-left: auto;
     text-transform: none; letter-spacing: normal;

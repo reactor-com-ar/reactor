@@ -14,23 +14,26 @@ require __DIR__ . '/bootstrap.php';
  *
  * TODAS las columnas son editables menos `id`, que es el AUTO_INCREMENT.
  *
- * PROMO SE ESCRIBE DESDE EL 29/09/2026, Y ANTES NO SE PODIA. La columna estaba
- * rota en el esquema: lo declaraba `FOREIGN KEY (promo) REFERENCES articulos
- * (id)`, pero el sistema historico la usa como un PORCENTAJE de descuento --
- * `cContrato::facturar()` calcula `($articulo->venta * $promo) / 100` y el combo
- * `$xContrato->promo` ofrecia 0, 10, 20 ... 100. Las dos lecturas no podian
- * convivir: `articulos` tiene ids 1..279 y ninguno de esos once valores existe
- * ahi, asi que cualquier promo que se guardara violaba la FK. El ABM la mostraba
- * de solo lectura porque escribirla eligiendo una lectura era repartir plata o
- * romper el INSERT.
+ * PROMO ES UN PORCENTAJE DE 1 A 100 Y NADA MAS, SIN CATALOGO DETRAS. El sistema
+ * historico la lee asi -- `cContrato::facturar()` calcula
+ * `($articulo->venta * $promo) / 100` -- y el ABM la escribe con un campo
+ * numerico que valida ese rango aca (`promoEntrada()`).
  *
- * LA TABLA `promociones` DESACTIVA ESA ELECCION PORQUE SU `id` ES EL PORCENTAJE
- * (migracion `20260929_1100`): la fila del 15 % tiene `id = 15`, asi que la
- * columna guarda el numero que el legacy espera Y apunta a una fila que existe.
- * Por eso `promo` se lee como FK contra `promociones` (de ahi sale
- * `promo_texto`, ya no de `combos`) y a la vez sigue siendo el porcentaje con el
- * que el front calcula el abono con descuento. "Sin promocion" es NULL, no la
- * fila 0: el 0 del sistema historico es un centinela, no una referencia.
+ * Llego a estar declarada FK dos veces y ninguna sirvio. Contra `articulos` la
+ * columna no se podia escribir -- `articulos` tiene ids 1..279 y ninguno de los
+ * once valores del combo legacy existe ahi, asi que cualquier promo violaba la
+ * FK y el ABM la mostraba de solo lectura. Contra la tabla `promociones`
+ * (migracion `20260929_1100`, que sembraba el porcentaje COMO PK: la fila del
+ * 15 % con `id = 15`) si se podia, pero el catalogo no agregaba nada: veinte
+ * filas que eran los veinte numeros que ya se podian escribir en la columna,
+ * con un `nombre` que era el `id` en castellano. Las dos se fueron el
+ * 30/09/2026 (migracion `20260930_1000`, que ademas borra la tabla).
+ *
+ * "SIN PROMOCION" ES NULL, no 0: es lo que tienen las 50 filas y la regla del
+ * resto del esquema -- el 0 del sistema historico es un centinela, no un dato.
+ * Un 0 que llegue del formulario se guarda NULL, porque un descuento del 0 % es
+ * no tener promocion y dos formas de escribir lo mismo en una columna es justo
+ * lo que el centinela ya hizo una vez.
  *
  * PLAN_MODO es `ENUM('dinamico','fijo') NOT NULL DEFAULT 'fijo'` (misma
  * migracion): que se hace con el plan cuando el dominio crece. Se valida contra
@@ -57,12 +60,21 @@ require __DIR__ . '/bootstrap.php';
 /**
  * Claves de `combos` con los textos de los codigos cortos de `contratos`.
  *
- * `$xContrato->promo` YA NO SE USA: los descuentos salen de la tabla
- * `promociones` (ver PROMO en la cabecera). El combo sigue cargado en la base
- * porque lo dibuja el back office viejo.
+ * `$xContrato->promo` NO SE USA: el descuento es un numero y se escribe como
+ * tal (ver PROMO en la cabecera). El combo -- que ofrecia 0, 10, 20 ... 100 --
+ * sigue cargado en la base porque lo dibuja el back office viejo.
  */
 const COMBO_TIPO       = '$xContrato->tipo';
 const COMBO_REMITIR    = '$xContrato->remitir';
+
+/**
+ * Los limites del porcentaje de descuento. `PROMO_PASO` es solo el salto de las
+ * flechitas del campo numerico: entre 1 y 100 se puede escribir cualquier
+ * entero, y por eso el endpoint NO valida que sea multiplo. Viajan al front en
+ * los catalogos para no tenerlos escritos dos veces.
+ */
+const PROMO_MAX  = 100;
+const PROMO_PASO = 5;
 
 /**
  * Los dos valores del ENUM `contratos`.`plan_modo`, con el texto que muestra la
@@ -136,9 +148,14 @@ function handleList(): void
     // unica forma de que el buscador encuentre lo que se ve; la contrapartida
     // es que un tipo que solo exista en COMBOS_FALLBACK —porque `combos` no lo
     // tiene cargado— no se puede buscar por su texto.
+    //
+    // `promo` NO se busca: es un numero de uno a tres digitos, asi que tipear
+    // "5" devolveria tambien el 15, el 25, el 50 y el 55 — y, por el LIKE, todo
+    // lo que tenga un 5 en el nombre del dominio o del plan. Un filtro por
+    // descuento es otra cosa y hoy no existe.
     $q = trim((string) ($_GET['q'] ?? ''));
     [$condiciones, $busq] = busquedaWhere($q, [
-        'do.nombre', 'cl.nombre', 'pl.nombre', 'pl.descripcion', 'cbt.texto', 'pr.nombre', 'c.uuid',
+        'do.nombre', 'cl.nombre', 'pl.nombre', 'pl.descripcion', 'cbt.texto', 'c.uuid',
     ]);
     $busq[':combo_tipo'] = COMBO_TIPO;
 
@@ -157,7 +174,6 @@ function handleList(): void
                 pl.descripcion AS plan_descripcion,
                 ar.venta       AS plan_venta,
                 c.promo,
-                pr.nombre      AS promo_nombre,
                 c.desde,
                 c.hasta,
                 c.registro,
@@ -177,7 +193,6 @@ function handleList(): void
          LEFT JOIN dominios  do ON do.id = c.dominio
          LEFT JOIN planes    pl ON pl.id = c.plan
          LEFT JOIN articulos ar ON ar.id = pl.articulo
-         LEFT JOIN promociones pr ON pr.id = c.promo
          LEFT JOIN combos    cbt ON cbt.combo = :combo_tipo AND cbt.valor = c.tipo'
         . ($condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '') . '
          ORDER BY c.id DESC'
@@ -208,11 +223,11 @@ function handleList(): void
             'plan_nombre'        => trim((string) ($r['plan_nombre'] ?? '')),
             'plan_descripcion'   => trim((string) ($r['plan_descripcion'] ?? '')),
             'plan_venta'         => $r['plan_venta'] === null ? null : (float) $r['plan_venta'],
-            // `promo` ES el porcentaje de descuento y ademas el id de la fila de
-            // `promociones` (ver PROMO en la cabecera): el front lo usa con los
-            // dos sentidos -- para el select y para la cuenta del abono.
+            // `promo` ES el porcentaje de descuento (ver PROMO en la cabecera):
+            // no hay texto que resolver, el front lo dibuja con el signo %.
+            // Pasa por `idOrNull()` como las FKs porque el 0 es lo mismo aca:
+            // un centinela, no un descuento.
             'promo'              => idOrNull($r['promo']),
-            'promo_texto'        => trim((string) ($r['promo_nombre'] ?? '')),
             'remitir'            => $remitir,
             'remitir_texto'      => combo(COMBO_REMITIR)[$remitir] ?? '',
             'habilitado'         => esHabilitado($r['habilitado']) ? 1 : 0,
@@ -305,22 +320,15 @@ function catalogos(): array
          ORDER BY p.habilitado DESC, p.orden ASC, p.nombre ASC'
     )->fetchAll());
 
-    // Las promociones vienen TODAS por el mismo motivo que los planes: un
-    // contrato puede estar parado sobre una que se deshabilito despues, y
-    // filtrarla aca lo dejaria sin promo al guardarlo. El front las marca.
-    // `ORDER BY id` es el orden por descuento -- el id ES el porcentaje.
-    $promos = array_map(static fn(array $r): array => [
-        'id'         => (int) $r['id'],
-        'nombre'     => trim((string) ($r['nombre'] ?? '')),
-        'habilitado' => esHabilitado($r['habilitado']) ? 1 : 0,
-    ], db()->query('SELECT id, nombre, habilitado FROM promociones ORDER BY id ASC')->fetchAll());
-
     return [
         'clientes'   => $clientes,
         'dominios'   => $dominios,
         'planes'     => $planes,
         'tipos'      => comboLista(COMBO_TIPO),
-        'promos'     => $promos,
+        // `promo` no es un catalogo sino un porcentaje (ver PROMO en la
+        // cabecera): lo que viaja son los limites del campo numerico, para que
+        // el front no los tenga escritos aparte del endpoint que los valida.
+        'promo'      => ['max' => PROMO_MAX, 'paso' => PROMO_PASO],
         'plan_modos' => array_map(
             static fn(string $v, string $t): array => ['valor' => $v, 'texto' => $t],
             array_keys(PLAN_MODOS),
@@ -548,9 +556,7 @@ function validarContrato(array $in, ?int $id): array
     $out['cliente'] = fkOpcional($in['cliente'] ?? null, 'clientes', 'El cliente');
     $out['dominio'] = fkOpcional($in['dominio'] ?? null, 'dominios', 'El dominio');
     $out['plan']    = fkOpcional($in['plan']    ?? null, 'planes',   'El plan');
-    // Un id que no este en `promociones` no es solo una FK rota: como el id ES
-    // el porcentaje, seria un descuento que nadie definio (ver la cabecera).
-    $out['promo']   = fkOpcional($in['promo']   ?? null, 'promociones', 'La promocion');
+    $out['promo']   = promoEntrada($in['promo'] ?? null);
 
     // plan_modo: la columna es NOT NULL, asi que un payload sin el campo -- o
     // con uno fuera del ENUM -- cae en 'fijo', que es el default del esquema y
@@ -637,6 +643,37 @@ function fkOpcional(mixed $valor, string $tabla, string $rotulo): ?int
     if (!$stmt->fetchColumn()) json_error("{$rotulo} #{$id} no existe", 422);
 
     return $id;
+}
+
+/**
+ * El porcentaje de descuento: entero de 1 a PROMO_MAX, o null.
+ *
+ * Se valida con `ctype_digit()` sobre el texto y no con `is_numeric()` ni con
+ * un cast: "15.9" se guardaria como 15 y " 15\n" tambien, o sea un descuento
+ * distinto del que alguien escribio. Mismo criterio que el uuid de mas arriba y
+ * que el celular de las invitaciones (CLAUDE.md).
+ *
+ * LO QUE SE PASA DE RANGO SE RECHAZA, NO SE RECORTA: llevar un 150 a 100 le
+ * regalaria al cliente el abono entero sin que nadie lo note. Es plata.
+ *
+ * El 0 entra y sale como null -- un descuento del 0 % es no tener promocion --,
+ * que es como estan las 50 filas (ver PROMO en la cabecera).
+ */
+function promoEntrada(mixed $valor): ?int
+{
+    $v = trim((string) ($valor ?? ''));
+    if ($v === '') return null;
+
+    if (!ctype_digit($v)) {
+        json_error('La promocion es un porcentaje entero de 0 a ' . PROMO_MAX, 422);
+    }
+
+    $pct = (int) $v;
+    if ($pct > PROMO_MAX) {
+        json_error('La promocion no puede superar el ' . PROMO_MAX . ' %', 422);
+    }
+
+    return $pct === 0 ? null : $pct;
 }
 
 /** Un centinela leido de la base sale como null ("sin fecha"). */

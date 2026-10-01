@@ -11,6 +11,13 @@ if (PHP_SAPI !== 'cli') {
     exit('jobs: solo por CLI');
 }
 
+// MISMA ZONA QUE LA WEB (`api/bootstrap.php` linea 5). El contenedor corre en
+// UTC —`docker/Dockerfile` no fija TZ, a diferencia de `motor/Dockerfile`—, asi
+// que sin esta linea `anotarLog()` estampa horas UTC en el .log mientras
+// `tareas_ejecuciones`.`inicio` / `.fin` las escribe la base en -03:00: el mismo
+// evento con dos horas distintas segun donde se lo mire.
+date_default_timezone_set('America/Argentina/Buenos_Aires');
+
 // Line-buffering forzado para que el streaming SSE muestre el log en vivo.
 @ob_implicit_flush(true);
 while (ob_get_level() > 0) @ob_end_flush();
@@ -76,14 +83,23 @@ function _cerrarEjecucion(string $estado, int $exit, ?string $mensaje): void
             ':id' => $eid,
         ]);
         if ($stmt->rowCount() > 0) {
-            // Reflejar en snapshot.
+            // Reflejar en snapshot. `ultimo_error` SOLO lleva mensaje cuando la
+            // corrida no termino bien: `marcarEjecucionOk()` tambien recibe un
+            // texto —el resumen de lo que hizo— y volcarlo ahi dejaria una tarea
+            // sana con "ultimo error: dolar: 1420.00 -> 1540.00". El resumen de
+            // una corrida buena ya vive en `tareas_ejecuciones`.`mensaje`, que
+            // es la columna que lo describe.
             $pdo->prepare(
                 'UPDATE tareas t
                     JOIN tareas_ejecuciones e ON e.tarea_id = t.id
                     SET t.ultimo_estado = :e,
                         t.ultimo_error  = :m
                   WHERE e.id = :id'
-            )->execute([':e' => $estado, ':m' => $mensaje, ':id' => $eid]);
+            )->execute([
+                ':e'  => $estado,
+                ':m'  => $estado === 'ok' ? null : $mensaje,
+                ':id' => $eid,
+            ]);
         }
     } catch (Throwable $ex) {
         error_log('bootstrap _cerrarEjecucion fallo: ' . $ex->getMessage());

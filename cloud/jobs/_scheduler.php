@@ -11,7 +11,19 @@ if (PHP_SAPI !== 'cli') {
     exit('scheduler: solo por CLI');
 }
 
+// LA EXPRESION CRON SE EVALUA EN HORA DE ARGENTINA, y esta linea es lo unico
+// que lo hace cierto: `cronMatch()` compara contra `new DateTime('now')`, o sea
+// contra el reloj de PHP, y el contenedor corre en UTC (`docker/Dockerfile` no
+// fija TZ). Sin esto `0 6 * * *` —lo que alguien carga en el Programador para
+// decir "a las 6 de la mañana"— dispararia a las 03:00, y la fila que escribe
+// la base con `SET time_zone = '-03:00'` lo confirmaria recien despues de
+// haber corrido. Misma zona que `api/bootstrap.php` y que `_bootstrap.php`.
+date_default_timezone_set('America/Argentina/Buenos_Aires');
+
 require_once __DIR__ . '/../../env.php';
+// Resolucion de `tareas`.`script` a ruta absoluta, compartida con el
+// "Ejecutar ahora" de `api/tareas_ejecutar.php`.
+require_once __DIR__ . '/../api/lib/tareas_script.php';
 
 $dsn = sprintf(
     'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
@@ -112,8 +124,7 @@ function dispararTarea(PDO $pdo, array $tarea, string $ejecDir): void
     );
     @file_put_contents($logPath, $encabezado);
 
-    $repoRoot  = realpath(__DIR__ . '/../..');
-    $scriptAbs = $repoRoot . '/' . $tarea['script'];
+    $scriptAbs = tareaScriptAbs((string) $tarea['script'], __DIR__);
 
     $cmd = sprintf(
         'EJECUCION_ID=%d timeout --signal=TERM --kill-after=10s %ds ' .

@@ -163,7 +163,8 @@ declare(strict_types=1);
  *   (14 con el centinela '1500-01-01'), asi que si algun dia entra al calculo hay
  *   que decidir primero que significa el centinela.
  * - NO factura, no anula, no cancela: no escribe una sola columna de
- *   `comprobantes`. El ciclo de facturacion es de `api/contratos_accion.php`.
+ *   `comprobantes`. El ciclo de facturacion es de `api/contratos_facturar_lib.php`,
+ *   que comparten la accion de la ficha y la tarea `contratos_facturar.php`.
  * - NO filtra por `dominios`.`habilitado`, igual que el job de los planes: lo que
  *   se factura es el contrato, y hay contratos habilitados con el dominio
  *   apagado (el 156).

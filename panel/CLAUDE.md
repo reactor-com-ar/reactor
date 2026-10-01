@@ -1103,6 +1103,53 @@ esquema:
   este repo todavía no tiene visor propio. Cuando exista, se cambia esa
   constante y nada más.
 
+#### Comprobantes → `Pagar` (01/10/2026)
+
+Ítem del menú contextual de la fila, **pegado a `Consultar`** —es la acción que
+la persona vino a hacer— y abierto en una **pestaña nueva**: la pantalla de cobro
+vive en otro sitio (`www.reactor.com.ar`) y mandar ahí la pestaña del panel deja
+a la persona fuera de su sesión para volver.
+
+- **LO QUE SE ABRE ES `https://www.reactor.com.ar/pagar/?uid=<uuid>`, y no hay
+  ninguna URL mejor.** Es el **mismo enlace corto** que ya emite `cloud`
+  (`PAGO_BASE` en [cloud/api/comprobantes_lib.php](../cloud/api/comprobantes_lib.php),
+  el ítem *Botón de pago*) y que atiende [www/pagar/index.php](../www/pagar/index.php)
+  con un **302 al visor**. El cobro en sí sale de `/comprobante/pagar` y es un
+  **POST**, justamente para que el prefetch del navegador o el preview del
+  cliente de correo no creen una preferencia de MercadoPago sin que nadie la
+  pida; así que lo que se referencia desde acá es **la pantalla donde vive ese
+  botón**, con el total, el detalle y el estado a la vista — que es además lo que
+  le sirve a quien va a pagar. Es la misma decisión que ya tomó `/pagar/?uid=`
+  cuando eligió mandar al visor en vez de saltar al cobrador.
+- **No se reusa `enlaces.compartir`** aunque hoy termine en la misma pantalla:
+  son dos intenciones distintas y el sitio público puede volver a cambiar a dónde
+  manda el enlace de pago sin que el del visor se mueva. Las dos constantes están
+  separadas también en `cloud`.
+- **LOS CUATRO CANDADOS SE REPLICAN, NO SE RELAJAN AL ESTADO SOLO.** El ítem sale
+  si el comprobante es **prefactura** (`talonarios.tipo = 'F'`), está
+  **Pendiente**, tiene **importe mayor a cero** y tiene **número de serie** — los
+  mismos de `comprobantePagable()` en
+  [www/lib/comprobantes.php](../www/lib/comprobantes.php), que es quien de verdad
+  corta del otro lado. **Con el estado solo no alcanza, y es medible**: de las 118
+  prefacturas Pendientes de la base, **6 tienen total 0,00 y 5 no tienen número**
+  — 11 facturas donde `Pagar` llevaría a una pantalla que contesta que no se
+  puede. La solapa Facturas trae además `'T'` (factura fiscal) y la muestra con el
+  mismo rótulo "Factura", pero el sitio público sólo cobra `'F'`: hoy no hay
+  ninguna `'T'` emitida, así que el candado es la red para el día que haya.
+- **El hecho vive en UN solo lugar: `enlaces.pagar` del endpoint**, que es la URL
+  o `null`. El front dibuja el ítem si y sólo si vino el enlace y **no vuelve a
+  evaluar nada** — el mismo hecho decidido en dos lugares se despega al primer
+  cambio, y el que manda es el del sitio público. Mismo criterio que
+  `puede_editar` / `puede_anular` de `cloud`, resueltos en el backend.
+- **Por eso tampoco hace falta distinguir la solapa.** `menuComprobante()` es el
+  mismo para Facturas y Recibos; un recibo es `'R'`, así que nunca trae el
+  enlace y el ítem no aparece. **No se filtra por `comprobantes.activo`**: eso
+  sería un segundo criterio que puede discrepar del primero.
+- **Queda fuera del modal de Consultar**, cuyo desplegable `Acciones` sigue en
+  Descargar / Copiar enlace / Copiar número. No estaba en el pedido, y el menú
+  contextual de la fila —desde donde se abre ese modal— ya lo ofrece, que es la
+  regla con la que ese desplegable se armó.
+
 ### Invitaciones (alta, envío por correo y páginas públicas)
 
 `api/invitaciones.php` (listado + `POST` de alta), `lib/invitaciones.php`,

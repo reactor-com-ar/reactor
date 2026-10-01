@@ -4074,15 +4074,29 @@
     }
 
     /* Menu contextual de fila. Sin Editar ni Eliminar: el modulo es de solo
-       lectura. Las acciones propias son las del comprobante en si (abrirlo,
-       bajarlo, compartirlo) y el atajo para acotar el listado por estado.
-       Ese atajo NO se ofrece sobre un comprobante Cancelado (misma regla en
-       Facturas y en Recibos, que comparten este menu). */
+       lectura. Las acciones propias son las del comprobante en si (pagarlo,
+       abrirlo, bajarlo, compartirlo) y el atajo para acotar el listado por
+       estado. Ese atajo NO se ofrece sobre un comprobante Cancelado (misma
+       regla en Facturas y en Recibos, que comparten este menu).
+
+       `Pagar` va PEGADO A CONSULTAR —es la accion que la persona vino a hacer—
+       y sale si y solo si el backend mando `enlaces.pagar`, que es null salvo
+       que el comprobante se pueda cobrar en linea: prefactura, Pendiente, con
+       importe y con numero (los cuatro candados estan documentados en
+       api/comprobantes.php). NO se recalcula aca: el mismo hecho decidido en
+       dos lugares se despega al primer cambio, y el que manda es el del sitio
+       publico. Por eso tampoco hace falta distinguir la solapa — un Recibo
+       nunca trae el enlace.
+
+       Abre en una pestaña nueva porque la pantalla de cobro vive en otro sitio
+       (`www.reactor.com.ar`): mandar ahi la pestaña del panel deja a la persona
+       fuera de su sesion para volver. */
     function menuComprobante(r) {
         const e       = r.enlaces;
         const filtrar = r.estado && r.estado !== CP_ESTADO_CANCELADO;
         return [
             { label: 'Consultar', icon: 'fa-eye', onSelect: () => verComprobante(r.id) },
+            e?.pagar ? { label: 'Pagar', icon: 'fa-credit-card', onSelect: () => window.open(e.pagar, '_blank', 'noopener') } : null,
             e ? { label: 'Abrir comprobante', icon: 'fa-up-right-from-square', onSelect: () => window.open(e.abrir, '_blank', 'noopener') } : null,
             e ? { label: 'Descargar',         icon: 'fa-download',            onSelect: () => window.open(e.descargar, '_blank', 'noopener') } : null,
             e ? { label: 'Copiar enlace',     icon: 'fa-link',                onSelect: () => copiar(e.compartir) } : null,

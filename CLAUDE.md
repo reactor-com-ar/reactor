@@ -594,6 +594,62 @@ leía.
   cotización → precios → planes. Cada eslabón falla por su cuenta y el de abajo
   corre igual con el dato que haya. Invertir dos de los tres hace que el de
   arriba aplique el dato del día anterior.
+  **Y la cola de esa cadena es el 1 de cada mes a las 09:00**:
+  [cloud/jobs/contratos_facturar.php](cloud/jobs/contratos_facturar.php) lee las
+  dos puntas que la cadena acaba de dejar frescas —`contratos.plan` y
+  `articulos.venta`— y emite. Ponerla antes facturaría el mes nuevo con la lista
+  de precios del mes anterior.
+
+### La facturación: un lib, dos caminos, y el criterio escrito dos veces
+
+Desde el 01/10/2026 el abono lo emiten **dos** caminos y los dos corren el mismo
+código, [cloud/api/contratos_facturar_lib.php](cloud/api/contratos_facturar_lib.php)
+(`facturarContexto()` + `facturarEmitir()`, o sea `cContrato::facturar()`
+portada): la acción de la ficha del ABM, que es la que se usa para facturar YA y
+la única que muestra los números antes de escribir, y
+[cloud/jobs/contratos_facturar.php](cloud/jobs/contratos_facturar.php), la tarea
+del día 1 (migración
+[20261001_1200](cloud/sql/migrations/20261001_1200_tarea_contratos_facturar.sql)).
+**Dos copias de esa función serían dos formas de que el comprobante del operador
+y el del job dejen de ser el mismo documento**, y son facturas con numeración
+fiscal mandadas a un cliente — por eso el lib, por la misma razón que
+`comprobantes_lib.php`.
+
+- **"Facturable" es `habilitado = 1 AND facturar <= CURDATE()`**, con los
+  centinelas de fecha excluidos: el atajo `Facturables` del listado de Contratos,
+  que es el filtro del back office viejo (`listar?frd=<genesis>&frh=<hoy>&hab=1`).
+  **Está escrito DOS veces y las dos se mueven juntas**: en SQL
+  (`FACTURABLE_WHERE` del lib, que usa el job) y en PHP
+  ([cloud/api/contratos.php](cloud/api/contratos.php), sobre la fila ya
+  normalizada, que es lo que cuenta la tarjeta del listado). `contratos.php` no
+  puede incluir el lib —declara su propio `combo()`, `idOrNull()` y
+  `FECHA_GENESIS`— así que es la misma duplicación-por-construcción que
+  `lib/habilitado.php` entre las tres apps. Si cambia de un lado solo, la tarjeta
+  anuncia una cantidad y el job factura otra.
+- **CORRER EL JOB DOS VECES NO FACTURA DOS VECES, y no hay marca de corrida**:
+  `facturarEmitir()` adelanta `contratos.facturar` un mes, así que el contrato
+  recién emitido deja de cumplir el `WHERE`. Una marca aparte podría
+  desincronizarse de la fecha; esto no. **Y se vuelve a chequear DENTRO de la
+  transacción con la fila bloqueada** (`esFacturable()` después del `FOR
+  UPDATE`): entre que el job arma la lista y le llega el turno a un contrato,
+  alguien pudo haberlo facturado a mano desde la ficha — son el mismo código y el
+  mismo minuto es posible.
+- **UN PERÍODO POR CONTRATO POR CORRIDA** (`PERIODOS_POR_CORRIDA`). Un contrato
+  atrasado varios meses no recibe cinco facturas de golpe a las 09:00: se le
+  emite el período más viejo y el job **lista al cierre los que siguen
+  facturables**, con cuántos períodos les faltan. Es la decisión más revisable
+  del job y por eso es una constante.
+- **UNA TRANSACCIÓN POR CONTRATO**, al revés que las otras cuatro tareas. Cada
+  comprobante es un documento independiente —si el contrato 19 falla, los 18 ya
+  emitidos tienen que quedar emitidos—, la serie del talonario es un contador
+  compartido que se bloquea en cada emisión (los 24 facturables de hoy usan UN
+  talonario) y un rollback global no devolvería los números ya mostrados.
+- **El lib no habla HTTP**: ninguna función llama a `json_error()` ni a
+  `json_ok()`, los bloqueos son texto y los errores salen por excepción. Es lo
+  que lo hace incluible desde CLI. La conexión la resuelve `db()`, que declara
+  `api/bootstrap.php` para la web y el job para CLI — mismo recurso que
+  `articulos_recalcular.php` con `articulos_lib.php`. **La transacción la abre el
+  llamador, no `facturarEmitir()`.**
 - **Un plan con cupo `-1` (ilimitado) NUNCA es el plan que corresponde.** Es el
   mínimo de `ORDER BY usuarios`, así que admitirlo lo haría ganar siempre y para
   cualquier dominio. Los seis planes Telemetry habilitados tienen `usuarios =

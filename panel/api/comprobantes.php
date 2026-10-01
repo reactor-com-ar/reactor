@@ -66,8 +66,16 @@ const TIPOS = [
     'R' => ['R'],
 ];
 
-/** Estados que el cliente puede ver (2 Pendiente, 3 Cancelado). */
-const ESTADOS_VISIBLES = ['2', '3'];
+/**
+ * Los dos estados de `comprobantes`.`estado` que este modulo nombra. Se
+ * comparan como STRING porque la columna es varchar(1) y '0' (Anulado) es un
+ * valor real -- mismo criterio que `cloud/api/comprobantes_lib.php`.
+ */
+const ESTADO_PENDIENTE = '2';
+const ESTADO_CANCELADO = '3';
+
+/** Estados que el cliente puede ver (Pendiente y Cancelado). */
+const ESTADOS_VISIBLES = [ESTADO_PENDIENTE, ESTADO_CANCELADO];
 
 /** Claves de `combos` con los textos de tipo de talonario y estado. */
 const COMBO_TIPO   = '$xTalonario->tipo';
@@ -86,6 +94,25 @@ const ESTADOS_FALLBACK = [
  * exista, se cambia aca y nada mas.
  */
 const VISOR_BASE = 'https://www.reactor.com.ar/comprobante/';
+
+/**
+ * Enlace corto de pago del sitio publico, indexado por `uuid`. ES EL MISMO que
+ * ya emite `cloud` (`PAGO_BASE` en `cloud/api/comprobantes_lib.php`, el item
+ * *Boton de pago*) y lo atiende [www/pagar/index.php](../../www/pagar/index.php),
+ * que responde un **302 al visor**.
+ *
+ * NO HAY NINGUNA URL QUE SE PUEDA ABRIR EN UNA PESTAÑA Y DISPARE EL COBRO, y no
+ * es una limitacion a resolver: el cobro sale de `/comprobante/pagar` **por
+ * POST** justamente para que el prefetch del navegador o el preview del cliente
+ * de correo no creen una preferencia de MercadoPago sin que nadie la pida (www
+ * CLAUDE.md, "El comprobante y su pago"). Asi que lo que se referencia desde
+ * aca es la pantalla donde vive ese boton, con el total, el detalle y el estado
+ * a la vista -- que es ademas lo que le sirve a quien va a pagar.
+ */
+const PAGO_BASE = 'https://www.reactor.com.ar/pagar';
+
+/** Tipo de talonario que se cobra en linea: la prefactura. */
+const TIPO_PREFACTURA = 'F';
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -434,6 +461,29 @@ function mapComprobante(array $r): array
     $serie   = str_pad((string) (int) ($r['serie'] ?? 0),           6, '0', STR_PAD_LEFT);
     $nombre  = tiposTexto()[$tipo] ?? $tipo;
 
+    // SE PUEDE COBRAR EN LINEA? Son los CUATRO candados de
+    // `comprobantePagable()` en [www/lib/comprobantes.php](../../www/lib/comprobantes.php),
+    // que es quien de verdad corta del otro lado. Se replican y no se relajan al
+    // estado solo, porque los cuatro descartan filas que este listado SI muestra:
+    // medido en dev sobre las 118 prefacturas Pendientes del sistema, 6 tienen
+    // total 0,00 y 5 no tienen numero de serie -- 11 facturas donde ofrecer
+    // "Pagar" termina en una pantalla que contesta que no se puede.
+    //
+    //   1. ES UNA PREFACTURA ('F'). La solapa Facturas trae tambien 'T' (factura
+    //      fiscal) y las muestra con el mismo rotulo "Factura", pero el sitio
+    //      publico solo cobra 'F': un recibo es el acuse de un pago hecho y una
+    //      fiscal no se cobra en linea.
+    //   2. ESTA PENDIENTE. Cancelado ya se pago, y son 969 de las 1.222
+    //      prefacturas de la base: sin este candado, cualquier fila vieja del
+    //      listado vuelve a cobrar algo saldado.
+    //   3. EL TOTAL ES MAYOR A CERO. MercadoPago rechaza una preferencia de
+    //      importe cero con un error suyo, despues de que la persona ya se fue.
+    //   4. TIENE NUMERO DE SERIE, o sea esta autorizada.
+    $pagable = $tipo   === TIPO_PREFACTURA
+        &&     $estado === ESTADO_PENDIENTE
+        && (float) ($r['total'] ?? 0) > 0
+        && (int)   ($r['serie'] ?? 0) > 0;
+
     return [
         'id'           => (int) $r['id'],
         'uuid'         => $uuid,
@@ -460,6 +510,12 @@ function mapComprobante(array $r): array
             'compartir'  => VISOR_BASE . 'visor?uuid='     . rawurlencode($uuid),
             'abrir'      => VISOR_BASE . 'abrir?uuid='     . rawurlencode($uuid),
             'descargar'  => VISOR_BASE . 'descargar?uuid=' . rawurlencode($uuid),
+            // `null` cuando no se cobra en linea, y es el UNICO lugar donde vive
+            // ese hecho: el front dibuja el item si y solo si vino el enlace, asi
+            // que no hay una segunda copia de los cuatro candados que pueda
+            // despegarse de esta. Mismo criterio que `puede_editar` /
+            // `puede_anular` de `cloud`, resueltos en el backend.
+            'pagar'      => $pagable ? PAGO_BASE . '/?uid=' . rawurlencode($uuid) : null,
         ],
     ];
 }

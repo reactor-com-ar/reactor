@@ -126,7 +126,10 @@ declare(strict_types=1);
  *   corrida con los 26 contratos habilitados en dinamico tampoco moveria
  *   ninguno: los 26 ya estan parados en el plan que les corresponde.
  * - NO toca `facturado`, `facturar` ni `remitir`. El ciclo de facturacion es de
- *   `api/contratos_accion.php?accion=facturar` y de nadie mas.
+ *   `api/contratos_facturar_lib.php` y de nadie mas -- lo comparten la accion de
+ *   la ficha (`api/contratos_accion.php?accion=facturar`) y la tarea
+ *   `contratos_facturar.php`, que corre el 1 de cada mes a las 09:00, una hora
+ *   despues de esta y leyendo el plan que esta corrida acaba de escribir.
  * - NO factura. Si el plan cambia, el comprobante del periodo siguiente sale con
  *   el abono nuevo porque `facturar` lee el plan en el momento de emitir.
  * - NO escribe `dominios`.`usuarios` ni ninguna otra columna de `dominios`.

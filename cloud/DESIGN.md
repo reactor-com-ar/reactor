@@ -1409,6 +1409,93 @@ con el talonario bloqueado (`SELECT … FOR UPDATE`): si entre la previsualizaci
 el click se emite otro comprobante, éste se lleva el siguiente. Mostrarlo sin la
 aclaración sería prometer un número fiscal que la pantalla no puede garantizar.
 
+### 15.3 Contratos → Dar de baja / Dar de alta: el estado comercial
+
+Las dos acciones que prenden y apagan un contrato **y el dominio que cuelga de
+él**. Están en el menú de la fila y en la barra `Acciones` de la ficha, armadas
+por la misma función (`contratoAccionesCiclo()` en `assets/js/app.js`), y se
+resuelven contra `POST api/contratos_accion.php?accion=baja|alta`.
+
+**LA TRANSICIÓN NO VIVE EN EL ENDPOINT: vive en `api/contratos_estado_lib.php`**
+(`contratoBaja()` / `contratoAlta()`), y la comparte con **`contratos_baja_morosos.php`
+(§33-nonies)**, la tarea del día 15 que da de baja automáticamente a los
+contratos con deuda vencida hace más de seis meses. Es el mismo reparto que la
+facturación (§33-octies): en el endpoint queda sólo HTTP —leer el id, abrir la
+transacción, traducir la precondición a un 409, devolver el JSON— y la escritura
+está escrita una vez. **Dos copias son dos formas de que la baja que hace el
+operador y la que hace el job dejen de apagar lo mismo**, y lo que se apaga es la
+app de un cliente. El lib **no habla HTTP y recibe el PDO por parámetro**, que es
+lo que lo hace incluible desde CLI sin que el job tenga que declarar `db()` ni
+`json_error()`.
+
+**SON LA MISMA TRANSICIÓN AL REVÉS Y NUNCA ESTÁN LAS DOS.** `Dar de alta` no es
+un ítem más del menú: **ocupa el lugar** de `Dar de baja` cuando el contrato está
+dado de baja. Un contrato habilitado ofrece `Facturar` + `Dar de baja`; uno
+deshabilitado ofrece `Dar de alta` y nada más — facturar un contrato dado de baja
+o volver a darlo de baja no son cosas que existan. Hasta el 01/10/2026 un
+contrato deshabilitado tenía el bloque entero vacío y la única forma de revivirlo
+era el campo `Habilitado` del formulario de Editar, **que no toca el dominio**:
+el contrato volvía a estar vivo con el dominio todavía suspendido.
+
+**ESCRIBEN CUATRO COLUMNAS DE DOS TABLAS, Y LAS CUATRO EN UNA TRANSACCIÓN:**
+
+| | `Dar de baja` | `Dar de alta` |
+|---|---|---|
+| `contratos`.`habilitado` | `0` | `1` |
+| `contratos`.`baja` | hoy | el centinela `2500-01-01` |
+| `dominios`.`habilitado` | `0` | `1` |
+| `dominios`.`situacion` | `'3'` Suspendido | `'1'` Normal |
+
+- **En una sola transacción porque es una sola afirmación.** Escribir el contrato
+  y no el dominio deja al cliente con el contrato dado de baja y la app operando
+  — dos cosas distintas sobre el mismo cliente, que es justo el estado que
+  §33-septies existe para no producir.
+- **Lo que corta el servicio es `situacion`, no `habilitado`.** `app/index.php`
+  lee `dominios`.`situacion` y con `'3'` no dibuja **ningún** control de
+  operación; de `dominios`.`habilitado` no mira nada — ésa es la bandera
+  administrativa de los listados de `cloud` y `panel`. El renglón que le apaga la
+  app al cliente es el cuarto de la tabla.
+- **`contratos`.`situacion` no se toca.** La escribe una sola tarea (§33-septies,
+  04:00) y sigue siendo así: es la mora calculada, no el estado comercial que se
+  decide acá. En un contrato dado de baja queda el último valor que tuvo, que es
+  el dato histórico — el mismo criterio con el que ese job no toca los
+  deshabilitados.
+- **Y por eso esta escritura no es para siempre: estas acciones fijan el estado
+  de HOY y el job lo revisa mañana.** Un alta sobre un contrato con facturas
+  vencidas vuelve a Limitado o Suspendido en la corrida de las 04:00 — **y el
+  diálogo del alta lo dice**, porque si no el operador leería el `Normal` como
+  definitivo. Al revés, una baja se sostiene sola: el job sólo mira contratos
+  habilitados y no toca los dominios que no tienen ninguno.
+- **`Dar de alta` no tiene contraparte automática.** La baja la hacen dos
+  caminos —esta acción y la tarea del día 15 (§33-nonies)—; el alta, sólo éste.
+  Si el cliente paga, el contrato **no vuelve solo**: volver a prender un dominio
+  es una decisión que toma una persona mirando por qué se apagó.
+- **El alta limpia `contratos`.`baja`**, y no es un extra: la columna significa
+  *cuándo se dio de baja este contrato*, así que un contrato habilitado con fecha
+  de baja cargada son dos afirmaciones que se contradicen y la ficha las muestra
+  las dos. Se escribe el centinela apocalipsis (`2500-01-01`), el "no se dio de
+  baja" de `cContrato::nuevo()`, que el ABM ya traduce a vacío al mostrar.
+- **La precondición se revalida con el contrato bloqueado** (`FOR UPDATE`), igual
+  que `Facturar`: dos clicks seguidos no dan dos bajas, el segundo se va con un
+  409. Esconder el ítem no es el control.
+- **El orden de los locks es `contratos` y después `dominios`**, el mismo que
+  toma el job de las 04:00: las dos escrituras se esperan en vez de abrazarse.
+- **Cada una deja un suceso** (`origen = 'contratos'`) con los valores de los que
+  venía el dominio — revertir a mano es leer ese renglón —, y **sube a `alerta`
+  cuando el dominio queda Suspendido viniendo de otra cosa**: eso es un cliente
+  que entra a la app y no encuentra ningún control. Mismo criterio que
+  §33-septies.
+- **Un contrato sin dominio escribe sólo sus dos columnas** y el suceso lo dice.
+  Hoy los 50 tienen dominio, pero el `0` del sistema histórico es "sin asignar" y
+  no una referencia.
+
+**Las dos van con `confirmDialog` (§15) y no con el modal de §15.2**: no hay nada
+que calcular — las cuatro columnas son siempre las mismas —, así que lo que va a
+pasar entra en una frase. Lo que esa frase **no puede omitir** es que la baja le
+apaga la app al cliente. El tono separa a las dos: la baja corta un servicio y va
+en `danger` con el botón `Dar de baja`; el alta no destruye nada y va en
+`primary` con el botón `Dar de alta`.
+
 ## 16. Toasts (notificaciones efímeras)
 
 ```css
@@ -1618,7 +1705,7 @@ el momento del click con el mismo formato que el menú de fila
 - La barra **envuelve** (`flex-wrap`) en pantallas angostas; no se scrollea horizontalmente ni se colapsa en un solo dropdown.
 - **El fondo es un gris intermedio entre los dos tokens que ya conviven en el modal**: `color-mix(in srgb, var(--surface) 40%, var(--bg))` ≈ `#1e1e1f`. Queda un escalón más claro que `--bg` (`#1a1a1a`) y todavía más oscuro que los dos grises del cuerpo — las tarjetas de consulta (`#202122`) y el fondo del modal / los inputs (`--surface`, `#242526`). Así la franja se despega del header y del body sin sumar otra línea divisoria y sin repetir ningún tono del contenido.
 - **La mezcla es entre dos tokens, nunca contra `#000`.** Un `color-mix(--surface X%, #000)` fija un tono que no existe en el sistema y hay que recalcularlo a mano en cada cambio de tema; mezclando `--surface` con `--bg`, el intermedio sigue solo a la paleta. La escala de grises, de claro a oscuro: `--border` → `--row-hover` → `--surface` → **franja** → `--bg`.
-- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`), **Contratos** (`openContratoViewModal` + `openContratoModal` + `openContratoDeleteModal` + `openContratoFacturarModal`), **Talonarios** (`openTalonarioViewModal` + `openTalonarioModal` + `openTalonarioDeleteModal`), **Comprobantes** (`openComprobanteViewModal` + `openComprobanteNuevoModal` + `openComprobanteEditModal` + `openRenglonModal` + `openPagoModal` + `openComprobanteDeleteModal`) y **el modal de Filtros de todos los módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos. Contratos suma el tercero: **el modal de borrado con desglose (§15.1) lleva la misma cabecera**, y su barra de acciones es la que **omite el botón de confirmar** cuando el impacto trae bloqueos.
+- Uso actual: **Dominios** (`openDomainViewModal` + `openDomainModal`), **Usuarios** (`openUserViewModal` + `openUserModal`), **Perfiles** (`openProfileViewModal` + `openProfileModal`), **Contratos** (`openContratoViewModal` + `openContratoModal` + `openContratoDeleteModal` + `openContratoFacturarModal`), **Talonarios** (`openTalonarioViewModal` + `openTalonarioModal` + `openTalonarioDeleteModal`), **Clientes** (`openClienteViewModal` + `openClienteModal` + `openClienteDeleteModal`), **Comprobantes** (`openComprobanteViewModal` + `openComprobanteNuevoModal` + `openComprobanteEditModal` + `openRenglonModal` + `openPagoModal` + `openComprobanteDeleteModal`) y **el modal de Filtros de todos los módulos** (`openFiltersModal`, el helper compartido). Los dos modales de cada módulo llevan la misma cabecera — título en primario + barra — para que consultar y editar no se vean como dos pantallas de sistemas distintos. Contratos suma el tercero: **el modal de borrado con desglose (§15.1) lleva la misma cabecera**, y su barra de acciones es la que **omite el botón de confirmar** cuando el impacto trae bloqueos.
 
 ### 21-bis.1 "Listar": saltar a otro módulo ya filtrado
 
@@ -1636,7 +1723,8 @@ dos preguntas distintas sobre el mismo usuario y el menú las ofrece por
 separado.
 
 - **El pedido se consume siempre y sólo aplica si la ruta coincide.** Si el usuario se desvía a otra pantalla, se descarta en vez de filtrar un listado equivocado más tarde.
-- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Contratos, Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Notificaciones, Difusión; para usuario: Perfiles y Adopciones; para contrato: Contratos —desde Comprobantes— y Comprobantes —desde Contratos—; para comprobante: Comprobantes, desde Contratos). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Contratos, Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Notificaciones, Difusión; para usuario: Perfiles y Adopciones; para contrato: Contratos —desde Comprobantes— y Comprobantes —desde Contratos—; para comprobante: Comprobantes, desde Contratos; para cliente: Dominios, Contratos y Comprobantes, desde Clientes). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+  - **El filtro puede no existir todavía, y entonces se agrega: lo que no se hace es saltar sin él.** Al estrenar `Clientes` (§40-bis) sus tres destinos tenían que poder decir por qué la lista venía acotada; Contratos y Comprobantes ya traían el campo `Cliente` y **Dominios no**, así que se le agregó al Modal de Filtros antes de cablear el ítem. La regla no es "sólo los que ya lo tienen por casualidad" sino que **el salto y el campo van juntos en el mismo cambio**.
 - **`Consultar contrato` lista un solo destino y está bien así.** Comprobantes es el único módulo con filtro por contrato, y el menú se dibuja igual que si tuviera ocho: un desplegable de un ítem no es un botón directo disfrazado — `Listar` significa lo mismo en los cuatro modales que lo tienen, y degradarlo a botón acá obligaría a reconocer la familia por la forma en vez de por el rótulo. `Pagos` no entra porque no es un módulo sino una pestaña del comprobante.
 - **El mismo par sirve para llevar al registro que una acción acaba de crear**, no sólo para los ítems de `Listar`: `Contratos → Facturar` termina con `pedirFiltroComprobante('comprobantes', res.comprobante)`, que es a donde llevaba el back office viejo después de facturar. La regla no cambia — el filtro tiene que existir en el Modal de Filtros del destino (ahí, `Código`) — y por eso el pedido se vuelca en `state.id` **antes** del fetch: Comprobantes filtra en el servidor, así que un recorte posterior mostraría "las 100 últimas de todos" y el comprobante recién emitido podría no estar entre ellas.
 - **El destino puede volcar el pedido en el filtro que le corresponda, que no siempre se llama igual.** `Contratos → Ver dominio` usa el mismo `pedirFiltroDominio`, pero en **Dominios** el dominio no es una FK sino la fila misma: `renderDominios()` lo vuelca en `state.codigo`. Lo que no cambia es la regla — el filtro usado **tiene que existir en el Modal de Filtros del destino**, para que se vea por qué la lista viene acotada y se pueda limpiar.
@@ -2472,7 +2560,7 @@ Utilidad de **Herramientas** que administra procesos automáticos programables. 
 
 **Infraestructura de jobs** (`cloud/jobs/`): `_scheduler.php` (tick minutal), `_bootstrap.php` (runtime común con `marcarEjecucionOk/Error`, `anotarLog`, `ejecucionId`), `_cleanup_logs.php` (cleanup nocturno por `retencion_dias`), `.htaccess` (`Require all denied`), `crontab` (versionado; se instala en `/etc/cron.d/reactor-cloud`). Cada ejecución tiene su propio `.log` en `/var/log/reactor/cloud/ejecuciones/<id>.log`.
 
-**Jobs de negocio**: `dolar_actualizar.php` (§33-quater), `articulos_recalcular.php` (§33-quinquies) y `contratos_plan_recalcular.php` (§33-sexies), que corren **en ese orden todos los días** — 06:00 la cotización, 07:00 el recálculo de los precios que salen de ella, 08:00 la reasignación de los planes que se cobran con esos precios. Cada eslabón falla por su cuenta: el de abajo corre igual con el dato que haya. Cuelgan de esa cadena dos tareas más: `contratos_situacion_recalcular.php` (§33-septies) a las **04:00**, que no comparte ni una columna con las tres y por eso corre fuera, y **`contratos_facturar.php` (§33-octies) a las 09:00 del día 1 de cada mes**, que es su **cola** — lee el plan y el precio que los dos eslabones de arriba acaban de dejar frescos, y es la única tarea del repo que emite comprobantes.
+**Jobs de negocio**: `dolar_actualizar.php` (§33-quater), `articulos_recalcular.php` (§33-quinquies) y `contratos_plan_recalcular.php` (§33-sexies), que corren **en ese orden todos los días** — 06:00 la cotización, 07:00 el recálculo de los precios que salen de ella, 08:00 la reasignación de los planes que se cobran con esos precios. Cada eslabón falla por su cuenta: el de abajo corre igual con el dato que haya. Cuelgan de esa cadena tres tareas más, ninguna de las cuales comparte una columna con las tres y por eso corren fuera: `contratos_situacion_recalcular.php` (§33-septies) a las **04:00**; **`contratos_facturar.php` (§33-octies) a las 09:00 del día 1 de cada mes**, que es su **cola** — lee el plan y el precio que los dos eslabones de arriba acaban de dejar frescos, y es la única tarea del repo que emite comprobantes; y **`contratos_baja_morosos.php` (§33-nonies) a las 09:00 del día 15**, la única que le corta el servicio a un cliente de una forma que no se deshace sola.
 
 **Reglas de la infraestructura:**
 - **`cron_expr` SE EVALÚA EN HORA DE ARGENTINA.** `cronMatch()` compara contra `new DateTime('now')`, o sea contra el reloj de PHP, y **el contenedor corre en UTC** (`docker/Dockerfile` no fija `TZ`, a diferencia de `motor/Dockerfile`). Por eso los tres entrypoints de `cloud/jobs/` —`_scheduler.php`, `_bootstrap.php` y `_cleanup_logs.php`— abren con `date_default_timezone_set('America/Argentina/Buenos_Aires')`, igual que `api/bootstrap.php` para la web. Sin esa línea `0 6 * * *` dispara a las 03:00, y además `anotarLog()` estampa horas UTC en el `.log` mientras la base escribe `inicio` / `fin` en `-03:00` (`SET time_zone = '-03:00'`): el mismo evento con dos horas distintas según dónde se lo mire.
@@ -2635,6 +2723,8 @@ Utilidad de **Herramientas** (§27) que compara la **estructura** de la base de 
 
 `cloud/jobs/contratos_situacion_recalcular.php`, que corre **todos los días a las 04:00** por el Programador de tareas (§33). Recorre `contratos` con `habilitado = 1`, cuenta sus facturas/prefacturas **pendientes**, toma el **vencimiento de la más antigua** y de los días de atraso sale `contratos`.`situacion`. La columna la crea la migración `20261001_1000_contratos_situacion.sql` y la tarea se da de alta con `20261001_1100_tarea_contratos_situacion_recalcular.sql`.
 
+**LAS REGLAS YA NO VIVEN EN EL JOB: viven en `api/contratos_situacion_lib.php`** (01/10/2026) — las bandas, qué cuenta como deuda, la consulta que la resuelve y las dos funciones que la traducen. El job quedó siendo el **barrido**: la lista de contratos, el `.log` y el suceso. El motivo es que esa misma cuenta la hacen ahora **cuatro** caminos: este barrido, la tarea del día 15 (§33-nonies), el ítem `Actualizar situación` de las fichas de Contratos y Dominios (§15.4) y el recálculo que dispara un cobro (§15.5). Verificado que el refactor no cambió el resultado: la corrida antes y después es idéntica salvo un acento (*0 situaciones cambiadas | 26 sin cambios | 18 Normal, 0 Limitado, 8 Suspendido*).
+
 | atraso de la pendiente más antigua | `situacion` |
 |---|---|
 | sin pendientes, o todavía sin vencer, o menos de 15 días | `'1'` Normal |
@@ -2651,7 +2741,7 @@ Utilidad de **Herramientas** (§27) que compara la **estructura** de la base de 
 
 - **SI UN DOMINIO TIENE VARIOS CONTRATOS HABILITADOS, GANA LA PEOR SITUACIÓN** (`peorSituacion()`). Hoy ninguno tiene dos, pero nada del esquema lo impide: con un contrato impago el cliente **no** está al día por más que el otro sí, y quedarse con la mejor dejaría operando a quien debe plata con sólo abrirle un contrato nuevo al lado.
 - **NO ES UN TRINQUETE: si la deuda se paga, el dominio vuelve solo.** El job recalcula desde cero todos los días, así que un dominio en `'3'` pasa a `'1'` en la corrida siguiente a que se cancelen sus pendientes — verificado en los dos sentidos. Nadie tiene que destrabarlo a mano.
-- **Sólo toca dominios con al menos un contrato habilitado** (en desarrollo, 26 de 148). Un dominio sin contrato vivo no tiene mora que mirar y pisarle la `situacion` sería opinar sobre un cliente del que este job no sabe nada: su valor queda como esté, puesto a mano o por el back office viejo.
+- **Sólo toca dominios con al menos un contrato habilitado** (en desarrollo, 26 de 148). Un dominio sin contrato vivo no tiene mora que mirar y pisarle la `situacion` sería opinar sobre un cliente del que este job no sabe nada: su valor queda como esté, puesto a mano, por el back office viejo o por `Dar de baja` / `Dar de alta` de la ficha del contrato (§15.3). **Eso es lo que hace que una baja se sostenga sola**: el contrato dado de baja sale del recorrido, su dominio se queda sin ninguno habilitado y la corrida siguiente no lo visita. Al revés no: un alta deja el contrato dentro del recorrido, así que el `Normal` que escribió la acción lo revisa este job a la mañana siguiente contra la deuda real.
 - **El orden de los locks es `contratos` y después `dominios`, siempre por `id` ascendente.** Dos corridas encimadas —que el `overlap = skip` de la tarea ya evita— tomarían los locks en el mismo orden y se esperarían en vez de abrazarse.
 - **Es la columna gemela de `dominios`.`situacion` y por eso tiene su misma forma**: `varchar(1)` nullable, los mismos tres códigos y el mismo catálogo de textos (`combos` con la clave `'$xDominio->situacion'`, 1 Normal / 2 Limitado / 3 Suspendido). **No hay `'$xContrato->situacion'` en `combos`**: el sistema histórico no tiene esta noción a nivel contrato, así que la columna es nueva de verdad y no el rescate de algo que el legacy ya escribía.
 - **NACE EN `NULL` Y NO EN `'1'`.** Sembrar `'1'` sería que un `ALTER` **afirme** que los 50 contratos están al día, y es falso: ocho de los 26 habilitados están vencidos hace 146 días o más. `NULL` significa "todavía no se calculó", igual que el `NULL` de `perfiles.registrante` significa "no se sabe".
@@ -2714,6 +2804,249 @@ El precio es que una corrida interrumpida deja parte facturada, y está asumido:
 - **`overlap = skip`, y acá pesa más que en las otras cuatro**: dos corridas encimadas podrían emitirle dos comprobantes al mismo contrato si la segunda leyera la lista antes de que la primera adelante `facturar`. El segundo chequeo con la fila bloqueada ya lo evita por su cuenta; esto es el candado de afuera. **`timeout_seg` = 300** y no los 120 de las otras: cada comprobante son seis sentencias en su propia transacción y el talonario se bloquea en cada una. Un `timeout` a mitad de corrida **no rompe nada** — lo ya emitido quedó commiteado y la corrida siguiente retoma por los que faltan.
 
 **OJO: EL CRITERIO DE "FACTURABLE" ESTÁ ESCRITO DOS VECES Y LAS DOS TIENEN QUE MOVERSE JUNTAS.** `api/contratos.php` calcula la misma bandera en PHP sobre la fila ya normalizada (`habilitado === 1 && facturar !== null && facturar <= $hoy`, donde `fechaSalida()` ya mandó los centinelas a `null`) y **no puede incluir el lib**: declara su propio `combo()`, `idOrNull()` y `FECHA_GENESIS`, que colisionarían con los de `comprobantes_lib.php`. Es la misma duplicación-por-construcción que `lib/habilitado.php` entre las tres apps. Si el criterio cambia y sólo cambia de un lado, **la tarjeta del listado anuncia una cantidad y el job factura otra**.
+
+### 15.4 `Actualizar situación` (Contratos y Dominios)
+
+El ítem que analiza **un** contrato o **un** dominio y le escribe la situación
+que le corresponde por su mora. Está en el menú de fila y en la barra `Acciones`
+de las fichas de los **dos** módulos, y pega contra
+`api/contratos_accion.php?accion=situacion` y `api/dominios_accion.php?accion=situacion`.
+
+**ES LA CUENTA DE LA TAREA DE LAS 04:00 (§33-septies) ACOTADA A UN DOMINIO, y no
+una parecida: es el mismo código.** Las reglas viven en
+`api/contratos_situacion_lib.php` —las bandas (`UMBRAL_LIMITADO` 15 /
+`UMBRAL_SUSPENDIDO` 30), qué cuenta como deuda (`DEUDA_ESTADO_PENDIENTE`,
+`DEUDA_TIPOS`, `DEUDA_SIN_FECHA`), la consulta que la resuelve
+(`deudaDeContrato()`) y las dos reglas que la traducen (`situacionPorAtraso()`,
+`peorSituacion()`)— y las comparten **cuatro** caminos: el barrido diario, la
+tarea del día 15 (§33-nonies), estos dos ítems y el recálculo que dispara un
+cobro. Con una copia por camino, la pantalla diría una situación y el job
+escribiría otra a las 04:00 de la mañana siguiente, sin que nadie hubiera tocado
+nada.
+
+- **Va con previsualización (§15.2) y no con `confirmDialog`**, y no es un lujo:
+  el resultado puede ser `Suspendido`, o sea dejar al cliente sin ningún control
+  de operación en la app. Un ítem de menú que apaga un servicio sin decir antes
+  que lo va a hacer no es una acción. Además el detalle que muestra —cuántas
+  pendientes, cuál es la más antigua, cuántos días de atraso— **es** la función:
+  contesta *"¿por qué está así este cliente?"*. `GET` previsualiza y `POST`
+  aplica, los dos por la misma función del backend.
+- **Entrar por un contrato o por su dominio hace lo mismo**, y tiene que ser así:
+  para saber qué le toca al dominio hay que mirar **todos** sus contratos
+  habilitados (gana la peor), y si se los mira hay que escribir lo que se
+  calculó — si no, `contratos`.`situacion` del hermano diría una cosa y
+  `dominios`.`situacion` estaría calculada con otra. El modal los lista uno por
+  uno, así que lo que se tocó está a la vista.
+- **Sólo sobre contratos habilitados**, la misma regla del job: uno dado de baja
+  no tiene mora que administrar y su `situacion` es el dato histórico. El ítem no
+  se dibuja y el endpoint corta con 409.
+- **Si el dominio no tiene ningún contrato habilitado no se escribe nada**, ni
+  siquiera un `Normal`: es la regla de §33-septies, y el modal lo dice con el
+  aviso en vez de con un número inventado. En ese caso tampoco se dibuja
+  `Aplicar` — un botón que no puede cambiar nada es una promesa que no se cumple.
+- **No toca `habilitado` ni la fecha de baja**, ni del contrato ni del dominio:
+  eso es de `Dar de baja` / `Dar de alta` (§15.3). La mora dice cuánto debe el
+  cliente; el estado comercial dice si el contrato está vivo. Un dominio dado de
+  baja que vuelve a `Normal` por esta acción **sigue deshabilitado**.
+- **Deja un suceso sólo cuando algo cambió**, y sube a `alerta` cuando el dominio
+  queda Suspendido viniendo de otra cosa. Un recálculo que confirma lo que ya
+  había no es un hecho que haya que poder ubicar en el tiempo, y este ítem se
+  puede tocar muchas veces seguidas sobre la misma ficha: anotarlos todos
+  taparía los que sí movieron algo.
+
+### 15.5 El cobro rehabilita: el recálculo que dispara un pago
+
+**Cobrarle a un cliente suspendido tiene que devolverle el servicio en el acto, y
+no al otro día a las 04:00.** Por eso un pago dispara el mismo recálculo, por
+`recalcularSituacionTrasPago()` del mismo lib. **Lo llama un solo camino**:
+`api/pago_imputado.php`, el webhook que avisa la imputación de MercadoPago.
+
+**LO QUE DISPARA LA REHABILITACIÓN NO ES UNA FILA EN `pagos`: es que el
+comprobante haya dejado de estar Pendiente.** `pagos` es una tabla del sistema
+histórico que este repo **todavía no tiene en cuenta para nada** — ni la mora, ni
+la baja por deuda (§33-nonies), ni la situación del dominio la miran: las tres
+cuentan sobre `comprobantes`.`estado`. Por eso
+`api/comprobantes_accion.php?accion=pago`, que es el único que escribe esa tabla,
+**no dispara el recálculo**: colgar de ahí la rehabilitación de un cliente sería
+atarla a un dato que el resto del sistema ignora. El día que `pagos` entre al
+cálculo, ese enganche se agrega en un solo lugar.
+
+- **El pago entra por el legacy, no por este repo.** `www/comprobante/pagar.php`
+  sólo redirige al cobrador de Databox, y la vuelta del comprador es un `?res=A`
+  en la URL del navegador — un parámetro que escribe cualquiera, así que **no
+  sirve como disparador**. Quien recibe la imputación es
+  `reactor-api/v2/mercadopago/imputar.php`, que marca la factura como Cancelada
+  (`cComprobante::pagoRegistrar()`). De ahí que el enganche sea un webhook
+  server-to-server y no una lectura de la vuelta del navegador.
+- **`pago_imputado.php` se autentica con HMAC-SHA256 del cuerpo** contra
+  `PAGO_WEBHOOK_SECRET`, comparado con `hash_equals()`. **Sin la constante
+  definida responde 503 y no hace nada**: un webhook que se abre solo cuando
+  falta la configuración es una puerta sin llave, y lo que hay del otro lado es
+  devolverle el servicio a un cliente suspendido.
+- **No escribe pagos ni toca comprobantes**: eso ya lo hizo el legacy, que es el
+  único que sabe qué aprobó MercadoPago. Sólo **recalcula** a partir de lo que
+  quedó en la base, así que llamarlo dos veces por el mismo pago da el mismo
+  resultado.
+- **El recálculo no puede deshacer el cobro.** `recalcularSituacionTrasPago()`
+  no lanza: si falla, el pago ya está registrado y es un hecho, así que el error
+  se reporta en la respuesta y queda en el Visor —y la corrida de las 04:00 lo
+  corrige igual—. Y **se acopla a la transacción del llamador si ya hay una
+  abierta** en vez de abrir la suya: sin esa guarda, su `catch` haría `rollBack()`
+  sobre la transacción ajena y tiraría abajo el pago que el llamador acababa de
+  escribir.
+- **Registrar un pago desde cloud, hoy, no rehabilita por sí solo**, y no es un
+  olvido: `accion=pago` **no cambia `comprobantes`.`estado`** (su cabecera
+  explica por qué `pagoRegistrar()` del legacy no se portó), así que la
+  prefactura sigue Pendiente y sigue contando como deuda. El dominio vuelve a
+  Normal cuando el comprobante deja de estar Pendiente — que es exactamente lo
+  que hace la imputación de MercadoPago. El enganche está puesto igual porque un
+  contrato con **otras** facturas puede cambiar de banda, y porque el día que esa
+  acción cancele el comprobante el circuito ya queda cerrado.
+
+**OJO: EL LEGACY TAMBIÉN RECALCULA, Y CON OTRAS REGLAS.** `pagoRegistrar()` de
+`reactor-api/framework/subframework.php` cierra llamando a
+`cDominio::situacionDetectar()`, que escribe la misma columna `dominios`.`situacion`
+con criterios distintos:
+
+| | `situacionDetectar()` (legacy) | `contratos_situacion_lib.php` |
+|---|---|---|
+| banda Normal | atraso ≤ **1 día** (`$intimar`) | atraso **< 15 días** |
+| banda Limitado | 2 a 30 días | 15 a 29 días |
+| qué mira | talonarios **38 y 48** hardcodeados | `tipo IN ('F','T')` |
+| qué vencimiento | el primero **por `id`** | el **`MIN()`** |
+| a qué contrato | sólo el de `dominios`.`contrato` (32 de 148 dominios lo tienen) | **todos** los habilitados del dominio |
+| `contratos`.`situacion` | no la conoce | la escribe |
+
+`$intimar` vale `1` y **no es una columna**: `contratos` no tiene ni `intimar` ni
+`suspender`, son propiedades de la clase. La misma clase declara `$limitar = 15`
+—el umbral que ese código debería usar— y **no lo usa en ningún lado**: es un bug
+viejo, no un criterio. **Con los dos caminos vivos la columna tiene dos
+escritores que no coinciden y gana el último que corrió**, así que al enganchar
+el webhook hay que comentar el bloque `// actualiza siguacion` de
+`pagoRegistrar()`. Es el mismo trato que ya recibió el robot de los planes del
+legacy (CLAUDE.md: *"hay que comentar esa línea de `reactor-api/cron/jobs` para
+que `fijo` signifique algo"*).
+
+## 33-nonies. Job: baja de contratos con deuda vencida
+
+`cloud/jobs/contratos_baja_morosos.php`, que corre **el día 15 de cada mes a las
+09:00** por el Programador de tareas (§33). Da de baja los contratos habilitados
+con una prefactura o factura **pendiente** vencida hace **más de seis meses**, y
+apaga su dominio. La tarea se da de alta con la migración
+`20261001_1300_tarea_contratos_baja_morosos.sql`, que **no crea ni modifica
+ninguna columna**.
+
+**LA BAJA ES LA MISMA QUE LA DE LA FICHA**, `contratoBaja()` de
+`api/contratos_estado_lib.php` (§15.3): cuatro columnas de dos tablas en una
+transacción — `contratos`.`habilitado` → `0`, `contratos`.`baja` → hoy,
+`dominios`.`habilitado` → `0`, `dominios`.`situacion` → `'3'` Suspendido. Está en
+un lib por la misma razón que la facturación (§33-octies): **dos copias son dos
+formas de que la baja que hace el operador y la que hace el job dejen de apagar
+lo mismo**, y lo que se apaga acá es la app de un cliente.
+
+**ES LA PRIMERA TAREA DEL REPO QUE LE CORTA EL SERVICIO A UN CLIENTE, Y NO SE
+DESHACE SOLA.** §33-septies también escribe `dominios`.`situacion`, pero es un
+*recálculo*: si la deuda se paga, la corrida siguiente devuelve el dominio a
+Normal. Ésta no. Da de baja el contrato, y un contrato dado de baja **sale del
+recorrido** de aquella tarea —que sólo mira habilitados— así que el Suspendido
+que deja esta corrida no lo pisa nadie. Revertirlo es que una persona entre a la
+ficha y le dé `Dar de alta`. De ahí salen todas las guardas de abajo.
+
+**QUÉ CUENTA COMO DEUDA, Y POR QUÉ NO ES "CUALQUIER FACTURA VIEJA":**
+
+- **El estado `Pendiente` es lo que hace que la tarea tenga sentido.** *"Una
+  factura cuyo vencimiento es superior a seis meses"* leído sin el estado alcanza
+  también a las ya cobradas: en desarrollo eso son **24 de los 26** contratos
+  habilitados —casi todo el padrón, la mayoría al día— contra **3** con el estado
+  puesto. Una factura vencida que ya se cobró no es deuda, y dar de baja por mora
+  es dar de baja por deuda.
+- **Los dos filtros son los de §33-septies** (`comprobantes`.`estado` = `'2'` y
+  `talonarios`.`tipo` IN `('F','T')`), que es donde este repo ya definió "deuda".
+  **Están escritos dos veces, en los dos jobs**, porque ninguno puede incluir
+  `api/comprobantes_lib.php` desde CLI —arrastra `api/bootstrap.php`, que manda
+  headers y llama a `requireAuth()`—. Si el criterio cambia y sólo cambia de un
+  lado, un dominio queda Suspendido por un comprobante que el otro job no
+  considera deuda, o de baja sin haber pasado nunca por Suspendido.
+- **Seis meses son seis meses de calendario** (`INTERVAL 6 MONTH`), no 180 días:
+  es lo que significa en un ciclo mensual y no se corre con los meses de 31.
+  *"Superior a"* es estricto (`<`), así que el comprobante que vence justo seis
+  meses antes de hoy entra recién al día siguiente.
+- **El centinela `'1500-01-01'` se excluye en el `WHERE`.** Si entra, está a
+  ~190.000 días del corte y el contrato se va de baja por un comprobante al que
+  nadie le cargó el vencimiento. Hoy no hay ninguna pendiente F/T así (0 filas),
+  así que la guarda no cambia ningún resultado: existe para el día que la haya.
+
+**RECIBO (`R`) QUEDA AFUERA, Y ACÁ SÍ CAMBIA UN RESULTADO.** §33-septies lo deja
+afuera y tiene verificado que allá no cambia nada; acá son **3 contratos con `R`
+afuera y 4 con `R` adentro**. El que sobra es el **143**, con el Recibo 5652
+pendiente desde el 2023-04-18 — 1.262 días, $ 1.032,24. Se deja afuera igual,
+para no tener dos definiciones de "deuda" conviviendo, **pero no se saltea en
+silencio**: la corrida lo cuenta aparte y lo lista en el `.log` y en el suceso
+(*"quedaría de baja si `TIPOS_DEUDA` contara Recibo"*), que es lo que hace que la
+decisión se pueda revisar con el dato a la vista. El día que se decida contarlo,
+el cambio es agregar `'R'` a la constante — **en los dos jobs**.
+
+**Las guardas, y de qué protege cada una:**
+
+- **Correrlo dos veces no da de baja dos veces, y no por una marca.** El `WHERE`
+  arranca con `habilitado = 1`, así que el contrato recién dado de baja ya no
+  aparece en la corrida siguiente. Mismo mecanismo que §33-octies con `facturar`.
+  **Verificado**: segunda corrida consecutiva → *0 candidatos*.
+- **Se revalida dentro de la transacción con la fila bloqueada**, y no sólo que
+  siga habilitado: **que la deuda siga ahí**. Entre que el job arma la lista y le
+  llega el turno a un contrato, alguien pudo haber cobrado esa factura desde
+  Comprobantes. Sin ese segundo chequeo se le cortaría el servicio a un cliente
+  que acaba de pagar.
+- **El tope de 10 bajas por corrida es un fusible**, y a diferencia del de
+  §33-octies **se chequea antes de la primera transacción**: allá lo ya emitido
+  eran facturas válidas, acá lo ya aplicado son clientes sin servicio. Si una
+  corrida se encuentra con decenas, pasó algo que el job no entiende y lo que
+  corresponde es cortar **sin tocar nada** y avisar.
+- **Una transacción por contrato**, como §33-octies: cada baja es una decisión
+  sobre un cliente distinto, y el lock de `dominios` —una tabla que `app/` lee en
+  cada request— se suelta enseguida en vez de quedar tomado hasta el commit
+  final. El `ORDER BY` es por antigüedad de la deuda: si la corrida se corta, lo
+  aplicado es lo más atrasado.
+- **La fecha de corte la calcula la base** (`DATE_SUB(CURDATE(), INTERVAL 6
+  MONTH)`), nunca el reloj de PHP, y se lee **una vez** para toda la corrida.
+  Misma regla que §33-septies y §33-octies.
+- **El `.log` nombra uno por uno los dominios que quedan sin servicio y con qué
+  valores venían**, y el suceso sube a `alerta`. **Retención de 30 días**, y acá
+  es lo más importante de la fila de `tareas`: ese `.log` es **el único lugar**
+  donde queda escrito de qué estado se vino. `contratos`.`baja` guarda la fecha,
+  no el estado anterior.
+
+**NO DA DE ALTA NADA, y es de una sola dirección a propósito**: si el cliente
+paga, el contrato **no vuelve solo**. Volver a prender un dominio es una decisión
+que toma una persona mirando por qué se apagó. §33-septies sí es simétrica, pero
+aquello mueve una columna derivada y esto da de baja un contrato. Tampoco cobra,
+ni imputa pagos, ni anula o cancela comprobantes, ni manda nada por correo, ni
+toca `contratos`.`situacion`, ni filtra por `dominios`.`habilitado` (igual que
+§33-sexies a §33-octies), ni mira `contratos`.`tolerancia` (mismo motivo que
+§33-septies).
+
+**POR QUÉ EL 15 A LAS 09:00.** El **día 15** es la mitad del mes, lo más lejos
+posible del día 1, que es cuando §33-octies emite el abono de todos los
+facturables: un comprobante recién emitido nace sin vencer (7 días), así que no
+podría disparar una baja ni corriendo el mismo día — separarlas es para que la
+factura del mes y el corte de servicio no le caigan juntos al mismo cliente en la
+misma mañana. Las **09:00** y no de madrugada a propósito: es horario de oficina,
+así que si la corrida corta el servicio de alguien hay gente mirando. No cuelga
+de la cadena diaria (06:00 → 07:00 → 08:00) ni la necesita: lee
+`comprobantes`.`estado` y `.vencimiento`, dos columnas que ninguna de las tres
+escribe. **Lo que sí importa del orden** es que las 04:00 de ese mismo día ya
+corrieron: el umbral de §33-septies son 30 días de atraso y el de ésta son seis
+meses, así que **esta tarea escala una suspensión que ya estaba, no estrena
+una**.
+
+**LA PRIMERA CORRIDA, verificada en desarrollo al 01/10/2026** (se corrió el job
+y se restauró el estado después): da de baja **3 contratos** — el 138 (dominio
+161 *Barrio Lujuva 3*, 8 pendientes, la más vieja del 2025-08-10, 417 días), el
+158 (dominio 234 *iSay*, 2 pendientes, 235 días) y el 156 (dominio 266 *Posada de
+los angeles*, 1 pendiente, 207 días). **Ninguno de los tres pierde el servicio en
+esa corrida**: los tres dominios ya estaban en Suspendido, puestos ahí por el job
+de las 04:00 hace meses. Lo que cambia es `habilitado`, y en dos de los tres —el
+dominio 266 ya estaba apagado—.
 
 ## 34. Selector de ids (Roles y Controladores)
 
@@ -3243,6 +3576,36 @@ El módulo **no aporta componentes nuevos salvo las burbujas del diálogo**. Tod
 
 ---
 
+## 40-bis. Comercial · Clientes
+
+ABM de `clientes`: **a quién se le factura**. La razón social, el domicilio, la condición frente al IVA y el CUIT que se imprimen en cada comprobante, más el talonario del que sale su numeración y el medio con el que paga. Cuelga de **Comercial**, entre `Talonarios` y `Artículos`, con `fa-address-book`.
+
+**Va pegado a `Talonarios` y no al final del grupo**, al revés que `Artículos` y `Planes`: `clientes`.`talonario` cuelga de ahí —es con qué numeración se le emite a cada uno— y los dos juntos cierran el circuito que el operador recorre (`Contratos / Comprobantes / Talonarios / Clientes`). Después empieza el catálogo, que se toca de vez en cuando.
+
+Reemplaza a `reactor-admin/clientes/` del sistema histórico. El módulo **no aporta componentes nuevos**: sale entero de las piezas ya documentadas — `moduleHeader()` (§23), `abmToolbar()` (§9), tabla estándar (§10), badges (§11), secciones de formulario (§8.1), Modal de Filtros compartido (§23-bis), tarjetas de consulta (§25) y borrado con desglose (§15.1).
+
+**Reglas:**
+
+- **EL CLIENTE QUE FACTURA SALE DEL DOMINIO, NO DEL CONTRATO.** Lo resuelve así `facturarContexto()` (§33-octies), igual que el legacy: primero el dominio del contrato y de ahí su cliente. Por eso el módulo cuenta **tres vínculos por separado** —dominios, contratos y comprobantes— en vez de un solo contador: son tres relaciones distintas y hoy no coinciden (61 clientes con dominio, 42 con contrato, 35 con comprobantes). Las tres son stat cards, las tres son filtro (`Vínculos`) y las tres son un ítem de `Listar`.
+- **`Sin talonario` ES EL ÚNICO KPI ACCIONABLE DE LOS CINCO, y por eso es el único que se pinta.** Sin talonario no hay de dónde sacar la numeración y `facturar` **bloquea** la emisión con esas palabras. Va en rojo **sólo cuando hay alguno** —hoy son 0—: un cero en rojo avisa de nada. La misma ausencia se dice en la fila (`badge-danger` en la columna `Talonario`) y en la ficha, en vez de un `—` que se leería como un dato que falta y no como una emisión trabada.
+- **LOS LARGOS SALEN DEL COMPROBANTE, NO DE `clientes`.** Seis columnas se **copian** al comprobante al facturar y allá son más cortas (`LARGO_CLIENTE` de `contratos_facturar_lib.php`): guardar una razón social de 255 caracteres sería guardar un cliente al que después no se le puede facturar. El ABM valida contra el **menor** de los dos largos —`razon` y `domicilio` 250, `correo` y `celular` 100, `condicion` 2, `cuit` 13— y el `maxlength` del formulario sale del mismo catálogo que manda el endpoint, así que no hay dos números que se puedan desincronizar.
+- **TRES FILAS NO RESPETAN EL FORMATO Y SE CONSERVAN.** `cuit` tiene una con guiones (`20-14078223-9`, cliente 134) y `celular` dos que no son diez dígitos (el 153 arrastra un U+202C invisible, el 157 tiene once). **El formato se exige SÓLO cuando el valor cambia**: el que la fila ya tenía se acepta tal cual, en el backend y en el front, que preguntan lo mismo. Sin esa excepción esas tres filas quedarían imposibles de guardar — nadie podría corregirles ni el correo —, y la validación, que existe para que no *entren* datos mal formados, terminaría bloqueando los que ya están. Es el mismo criterio con el que `talonarios.php` acepta el `tipo = 'A'` heredado del talonario 35 (ABM.md).
+  - **Y ES LO CONTRARIO DE LO QUE HACE LA INVITACIÓN, a propósito.** Allá el celular son diez dígitos y nada más porque las 384 filas de `usuarios` y de `invitaciones` ya lo cumplen (`CLAUDE.md`). Acá no, y una regla que la tabla no cumple no normaliza datos: bloquea la pantalla.
+  - **Lo que llega mal se rechaza, no se limpia en silencio.** Al CUIT con guiones se le podrían sacar los separadores y guardar `20140782239`, que además es un CUIT válido — pero eso es **reescribir** un dato cargado desde una pantalla que nadie abrió para eso.
+- **`condicion` ES OBLIGATORIA; el resto del formulario no.** La copia el comprobante y es lo que decide qué documento se emite; las 64 filas tienen una. Por eso su `<select>` **no lleva opción vacía** y en el alta arranca en `Consumidor Final`, que es lo que tienen 54 de las 64. El único otro campo obligatorio es `Nombre`: es con lo que el cliente se identifica en toda pantalla que lo nombre.
+  - **El código corto se muestra SIEMPRE traducido** contra `combos` (`$xCliente->condicion`), nunca las dos letras peladas. `Consumidor Final` va en `badge-info` porque es lo normal y las otras tres en `badge-success`: son las que cambian qué documento se emite.
+- **`Nombre` y `Razón social` son dos cosas y se dicen las dos.** El primero es el de uso interno —con el que se busca— y el segundo el fiscal, el que se imprime. Coinciden en muchas filas y en muchas otras no (`Anonimo` / `SMSV`, `Libertad` / `Libertad S.A.`), así que las dos son columna del listado y la `.form-nota` del formulario dice cuál es cuál.
+- **`talonario` y `medio` listan TODO, no sólo lo habilitado.** Hay clientes colgados de un talonario o un medio deshabilitado y, con el filtro puesto, abrir uno y guardarlo lo dejaría sin talonario — o sea sin forma de facturarle. Es el mismo criterio con el que Contratos lista todos los planes: el deshabilitado se marca en la etiqueta (`(deshabilitado)`) y en la ficha con un `badge-warn`.
+  - **`medio` NO es FK en el esquema y una fila tiene el centinela `0`.** Se normaliza a `null` al leer y se escribe `null` al guardar, como toda FK del sistema histórico — pero **no se declara la constraint acá**: eso es un cambio de esquema y va por su propia migración (`CLAUDE.md`, "El 0 es centinela").
+- **`Provincia` es texto libre con `<datalist>` de lo que YA está cargado**, no un catálogo de 24 que la base no conoce. Es lo que evita que la misma provincia entre escrita de dos formas y que el filtro del listado la parta en dos; una provincia nueva se sigue pudiendo tipear. El filtro del modal, en cambio, es un `<select>` con esos mismos valores: ahí no hay nada que inventar.
+- **Localidad y contacto llevan su dato secundario de glosa debajo** —provincia y celular— en vez de dos columnas más, y el CUIT va de glosa bajo el nombre: son cómo se ubica al cliente, no datos que se comparen entre filas (mismo criterio que marca y categoría en Artículos, §41.2).
+- **Diecisiete tarjetas en Consultar: catorce `half` y tres `full`** — `Nombre` y `Razón social` en las ranuras 3 y 4, `Domicilio` después del renglón de contacto. Agregar o quitar un campo obliga a rehacer esa cuenta (§25).
+- **La baja va con el modal de desglose** (§15.1): las tres FK que apuntan acá son `RESTRICT` y las tres **bloquean** — dominios, contratos y comprobantes. No hay nada que se borre en cascada ni que quede sin referencia, así que las dos secciones del modal viajan vacías y sólo se dibuja el recuadro rojo. **Hoy ningún cliente se puede borrar** —los 64 tienen al menos un vínculo— y eso es lo correcto: lo que cuelga de un cliente son comprobantes fiscales emitidos y dominios en producción.
+- **`Ver dominios` estrenó el filtro `Cliente` en Dominios.** Las tres navegaciones van por el par genérico `pedirFiltroCampo()` / `tomarFiltroCampo()` (§21-bis.1) y las tres exigen que el filtro **exista como campo del Modal de Filtros del destino**: Contratos y Comprobantes ya lo tenían, Dominios no, así que se le agregó —por ID, como en Comprobantes, porque allá el cliente es una FK y el listado no lo trae como columna—. Sin ese campo el ítem no se habría agregado "para que el menú quede completo".
+- **La condición de las tres navegaciones vive en UNA función** (`clienteNavegaciones()`), no copiada en el menú de la fila y en el del modal: con la condición duplicada, agregarle un caso deja un menú ofreciendo lo que el otro ya esconde (ABM.md §1.3).
+
+---
+
 ## 41. Comercial · Artículos
 
 ABM de `articulos`: el catálogo del que cuelga toda la plata del sistema — el abono de cada plan (`planes`.`articulo`), lo que se factura (`comprobantesrenglones`.`articulo`), lo que se le cobra a un chip y lo que publica la tienda. Cuelga de **Comercial**, debajo de `Talonarios`, con `fa-box`.
@@ -3423,5 +3786,5 @@ declara para las entidades con ciclo de vida, y acá se cumple entera:
 7. **Densidad**: padding `10–14px` en celdas; gaps `12–20px` entre cards.
 8. **Mobile**: `<768px` colapsa sidebar a overlay; grids `form-row*` a una columna.
 9. **Sin librerías UI pesadas** (Bootstrap / Tailwind / Material). CSS plano + variables.
-10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los veinte módulos, más el desplegable `Listar` intercalado entre el buscador y `Filtros` en el módulo que tiene filtros rápidos (§9, §12.1). Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
+10. **Toolbar de listado completa**: búsqueda rápida + `Filtros` + `Refrescar` (sin texto), en ese orden y en los veintiún módulos, más el desplegable `Listar` intercalado entre el buscador y `Filtros` en el módulo que tiene filtros rápidos (§9, §12.1). Sale de `abmToolbar()`; ninguno arma el suyo. Refrescar re-renderiza el módulo entero —KPIs incluidos— y conserva los filtros vigentes (§9).
 11. **Si dudás, mirá los componentes de arriba antes de crear uno nuevo.**

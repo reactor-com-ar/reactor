@@ -383,5 +383,16 @@ function accionPago(): void
         ':operacion' => $operacion,
     ]);
 
+    // NO DISPARA EL RECALCULO DE SITUACION, y no es un olvido: `pagos` es una
+    // tabla del sistema historico que este repo TODAVIA NO TIENE EN CUENTA para
+    // nada -- ni la mora, ni la baja por deuda, ni la situacion del dominio la
+    // miran (`contratos_situacion_lib.php` cuenta sobre `comprobantes`.`estado`).
+    // Colgar de aca la rehabilitacion de un cliente seria hacerla depender de un
+    // dato que el resto del sistema ignora.
+    //
+    // Lo que SI rehabilita es que el comprobante deje de estar Pendiente, y eso
+    // hoy lo hace la imputacion de MercadoPago del legacy
+    // (`reactor-api/v2/mercadopago/imputar.php`), que avisa por
+    // `api/pago_imputado.php`. Ver DESIGN.md §15.5.
     json_ok(['id' => (int) db()->lastInsertId(), 'comprobante' => $id, 'monto' => $monto], 201);
 }

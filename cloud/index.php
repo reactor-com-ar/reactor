@@ -158,6 +158,15 @@ $userDisplay = $currentUser['nombre'] !== '' ? $currentUser['nombre'] : $current
                         <i class="fa-solid fa-receipt nav-icon"></i> Talonarios
                     </a>
                     <?php
+                    // Clientes cierra el circuito de facturación y va pegado a
+                    // Talonarios: es de quien cuelga `clientes`.`talonario`, o
+                    // sea con qué numeración se le emite a cada uno. Después
+                    // empieza el catálogo.
+                    ?>
+                    <a href="#/clientes" data-route="clientes" class="nav-item nav-sub-item">
+                        <i class="fa-solid fa-address-book nav-icon"></i> Clientes
+                    </a>
+                    <?php
                     // Artículos y Planes van al final del grupo y no antes de
                     // Contratos aunque sean el catálogo del que éste cuelga:
                     // Contratos / Comprobantes / Talonarios es el circuito que

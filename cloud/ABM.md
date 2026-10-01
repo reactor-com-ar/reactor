@@ -16,7 +16,7 @@ Las columnas del listado deben respetar este orden:
 3. **Columna `Acciones`, al final:**
    - Una sola columna llamada **`Acciones`** que contiene un botón con **ícono hamburguesa** (`fa-bars`).
    - El click sobre el botón **y** el **click derecho** sobre cualquier punto de la fila abren el **mismo menú contextual**, posicionado en el punto de activación.
-   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Contratos, Comprobantes, Talonarios, Artículos, Planes, Notificaciones, Difusión, Señales, Registros, Adopciones, Usuarios, Perfiles, Controladores, Roles y Permisos** (más la solapa Perfiles del modal de Consultar de Usuarios).
+   - **Click izquierdo sobre la fila = acción por defecto.** Un módulo puede habilitar el atajo agregando `class="row-clickable"` al `<tr>` (cursor pointer, §10 de `DESIGN.md`) y un listener de `click` en la fila. La acción por defecto es **Consultar** (en módulos sin modal de consulta, como el Editor de parámetros, es Editar). El botón hamburguesa frena la propagación para no disparar el atajo. El atajo es el comportamiento estándar de todo listado ABM: está activo en **Dominios, Dispositivos, Chips, Transceptores, Contratos, Comprobantes, Talonarios, Clientes, Artículos, Planes, Notificaciones, Difusión, Señales, Registros, Adopciones, Usuarios, Perfiles, Controladores, Roles y Permisos** (más la solapa Perfiles del modal de Consultar de Usuarios).
    - El menú contextual debe incluir, como mínimo y en este orden:
      - **Consultar** — ícono de ojo (`fa-eye`).
      - **Editar** — ícono de lápiz (`fa-pencil`).
@@ -42,7 +42,7 @@ Las columnas del listado deben respetar este orden:
 
 ### Dónde se filtra: en el navegador o en el servidor
 
-- **EL TEXTO LIBRE SIEMPRE EN EL SERVIDOR.** El buscador rápido y el campo `Buscar` del modal de Filtros se resuelven en SQL, en los **20** listados, sin excepción — ver "Cómo busca el texto libre". Esto no depende del tamaño de la tabla: un filtro de texto en el navegador sólo ve lo que se trajo, así que el día que el endpoint gane un `LIMIT` contesta *"no hay resultados"* sobre filas que existen, que es la única respuesta que un buscador no puede dar.
+- **EL TEXTO LIBRE SIEMPRE EN EL SERVIDOR.** El buscador rápido y el campo `Buscar` del modal de Filtros se resuelven en SQL, en los **21** listados, sin excepción — ver "Cómo busca el texto libre". Esto no depende del tamaño de la tabla: un filtro de texto en el navegador sólo ve lo que se trajo, así que el día que el endpoint gane un `LIMIT` contesta *"no hay resultados"* sobre filas que existen, que es la única respuesta que un buscador no puede dar.
 - **El resto de los filtros, por defecto en el navegador.** El módulo se trae la tabla entera en el `render*()` y el modal de Filtros recorta ese array. Es lo que hacen casi todos: con 18 talonarios o 50 contratos traer todo es más barato que ida y vuelta por cada filtro.
 - **En el servidor cuando la tabla es grande y crece** (Comprobantes: 2.326 filas y una más por cada facturación). Ahí el modal de Filtros arma una query string, el endpoint filtra en SQL y `Aplicar` **vuelve a pedir la ventana** en vez de recortar un array.
 - **Cuando se filtra en el servidor, la búsqueda rápida de la toolbar sigue siendo client-side** y opera **sólo sobre la ventana traída**. Son dos cosas distintas y hay que decirlo en la pantalla, o el operador concluye que un comprobante no existe cuando lo que pasa es que quedó fuera del límite:
@@ -174,7 +174,7 @@ Reglas al aplicarlo:
 `busquedaWhere($consulta, $columnas)` vive en
 [lib/busqueda.php](lib/busqueda.php) y lo carga `api/bootstrap.php` para todos
 los endpoints. Devuelve `[$condiciones, $params]` para meter en el `WHERE`; con
-la consulta vacía las dos vienen vacías y no se agrega nada. Lo usan los 20
+la consulta vacía las dos vienen vacías y no se agrega nada. Lo usan los 21
 listados más `Razón social` de Comprobantes, el Visor de sucesos y el
 Programador de tareas.
 

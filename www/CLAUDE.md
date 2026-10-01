@@ -438,10 +438,19 @@ El detalle del paquete está en [fontawesome/README.md](fontawesome/README.md).
   porro quisquam est qui dolorem ?"). El FAQ real es `/ayuda/preguntas`, que está
   en el menú y sale de la base.
 - **Casi todo el circuito transaccional** (`cuenta/`, `pagos/`, `comprobantes/`,
-  `contrato/`, `usuarios/`, `inscripciones/`, `agentes/`): decisión de alcance,
+  `usuarios/`, `inscripciones/`, `agentes/`): decisión de alcance,
   el pedido fue el sitio público. **`comprobante/` y `pagar/` SÍ se portaron**
-  (30/09/2026) — ver la sección siguiente: son las dos URLs que el sistema
-  *nuevo* ya emite hacia acá.
+  (30/09/2026) y **`contrato/estado/` también** (01/10/2026) — ver las dos
+  secciones siguientes: son las URLs que el sistema ya emite hacia acá.
+- **`contrato/estado/pagar.php`**, que es la única pieza de `contrato/` que quedó
+  afuera a propósito y no por alcance: eran 24 líneas que volvían a armar la URL
+  del cobrador, o sea la **tercera** copia de ese armado en el sitio y la única
+  sin un solo chequeo. El botón *Pagar* del estado de cuenta postea a
+  `/comprobante/pagar`, que es la puerta que tiene los candados. Su URL —
+  `pagar?id=<id cifrado con la XOR del legacy>`— no está publicada en ninguna
+  parte: era un enlace dibujado dentro de la propia página, no una URL que se
+  mandara por correo, así que portarla obligaba a traer ese cifrado al repo para
+  no ganar ninguna ruta nueva. Mismo argumento que `comprobante/imprimir.php`.
 - **Las carpetas con sufijo `___`** (`info___/`, `productos/actuadores___/`),
   que en el legacy es la marca de "desactivado".
 
@@ -513,6 +522,108 @@ nuevo ya emite dos URLs de este sitio que hasta ahora no respondían**:
   Quien lo abre desde cloud es un operador que necesita ver el comprobante y
   copiar el enlace; quien lo recibe es un cliente, y pagar sin ver qué se paga no
   es un atajo. Además un GET no crea una preferencia de cobro.
+
+## El estado de cuenta y el pago sin sesión (01/10/2026)
+
+`/contrato/estado?uid=<uuid>` —[contrato/estado/index.php](contrato/estado/index.php)
+más [lib/contratos.php](lib/contratos.php)— es la pantalla donde un cliente ve
+qué debe y **paga sus facturas pendientes sin iniciar sesión**. Es el port de
+`reactor-www/contrato/estado/`, es una **URL publicada** (es la que Reactor le
+manda al cliente, y de ahí que el parámetro se llame `uid` y no `uuid`) y sirve
+además de **libre deuda** cuando no hay nada pendiente.
+
+- **EL PAGO NO TIENE PUERTA PROPIA: POSTEA A `/comprobante/pagar`.** El legacy
+  traía un `contrato/estado/pagar.php` que volvía a armar la URL del cobrador, con
+  lo cual el sitio tenía **tres** armados con tres juegos de chequeos distintos —
+  ninguno ahí, dos en `comprobante/pagar.php`, cuatro en `pagar/index.php`— y la
+  misma factura era pagable o no según por qué botón se entrara. Ahora los cuatro
+  candados de `comprobantePagable()` corren una vez y valen para las dos entradas.
+- **EL BOTÓN ES UN POST, Y ACÁ PESA MÁS QUE EN EL VISOR.** Esta página dibuja
+  **hasta 21 botones de pago a la vez** (el contrato 67813620), así que un GET lo
+  convertiría en veintiuna preferencias de cobro creadas de una por el prefetch
+  del navegador o el preview del cliente de correo. Mismo motivo por el que
+  `Aceptar` de las invitaciones dejó de ser un enlace.
+- **DEL REQUEST SE LEE UN INTERRUPTOR, NUNCA UNA URL DE RETORNO.** El formulario
+  manda `volver=estado` y a dónde se vuelve lo resuelve
+  `contratoUuidDeComprobante()` **contra la base**, desde el comprobante que se
+  está pagando. Aceptar la URL tal como llega sería un redirect abierto firmado
+  por nosotros y servido **desde la pasarela de pago**: la persona aterriza ahí
+  después de tipear los datos de su tarjeta y lee lo que vea como parte del
+  trámite. Sin `volver` el retorno sigue siendo el visor —que es de donde viene el
+  botón del correo— y también cuando el comprobante no cuelga de ningún contrato
+  (hay 5 pendientes así).
+- **VOLVER ACÁ CON `res=A` NO SACA LA FACTURA DE LA LISTA, Y POR ESO SE AVISA.**
+  Este sitio no escribe en la base: la factura pasa a Cancelada cuando el back
+  office concilia. O sea que quien acaba de pagar vuelve y **ve su factura
+  todavía pendiente, con el botón Pagar al lado**. El legacy también volvía acá y
+  no decía nada: la trampa estaba servida y lo que cuesta es que el cliente pague
+  dos veces. El cartel del resultado lleva ahora la advertencia explícita.
+- **LA DEUDA SE CUENTA UNA SOLA VEZ Y CON EL CRITERIO DE LOS JOBS DE MORA**
+  (`CONTRATO_TIPOS_DEUDA`: `estado = '2'` + `talonarios.tipo IN ('F','T')`, el
+  mismo de [cloud/jobs/contratos_situacion_recalcular.php](../cloud/jobs/contratos_situacion_recalcular.php)
+  y [cloud/jobs/contratos_baja_morosos.php](../cloud/jobs/contratos_baja_morosos.php)).
+  El legacy tenía **dos criterios en la misma página** —el encabezado contaba
+  `talonarioTipo='F' AND talonarioFiscal='0'` y la lista `talonarioTipo='F'`— así
+  que el texto podía anunciar una cantidad y la lista mostrar otra. Alinearse no
+  cambió un solo número: de los pendientes con contrato, ninguno sale de un
+  talonario fiscal y no hay ningún `'T'` pendiente. Lo que gana es que esta
+  pantalla y la suspensión del dominio no puedan decir cosas distintas.
+- **"Debe" se decide por CANTIDAD y no por importe.** El contrato 27045294 tiene 4
+  pendientes que suman **$ 0,00**: por importe sería "Libre Deuda" mientras el job
+  del día 15 lo sigue viendo con cuatro vencidas, o sea mientras camina hacia la
+  baja. La cantidad es lo que mira la mora.
+- **DEUDA Y PAGABLE NO SON LO MISMO, y la lista lo muestra.** De los 113
+  pendientes con contrato hay **11 no pagables** —5 sin número de serie y 6 en
+  $ 0,00, repartidos en 6 contratos—: se listan igual (son deuda) pero sin botón y
+  con el motivo en criollo de `comprobanteMotivoNoPagable()`. El legacy les
+  dibujaba el botón y la persona terminaba en un error de MercadoPago, del otro
+  lado, después de irse del sitio.
+- **UN TOPE QUE SE COME FILAS SE DICE.** El resumen sale de un agregado sobre
+  **toda** la deuda y la lista tiene tope (`CONTRATO_DEUDA_LISTADO`), así que la
+  página avisa cuántas quedaron sin dibujar. El legacy cortaba en 24 en silencio y
+  el total de arriba no cerraba con lo de abajo.
+- **"Su servicio está activo" y la situación del dominio son DOS hechos y no se
+  pisan.** `contratos.habilitado` dice si el contrato está vigente;
+  `dominios.situacion` —la columna que lee [app/index.php](../app/index.php) para
+  cortar los controles— si el servicio está operando. Con un solo cierre, el
+  contrato 09669239 (vigente, dominio Suspendido) leía *"Su servicio está activo"*
+  y dos renglones después *"situación Suspendido"*: para el cliente eso no son dos
+  columnas, es una página que se contradice sobre si le funciona el portón. Son
+  tres cierres: rescindido / vigente (con la situación debajo) / activo. La
+  situación va **traducida** con el combo `'$xDominio->situacion'`, nunca el número
+  pelado, y **sólo sobre un contrato vigente**: sobre uno rescindido prometería que
+  al pagar se restablece solo, y la baja no tiene contraparte automática.
+- **NO SE INVENTA UN CÓDIGO DE VALIDACIÓN.** El legacy cerraba el documento con
+  *"Código de validación: "* y un `aleatorio(111111, 999999)`: un número que no se
+  guardaba en ninguna parte, que cambiaba en cada recarga y que no validaba nada.
+  En un papel que el cliente puede presentar como libre deuda eso es peor que no
+  poner nada. Lo reemplaza la URL de esta misma página, que sí se consulta.
+- **Los datos vacíos no se imprimen.** La frase era un `echo` con los cinco campos
+  siempre, así que los **39 de 64** clientes sin domicilio leían
+  `domicilio <b></b>, ` en medio del documento.
+- **El titular se nombra como en la factura**: razón social y el nombre de
+  fantasía entre paréntesis, igual que `comprobanteCliente()`. El legacy imprimía
+  acá sólo `clientes.nombre`, así que el mismo cliente era "Barrio Aimara" en este
+  documento y "CONSORCIO PROPIETARIOS AIMARA BARRIO PRIVADO (Barrio Aimara)" en su
+  factura — son los dos papeles que ve, tienen que nombrarlo igual.
+- **No se indexa** (`wwwRobots(false)`) y el `uid` se valida por forma —8 dígitos,
+  `ctype_digit()`— antes de tocar la base. El legacy no ponía la meta.
+
+### PENDIENTE: acá la fuerza bruta NO es imposible
+
+La sección de arriba del comprobante dice, con razón, que **no hace falta cupo por
+IP**: `comprobantes.uuid` son 16 alfanuméricos, o sea 36^16 ≈ 8e24 combinaciones.
+**Ese argumento no se hereda para esta página.** `contratos.uuid` son **8
+dígitos** —verificado: las 50 filas tienen exactamente 8, todas numéricas y todas
+distintas—, o sea 10^8 combinaciones con 50 válidas adentro: diecisiete órdenes de
+magnitud menos. El uuid no es correlativo (36682741, 66993031, 09669239), así que
+no se adivina de una, pero **un barrido sostenido encuentra contratos**, y lo que
+queda expuesto es el titular, su domicilio, su celular, su dominio y cuánto debe.
+
+Lo que falta es un **tope por IP**, como el que ya tiene el chat. No se agregó en
+este cambio porque no hay dónde contarlo sin una tabla nueva, o sea una migración,
+y eso es una decisión aparte. Es la misma clase de hueco anotado que el tope de
+intentos del código de verificación del login de `app`.
 
 ### La hoja es HTML, no un PDF generado
 

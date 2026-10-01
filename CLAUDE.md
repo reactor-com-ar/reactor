@@ -31,6 +31,7 @@ comparación acá.
 | **El robot de la cotización** (`reactor-api/robot/articulosActualizar.php`) | **Nada: dejó de correr.** Movía `parametros`.`articulos.dolar.cotizacion` y de paso recalculaba `articulos` entera. Al 30/09/2026 el parámetro de producción seguía en `1530.00` con fecha `2026-09-05` | ya se fue: lo reemplazan **dos** tareas, [cloud/jobs/dolar_actualizar.php](cloud/jobs/dolar_actualizar.php) a las 06:00 (escribe los dos parámetros) y [cloud/jobs/articulos_recalcular.php](cloud/jobs/articulos_recalcular.php) a las 07:00 (reprecia las filas en dólares) |
 | **El robot de los contadores del dominio** (`reactor-api/robot/dominiosActualizar.php`) | 05:30: refresca `dominios`.`usuarios` / `.dispositivos` / `.chips` / `.paneles` con un `COUNT`. **Está vivo, y es medible**: los 53 dominios habilitados tienen los cuatro contadores frescos y 17 de los 95 deshabilitados están desfasados — exactamente el `WHERE habilitado = 1` del robot | sin fecha, y **no hace falta esperarlo**: ninguna app de este repo lee ese cache, las cuatro pantallas que muestran esos números los calculan |
 | **El robot de los planes** (`reactor-api/robot/contratosActualizar.php`) | Está **sin comentar** en el crontab del legacy a las 05:45, un renglón después del de arriba —que está vivo—, así que hay que asumir que corre. Le reasigna el plan a **todos** los contratos habilitados, sin mirar `plan_modo`, que es de este repo y el legacy no conoce | lo reemplaza [cloud/jobs/contratos_plan_recalcular.php](cloud/jobs/contratos_plan_recalcular.php) a las 08:00, que sólo toca los `dinamico`. **Mientras los dos corran, el viejo manda sobre los `fijo`**: hay que comentar esa línea de `reactor-api/cron/jobs` para que `fijo` signifique algo |
+| **El webhook de MercadoPago** (`reactor-api/v2/mercadopago/imputar.php`) | **Es por donde entra TODO cobro online.** Marca la factura como Cancelada y emite el recibo (`cComprobante::pagoRegistrar()`). `www/` de este repo sólo redirige al cobrador de Databox y no recibe nada | sin fecha. Lo que sí se engancha hoy es el recálculo de situación: ver abajo |
 | **`control.reactor.com.ar`** | nginx lo redirige con 301 a `panel.` | al terminar la transición |
 
 ### Las consecuencias que hay que respetar al escribir código
@@ -698,7 +699,18 @@ tipo, y los textos salen del mismo catálogo —`combos` con la clave
 noción a nivel contrato, así que la columna es nueva de verdad y no el rescate de
 algo que el legacy ya escribía.
 
-**La escribe UNA tarea y nadie más**:
+**El cálculo está escrito UNA vez**, en
+[cloud/api/contratos_situacion_lib.php](cloud/api/contratos_situacion_lib.php)
+(01/10/2026): las bandas (`UMBRAL_LIMITADO` 15 / `UMBRAL_SUSPENDIDO` 30), qué
+cuenta como deuda (`DEUDA_ESTADO_PENDIENTE`, `DEUDA_TIPOS`, `DEUDA_SIN_FECHA`) y
+la regla de que el dominio se queda con la **peor** situación de sus contratos
+habilitados. **Lo comparten cuatro caminos** y por eso vive en un lib: el barrido
+diario, la tarea del día 15, el ítem `Actualizar situación` de las fichas de
+Contratos y Dominios, y el recálculo que dispara un cobro. Con una copia por
+camino, la pantalla diría una situación y el job escribiría otra a las 04:00 de
+la mañana siguiente.
+
+**La recorre entera UNA tarea**:
 [cloud/jobs/contratos_situacion_recalcular.php](cloud/jobs/contratos_situacion_recalcular.php),
 todos los días a las 04:00 (migración
 [20261001_1100](cloud/sql/migrations/20261001_1100_tarea_contratos_situacion_recalcular.sql)).
@@ -729,6 +741,76 @@ contrato y de los días de atraso sale el código: menos de 15 → `1`, de 15 a 
   recalcula desde cero todos los días, así que un dominio en `3` pasa a `1` en
   la corrida siguiente a que se cancelen sus pendientes. No hace falta
   destrabarlo a mano.
+- **`dominios`.`situacion` TIENE UN SEGUNDO ESCRITOR, y es a propósito**: la
+  **transición de estado comercial del contrato**, que vive en
+  [cloud/api/contratos_estado_lib.php](cloud/api/contratos_estado_lib.php)
+  (01/10/2026). Dar de baja un contrato lo deshabilita y deja su dominio
+  **deshabilitado y Suspendido**; darlo de alta lo habilita, le borra la fecha de
+  baja y deja el dominio **habilitado y Normal**. Las cuatro columnas de las dos
+  tablas se escriben en la **misma transacción**, con el lock de `contratos`
+  primero y el de `dominios` después — el orden del job, para que las dos
+  escrituras se esperen en vez de abrazarse. **`contratos`.`situacion` sigue
+  teniendo UN solo escritor**: la mora la calcula la tarea y el estado comercial
+  lo decide la transición, y son dos cosas distintas.
+- **ESA TRANSICIÓN LA EJECUTAN DOS CAMINOS Y POR ESO ESTÁ EN UN LIB** — mismo
+  argumento que `contratos_facturar_lib.php`: dos copias son dos formas de que la
+  baja que hace el operador y la que hace el job dejen de apagar lo mismo, y lo
+  que se apaga es la app de un cliente.
+  - **A mano**, desde `Dar de baja` / `Dar de alta` de la ficha y del menú de
+    fila de Contratos ([cloud/api/contratos_accion.php](cloud/api/contratos_accion.php)).
+  - **Automáticamente**, sólo la baja:
+    [cloud/jobs/contratos_baja_morosos.php](cloud/jobs/contratos_baja_morosos.php),
+    el **día 15 de cada mes a las 09:00** (migración
+    [20261001_1300](cloud/sql/migrations/20261001_1300_tarea_contratos_baja_morosos.sql)),
+    sobre los contratos habilitados con una prefactura o factura **pendiente**
+    vencida hace más de seis meses. **"Deuda" es el mismo criterio del job de las
+    04:00** (`estado = '2'` + `talonarios.tipo IN ('F','T')`), escrito en los dos
+    jobs porque ninguno puede incluir `comprobantes_lib.php` desde CLI: si cambia
+    de un lado solo, un dominio queda Suspendido por un comprobante que el otro
+    no considera deuda. **El estado `Pendiente` no es un detalle**: sin él la
+    tarea alcanzaría también a las facturas ya cobradas — 24 de los 26 contratos
+    habilitados en desarrollo, contra 3 con el estado puesto.
+- **EL ALTA NO TIENE CONTRAPARTE AUTOMÁTICA: si el cliente paga, el contrato NO
+  vuelve solo.** Volver a prender un dominio es una decisión que toma una persona
+  mirando por qué se apagó. **La situación sí vuelve sola** —ver abajo—, que es
+  otra cosa: un dominio puede estar en `Normal` y seguir deshabilitado.
+- **UN COBRO REHABILITA, Y EL COBRO ENTRA POR EL LEGACY.** Pagar la deuda saca al
+  dominio de Suspendido en el acto y no al otro día a las 04:00: lo hace
+  `recalcularSituacionTrasPago()` del lib de situación, llamado desde
+  [cloud/api/pago_imputado.php](cloud/api/pago_imputado.php), el webhook que
+  avisa la imputación de MercadoPago.
+  - **LO QUE DISPARA LA REHABILITACIÓN NO ES UNA FILA EN `pagos`: es que el
+    comprobante deje de estar Pendiente.** `pagos` es una tabla del sistema
+    histórico que este repo **todavía no tiene en cuenta para nada** — ni la
+    mora, ni la baja por deuda, ni la situación del dominio la miran: las tres
+    cuentan sobre `comprobantes`.`estado`. Por eso
+    [cloud/api/comprobantes_accion.php](cloud/api/comprobantes_accion.php)`?accion=pago`,
+    el único que la escribe, **no dispara el recálculo**: sería atar la
+    rehabilitación de un cliente a un dato que el resto del sistema ignora.
+  - **La vuelta del navegador NO es el disparador.** `www/comprobante/pagar.php`
+    redirige al cobrador de Databox y el comprador vuelve con `?res=A` en la URL
+    — un parámetro que escribe cualquiera. Quien recibe la imputación de verdad
+    es `reactor-api/v2/mercadopago/imputar.php` del legacy.
+  - **El webhook se firma con HMAC-SHA256 contra `PAGO_WEBHOOK_SECRET`**, y
+    **sin esa constante responde 503**: no se abre solo por falta de
+    configuración, porque del otro lado está devolverle el servicio a un cliente
+    suspendido.
+  - **AL ENGANCHARLO HAY QUE COMENTAR EL RECÁLCULO DEL LEGACY.**
+    `cComprobante::pagoRegistrar()` cierra llamando a
+    `cDominio::situacionDetectar()`, que escribe la MISMA columna con otras
+    reglas: Normal es atraso ≤ **1 día** (`$intimar`, una propiedad de clase —
+    `contratos` no tiene esa columna), mira los talonarios **38 y 48**
+    hardcodeados, toma el primer vencimiento **por `id`** en vez del `MIN()` y
+    sólo atiende al contrato de `dominios`.`contrato` (32 de 148 dominios lo
+    tienen). La misma clase declara `$limitar = 15` —el umbral que ese código
+    debería usar— y **nunca lo usa**: es un bug viejo, no un criterio. Con los
+    dos vivos gana el último que corrió. Mismo trato que el robot de los planes.
+- **Lo que la acción escribe es el estado de hoy, no el final**: a las 04:00 la
+  tarea vuelve a mirar la deuda real de los contratos habilitados, así que un
+  alta sobre un contrato con facturas vencidas vuelve a Limitado o Suspendido a
+  la mañana siguiente. **Una baja, en cambio, se sostiene sola** — el contrato
+  dado de baja sale del recorrido de la tarea y su dominio se queda sin ninguno
+  habilitado.
 - **Sólo toca dominios con al menos un contrato habilitado.** Un dominio sin
   contrato vivo no tiene mora que mirar y su `situacion` queda como esté —
   puesta a mano o por el back office viejo.

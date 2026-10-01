@@ -98,6 +98,15 @@ declare(strict_types=1);
  * agregar 'R' a `TIPOS_DEUDA` y nada mas — por eso es una constante y no una
  * lista escrita adentro del SQL.
  *
+ * OJO: ESE MISMO CRITERIO DE "DEUDA" ESTA ESCRITO DOS VECES. `ESTADO_PENDIENTE`
+ * y `TIPOS_DEUDA` se redeclaran igual en `contratos_baja_morosos.php`, la tarea
+ * del dia 15 que da de baja los contratos con deuda vencida hace mas de seis
+ * meses — ninguno de los dos jobs puede incluir `api/comprobantes_lib.php` desde
+ * CLI. LOS DOS TIENEN QUE MOVERSE JUNTOS: con uno solo, un dominio quedaria
+ * Suspendido por un comprobante que el otro job no considera deuda, o de baja
+ * sin haber pasado nunca por Suspendido. Y ahi Recibo SI cambia un resultado (el
+ * contrato 143 entra o no entra), asi que es el lugar donde esta decision se ve.
+ *
  * ------------------------------------------------------------------------
  * LOS BORDES DE LAS BANDAS: CADA UNA SE QUEDA CON SU LIMITE INFERIOR
  * ------------------------------------------------------------------------
@@ -154,7 +163,13 @@ declare(strict_types=1);
  *   tenga al menos un contrato habilitado. El job solo escribe sobre lo que
  *   calculo: un dominio sin contrato vivo no tiene mora que mirar, y pisarle la
  *   `situacion` seria opinar sobre un cliente del que este job no sabe nada. Su
- *   valor queda como esta — puesto a mano o por el back office viejo.
+ *   valor queda como esta — puesto a mano, por el back office viejo o por las
+ *   acciones `baja` / `alta` de `api/contratos_accion.php`, que escriben las
+ *   mismas dos columnas de `dominios` que este bloque. Eso es lo que hace que
+ *   una baja se sostenga sola: el contrato dado de baja sale de este recorrido
+ *   y su dominio se queda sin ninguno habilitado. Un alta, en cambio, vuelve a
+ *   meter el contrato aca, asi que el 'Normal' que escribio la accion lo revisa
+ *   esta corrida contra la deuda real.
  * - NO LEE `contratos`.`tolerancia`, la fecha de gracia que se carga a mano en el
  *   ABM. Es la unica columna del contrato que podria pisar este calculo y queda
  *   afuera porque el enunciado no la menciona y porque nada en este repo la lee
@@ -176,63 +191,37 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_bootstrap.php';
 
+/**
+ * EL CALCULO DE LA MORA NO VIVE ACA: vive en `api/contratos_situacion_lib.php`.
+ *
+ * De ahi salen las bandas (`UMBRAL_LIMITADO` / `UMBRAL_SUSPENDIDO`), que cuenta
+ * como deuda (`DEUDA_ESTADO_PENDIENTE` / `DEUDA_TIPOS` / `DEUDA_SIN_FECHA`), la
+ * consulta que la resuelve (`deudaDeContrato()`) y las dos reglas que la
+ * traducen (`situacionPorAtraso()` y `peorSituacion()`). Los codigos de
+ * situacion y sus textos llegan por arrastre, de `contratos_estado_lib.php` --
+ * las mismas constantes con las que `Dar de baja` escribe el '3'.
+ *
+ * ESTAN EN UN LIB PORQUE ESTA CUENTA LA HACEN TRES CAMINOS: este barrido diario,
+ * el `Actualizar situacion` de la ficha de Contratos
+ * (`api/contratos_accion.php?accion=situacion`) y el de la ficha de Dominios
+ * (`api/dominios_accion.php?accion=situacion`). Con una copia por camino, la
+ * pantalla diria una situacion y este job escribiria otra a las 04:00 de la
+ * mañana siguiente -- y esa situacion decide si un cliente ve o no los controles
+ * de la app.
+ *
+ * El lib no habla HTTP, no usa `db()` y no escribe logs: recibe el PDO por
+ * parametro y la transaccion la abre el llamador. Es lo que lo hace incluible
+ * desde CLI sin tener que declarar nada, a diferencia de
+ * `contratos_facturar_lib.php`.
+ */
+require_once __DIR__ . '/../api/contratos_situacion_lib.php';
+
 // El bootstrap carga este helper solo en el camino de error. Se requiere aca
 // porque el job tambien deja rastro cuando sale bien: mover la situacion de un
 // contrato es decir que un cliente esta en mora, y eso tiene que poder ubicarse
 // en el tiempo desde el Visor de sucesos sin ir a buscar el .log de la ejecucion.
 $_sucesos = __DIR__ . '/../api/lib/sucesos.php';
 if (is_file($_sucesos)) require_once $_sucesos;
-
-/**
- * Los tres valores de `contratos`.`situacion` (varchar(1)).
- *
- * Son los MISMOS codigos de `dominios`.`situacion` y los traduce el mismo
- * catalogo, `combos` con la clave `'$xDominio->situacion'` (1 Normal /
- * 2 Limitado / 3 Suspendido). Se comparan y se escriben como STRING porque la
- * columna es varchar: mismo criterio que `comprobantes`.`estado`.
- */
-const SITUACION_NORMAL     = '1';
-const SITUACION_LIMITADO   = '2';
-const SITUACION_SUSPENDIDO = '3';
-
-/** Nombres para el log. No se leen de `combos`: el job no depende del catalogo. */
-const SITUACION_TEXTOS = [
-    SITUACION_NORMAL     => 'Normal',
-    SITUACION_LIMITADO   => 'Limitado',
-    SITUACION_SUSPENDIDO => 'Suspendido',
-];
-
-/**
- * Dias de atraso a partir de los cuales arranca cada banda.
- *
- * Cada banda se queda con su limite inferior: 15 ya es Limitado y 30 ya es
- * Suspendido (ver el encabezado, "los bordes de las bandas").
- */
-const UMBRAL_LIMITADO    = 15;
-const UMBRAL_SUSPENDIDO  = 30;
-
-/**
- * `comprobantes`.`estado` = Pendiente, el unico estado que es deuda.
- *
- * El catalogo canonico de los cuatro valores vive en `ESTADO_*` de
- * `api/comprobantes_lib.php`; aca va solo el que este job necesita, porque ese
- * archivo no se puede incluir desde CLI (arrastra `api/bootstrap.php`, que manda
- * headers y llama a `requireAuth()`). Es el mismo motivo por el que
- * `contratos_plan_recalcular.php` redeclara `PLAN_MODO_DINAMICO`.
- */
-const ESTADO_PENDIENTE = '2';
-
-/**
- * Los tipos de `talonarios`.`tipo` cuyo comprobante documenta una deuda:
- * `F` Prefactura y `T` Factura.
- *
- * Es una constante y no una lista escrita adentro del SQL porque es la decision
- * mas probable de revisar del job entero — ver el encabezado sobre Recibo (`R`).
- */
-const TIPOS_DEUDA = ['F', 'T'];
-
-/** El "sin fecha" del sistema historico (`cTiempo::genesis()`). */
-const FECHA_GENESIS = '1500-01-01';
 
 try {
     $pdo = _jobsPdo();
@@ -273,35 +262,6 @@ try {
 
     anotarLog(sprintf('%d contratos habilitados', $total));
 
-    // La deuda de un contrato, resuelta por la base en una sola fila.
-    //
-    // `MIN(vencimiento)` es el vencimiento de la mas antigua y `DATEDIFF` el
-    // atraso en dias, los dos sobre la conexion con `time_zone = '-03:00'`.
-    // Los tres contadores no deciden nada: se informan.
-    //
-    //   `pendientes`     las que entran al calculo (con fecha utilizable)
-    //   `sin_fecha`      las excluidas por `NULL` o por el centinela
-    //   `pendientes_otros` las pendientes de los otros cinco tipos de talonario,
-    //                    que NO son deuda — esta para que el .log explique por
-    //                    que un contrato con comprobantes pendientes sale Normal
-    //
-    // El `IN (...)` se arma con placeholders desde `TIPOS_DEUDA` y no se
-    // interpola: es la unica forma de que la lista siga siendo un dato.
-    $ph    = implode(',', array_fill(0, count(TIPOS_DEUDA), '?'));
-    $deuda = $pdo->prepare(
-        "SELECT
-            SUM(co.estado = ? AND t.tipo IN ($ph) AND co.vencimiento IS NOT NULL AND co.vencimiento <> ?) AS pendientes,
-            SUM(co.estado = ? AND t.tipo IN ($ph) AND (co.vencimiento IS NULL OR co.vencimiento = ?))     AS sin_fecha,
-            SUM(co.estado = ? AND (t.tipo IS NULL OR t.tipo NOT IN ($ph)))                                AS pendientes_otros,
-            MIN(CASE WHEN co.estado = ? AND t.tipo IN ($ph) AND co.vencimiento IS NOT NULL AND co.vencimiento <> ?
-                     THEN co.vencimiento END)                                                             AS venc_min,
-            DATEDIFF(CURDATE(), MIN(CASE WHEN co.estado = ? AND t.tipo IN ($ph) AND co.vencimiento IS NOT NULL AND co.vencimiento <> ?
-                     THEN co.vencimiento END))                                                            AS dias
-           FROM comprobantes co
-           LEFT JOIN talonarios t ON t.id = co.talonario
-          WHERE co.contrato = ?"
-    );
-
     // El dominio es solo para el log: el calculo no lo usa para nada.
     $ctx = $pdo->prepare('SELECT id, nombre FROM dominios WHERE id = :id');
 
@@ -310,28 +270,19 @@ try {
     foreach ($contratos as $con) {
         $id = (int) $con['id'];
 
-        // El orden de los parametros sigue al del SQL de arriba. Se arma con un
-        // helper para no repetir la terna estado/tipos/centinela cinco veces.
-        $args = [];
-        foreach ([1, 2, 3, 4, 5] as $bloque) {
-            $args[] = ESTADO_PENDIENTE;
-            foreach (TIPOS_DEUDA as $t) $args[] = $t;
-            // El tercer bloque (`pendientes_otros`) no compara contra el
-            // centinela: cuenta comprobantes de otros tipos, sin mirar la fecha.
-            if ($bloque !== 3) $args[] = FECHA_GENESIS;
-        }
-        $args[] = $id;
+        // La deuda la resuelve el lib en una sola fila: la misma consulta y los
+        // mismos filtros que usan los dos `Actualizar situacion` de las fichas.
+        // Los tres contadores no deciden nada, se informan — `pendientes_otros`
+        // esta para que el .log pueda explicar por que un contrato CON
+        // comprobantes pendientes sale Normal.
+        $d = deudaDeContrato($pdo, $id);
 
-        $deuda->execute($args);
-        $d = $deuda->fetch() ?: [];
-
-        $pendientes = (int) ($d['pendientes']       ?? 0);
-        $sinFecha   = (int) ($d['sin_fecha']        ?? 0);
-        $otros      = (int) ($d['pendientes_otros'] ?? 0);
-        $dias       = $d['dias'] === null ? null : (int) $d['dias'];
-        $vencMin    = $d['venc_min'] ?? null;
-
-        $nueva = situacionPorAtraso($dias);
+        $pendientes = $d['pendientes'];
+        $sinFecha   = $d['sin_fecha'];
+        $otros      = $d['pendientes_otros'];
+        $dias       = $d['dias'];
+        $vencMin    = $d['venc_min'];
+        $nueva      = $d['situacion'];
 
         $ctx->execute([':id' => (int) $con['dominio']]);
         $dom     = $ctx->fetch() ?: [];
@@ -385,7 +336,7 @@ try {
             $iguales++;
             anotarLog(sprintf(
                 '  #%d %s | %s | %s sin cambios',
-                $id, $dominio, $detalle, textoSituacion($nueva)
+                $id, $dominio, $detalle, situacionTexto($nueva)
             ));
             continue;
         }
@@ -396,7 +347,7 @@ try {
 
         anotarLog(sprintf(
             '  #%d %s | %s | %s -> %s',
-            $id, $dominio, $detalle, textoSituacion($vieja), textoSituacion($nueva)
+            $id, $dominio, $detalle, situacionTexto($vieja), situacionTexto($nueva)
         ));
     }
 
@@ -452,7 +403,7 @@ try {
             anotarLog(sprintf(
                 '  DOMINIO #%d %s | %s -> %s | por %s %s',
                 $domId, $info['nombre'],
-                textoSituacion($domVieja), textoSituacion($domNueva),
+                situacionTexto($domVieja), situacionTexto($domNueva),
                 count($info['contratos']) === 1 ? 'el contrato' : 'los contratos',
                 '#' . implode(', #', $info['contratos'])
             ));
@@ -484,7 +435,7 @@ try {
     foreach ($aSuspendido as [$id, $dominio, $vieja, , $dias]) {
         anotarLog(sprintf(
             'A SUSPENDIDO: #%d %s | %s | venia de %s',
-            $id, $dominio, textoAtraso($dias), textoSituacion($vieja)
+            $id, $dominio, textoAtraso($dias), situacionTexto($vieja)
         ));
     }
 
@@ -500,7 +451,7 @@ try {
     foreach ($domSuspendidos as [$domId, $nombre, $domVieja]) {
         anotarLog(sprintf(
             'SIN SERVICIO: dominio #%d %s | venia de %s | la app deja de mostrarle los controles',
-            $domId, $nombre, textoSituacion($domVieja)
+            $domId, $nombre, situacionTexto($domVieja)
         ));
     }
 
@@ -544,62 +495,12 @@ try {
 }
 
 /**
- * La situacion que corresponde a un atraso en dias.
- *
- * `null` es "no hay deuda fechable" —ningun pendiente, o ninguno con fecha
- * usable— y da Normal. Un atraso negativo es un comprobante emitido que todavia
- * no vencio, y tambien da Normal.
- *
- * Son dos `>=` en orden descendente y no un `switch` de rangos: asi no hay forma
- * de dejar un hueco entre dos bandas. Cada banda se queda con su limite inferior
- * (ver el encabezado).
+ * Las cuatro funciones que vivian aca --`situacionPorAtraso()`,
+ * `peorSituacion()`, `situacionTexto()` y `textoAtraso()`-- se mudaron a
+ * `api/contratos_situacion_lib.php` y a `api/contratos_estado_lib.php` cuando el
+ * `Actualizar situacion` de las fichas paso a hacer esta misma cuenta. Lo unico
+ * que queda abajo es lo que solo sirve para el .log de este barrido.
  */
-function situacionPorAtraso(?int $dias): string
-{
-    if ($dias === null)                  return SITUACION_NORMAL;
-    if ($dias >= UMBRAL_SUSPENDIDO)      return SITUACION_SUSPENDIDO;
-    if ($dias >= UMBRAL_LIMITADO)        return SITUACION_LIMITADO;
-
-    return SITUACION_NORMAL;
-}
-
-/**
- * La PEOR de dos situaciones, que es la que le toca al dominio.
- *
- * Un dominio puede tener mas de un contrato habilitado —hoy ninguno lo tiene,
- * pero nada del esquema lo impide— y entonces hay que elegir. Gana la peor
- * porque la situacion dice si el cliente esta al dia: con un contrato impago el
- * dominio NO lo esta, por mas que el otro si. Quedarse con la mejor dejaria
- * operando a quien debe plata con solo abrirle un contrato nuevo al lado.
- *
- * Los tres codigos son '1' < '2' < '3' y estan ordenados de menor a peor, asi
- * que `max()` sobre el string alcanza; se escribe con nombre igual para que la
- * regla se lea y no haya que deducirla de una comparacion de caracteres.
- */
-function peorSituacion(string $a, string $b): string
-{
-    return max($a, $b);
-}
-
-/** Un codigo de situacion con su texto, o el marcador del `NULL` inicial. */
-function textoSituacion(?string $codigo): string
-{
-    if ($codigo === null || $codigo === '') return 'sin calcular';
-
-    return isset(SITUACION_TEXTOS[$codigo])
-        ? sprintf("'%s' %s", $codigo, SITUACION_TEXTOS[$codigo])
-        : sprintf("'%s' (desconocido)", $codigo);
-}
-
-/** El atraso en palabras, con el signo explicito cuando todavia no vencio. */
-function textoAtraso(?int $dias): string
-{
-    if ($dias === null) return 'sin fecha';
-    if ($dias < 0)      return sprintf('vence en %d dia(s)', -$dias);
-    if ($dias === 0)    return 'vence hoy';
-
-    return sprintf('%d dia(s) de atraso', $dias);
-}
 
 /** Un nombre de la base para el log, o un marcador cuando viene vacio. */
 function textoNombre(mixed $nombre): string

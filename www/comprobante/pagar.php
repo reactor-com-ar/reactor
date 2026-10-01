@@ -49,10 +49,23 @@ declare(strict_types=1);
  * circuito de pagos del back office cuando concilia; esta pantalla sólo deriva.
  * Por eso volver acá con `res=A` NO significa que el comprobante ya figure
  * pago: el estado que muestra el visor es el de la base, que es la verdad.
+ *
+ * ---
+ *
+ * **ES LA ÚNICA PUERTA AL COBRADOR, Y DESDE EL 01/10/2026 TIENE DOS ENTRADAS**: el
+ * botón del visor y los botones *Pagar* del estado de cuenta
+ * (`/contrato/estado?uid=`). El estado de cuenta NO trae su propio armado de la
+ * URL de pago —el legacy sí: `contrato/estado/pagar.php`, una tercera copia con
+ * cero chequeos— justamente para que los cuatro candados de
+ * `comprobantePagable()` se apliquen una vez y valgan para las dos entradas.
+ *
+ * Lo único que cambia entre ellas es A DÓNDE SE VUELVE, y eso lo decide `volver`:
+ * un interruptor de un valor, no una URL. Ver `$retorno` más abajo.
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/inicio.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/comprobantes.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/lib/contratos.php';
 
 $uuid = wwwEntrada('uuid');
 
@@ -81,4 +94,32 @@ if (!comprobantePagable($comprobante)) {
     );
 }
 
-wwwIr(comprobanteUrlPago($comprobante, comprobanteUrlVisor($comprobante['uuid'])));
+/**
+ * A dónde vuelve la persona cuando el cobrador termina.
+ *
+ * **DEL REQUEST SE LEE UN INTERRUPTOR, NUNCA UNA URL.** `volver=estado` dice
+ * "vengo del estado de cuenta"; cuál es ese estado de cuenta lo resuelve
+ * `contratoUuidDeComprobante()` contra la base, desde el comprobante que se está
+ * pagando. Aceptar la URL de retorno tal como llega sería un redirect abierto
+ * firmado por nosotros y servido **desde la pasarela de pago**, que es el mejor
+ * lugar posible para plantar una pantalla falsa de cobro: la persona llega ahí
+ * después de tipear los datos de su tarjeta, viniendo de MercadoPago, y lo que
+ * vea lo va a leer como parte del trámite. El legacy lo armaba así en
+ * `contrato/estado/pagar.php`, aunque ahí la URL era fija y no venía del request.
+ *
+ * El default sigue siendo el visor, que es de donde viene el botón del correo: es
+ * la pantalla que muestra el estado de ESE comprobante. Y es también el fallback
+ * cuando `volver=estado` llega sobre un comprobante que no cuelga de ningún
+ * contrato —hay 5 pendientes así— porque entonces no hay estado de cuenta al que
+ * volver.
+ */
+$retorno = comprobanteUrlVisor($comprobante['uuid']);
+
+if (wwwEntrada('volver') === 'estado') {
+    $contrato = contratoUuidDeComprobante((int) $comprobante['id']);
+    if ($contrato !== '') {
+        $retorno = contratoUrlEstado($contrato);
+    }
+}
+
+wwwIr(comprobanteUrlPago($comprobante, $retorno));

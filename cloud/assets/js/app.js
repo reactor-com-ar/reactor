@@ -43,6 +43,7 @@
         contratos:    { title: 'Contratos',    render: renderContratos,    group: 'comercial' },
         comprobantes: { title: 'Comprobantes', render: renderComprobantes, group: 'comercial' },
         talonarios:   { title: 'Talonarios',   render: renderTalonarios,   group: 'comercial' },
+        clientes:     { title: 'Clientes',     render: renderClientes,     group: 'comercial' },
         articulos:    { title: 'Artículos',    render: renderArticulos,    group: 'comercial' },
         planes:       { title: 'Planes',       render: renderPlanes,       group: 'comercial' },
         notificaciones: { title: 'Notificaciones', render: renderNotificaciones, group: 'comunicacion' },
@@ -3842,14 +3843,49 @@
             : `<span class="badge badge-danger">Deshabilitado</span>`;
     }
 
-    // Si el contrato admite las dos acciones del ciclo comercial (Facturar /
-    // Dar de baja). Es la misma condición que el back office viejo usaba para
-    // dibujarlas — `habilitado == 1` — y la primera que revalida el endpoint.
-    // Está en una función y no repetida en los dos menús porque son la MISMA
-    // regla: con una copia, agregar una condición deja un menú ofreciendo lo
-    // que el otro ya esconde.
+    // Si el contrato admite las acciones que sólo tienen sentido vivo
+    // (Facturar / Dar de baja). Es la misma condición que el back office viejo
+    // usaba para dibujarlas — `habilitado == 1` — y la primera que revalida el
+    // endpoint.
     function contratoOperable(c) {
         return c.habilitado === 1;
+    }
+
+    /* Las acciones del contrato que dependen de su estado, en el orden del back
+       office viejo: primero lo que se viene a hacer, después el cambio de
+       estado. Está escrito UNA vez y lo arman los dos menús —el de la fila y el
+       de la ficha— porque es la MISMA regla: con una copia, agregar una
+       condición deja un menú ofreciendo lo que el otro ya esconde.
+
+       HABILITADO Y DADO DE BAJA SON EXCLUYENTES, así que `Dar de alta` no es un
+       ítem más: es el que OCUPA EL LUGAR de `Dar de baja` cuando el contrato
+       está dado de baja. Un contrato nunca ofrece las dos, y el menú nunca
+       queda sin ninguna — un contrato deshabilitado tenía hasta ahora el bloque
+       entero vacío y la única forma de revivirlo era el campo `Habilitado` de
+       Editar, que no toca el dominio.
+
+       `Actualizar situación` va con los habilitados por la misma razón que el
+       job de las 04:00 sólo recorre `habilitado = 1`: un contrato dado de baja
+       no tiene mora que administrar y su `situacion` es el dato histórico.
+
+       Esconder el ítem NO es el control: el endpoint revalida la bandera con el
+       contrato bloqueado y contesta 409 (CLAUDE.md). */
+    function contratoAccionesCiclo(c) {
+        if (contratoOperable(c)) {
+            return [
+                { act: 'facturar', label: 'Facturar', icon: 'fa-cash-register',
+                  run: () => pedirPrevioFacturar(c) },
+                { act: 'situacion', label: 'Actualizar situación', icon: 'fa-gauge-high',
+                  run: () => pedirPrevioSituacion('contratos_accion', c.id,
+                                                  `del contrato #${c.id}`) },
+                { act: 'baja', label: 'Dar de baja', icon: 'fa-thumbs-down',
+                  run: () => confirmarBajaContrato(c) },
+            ];
+        }
+        return [
+            { act: 'alta', label: 'Dar de alta', icon: 'fa-thumbs-up',
+              run: () => confirmarAltaContrato(c) },
+        ];
     }
 
     function contratosTableBody(contratos) {
@@ -4037,17 +4073,12 @@
 
         function rowMenuFor(c) {
             const extra = [];
-            // Las dos acciones del ciclo comercial van primero: son lo que se
-            // viene a hacer sobre un contrato. Sólo aparecen con el contrato
-            // habilitado — facturar uno dado de baja o volver a darlo de baja
-            // no son cosas que existan —, y el endpoint corta igual: esconder
-            // el botón no es el control (CLAUDE.md).
-            if (contratoOperable(c)) {
-                extra.push({ act: 'facturar', label: 'Facturar', icon: 'fa-cash-register',
-                             onSelect: () => pedirPrevioFacturar(c) });
-                extra.push({ act: 'baja', label: 'Dar de baja', icon: 'fa-thumbs-down',
-                             onSelect: () => confirmarBajaContrato(c) });
-            }
+            // Las acciones del ciclo comercial van primero: son lo que se viene
+            // a hacer sobre un contrato. Cuáles son depende de si está
+            // habilitado o dado de baja — `contratoAccionesCiclo()`.
+            contratoAccionesCiclo(c).forEach(it => extra.push({
+                act: it.act, label: it.label, icon: it.icon, onSelect: it.run,
+            }));
             if (c.dominio) {
                 extra.push({ act: 'go-dominio', label: 'Ver dominio', icon: 'fa-flag',
                              onSelect: () => pedirFiltroDominio('dominios', c.dominio) });
@@ -4449,15 +4480,16 @@
                 { act: 'edit', label: 'Editar contrato', icon: 'fa-pencil',
                   onSelect: () => { close(); openContratoModal(c); } },
             ];
-            // Mismas dos acciones del ciclo comercial que el menú de la fila, y
-            // con la misma condición. El orden también es el del back office
-            // viejo: facturar y dar de baja juntas, separadas de Editar.
-            if (contratoOperable(c)) {
+            // Mismas acciones del ciclo comercial que el menú de la fila, por la
+            // misma función. El orden también es el del back office viejo:
+            // facturar y el cambio de estado juntas, separadas de Editar.
+            const ciclo = contratoAccionesCiclo(c);
+            if (ciclo.length) {
                 items.push({ divider: true });
-                items.push({ act: 'facturar', label: 'Facturar', icon: 'fa-cash-register',
-                             onSelect: () => { close(); pedirPrevioFacturar(c); } });
-                items.push({ act: 'baja', label: 'Dar de baja', icon: 'fa-thumbs-down',
-                             onSelect: () => { close(); confirmarBajaContrato(c); } });
+                ciclo.forEach(it => items.push({
+                    act: it.act, label: it.label, icon: it.icon,
+                    onSelect: () => { close(); it.run(); },
+                }));
             }
             if (c.uuid) {
                 items.push({ divider: true });
@@ -5005,12 +5037,13 @@
         });
     }
 
-    /* ---- Acciones del contrato: Facturar y Dar de baja ----
-     * Las dos que tenía el menú "Acciones" del back office viejo
-     * (`reactor-admin/contratos/consultar.php`). Viven en su propio endpoint
-     * (`api/contratos_accion.php`) y no en el PUT del ABM: ninguna es "guardar
-     * los campos que mandaste" — facturar escribe en cuatro tablas — y el
-     * detalle de por qué está en la cabecera de ese archivo.
+    /* ---- Acciones del contrato: Facturar, Dar de baja y Dar de alta ----
+     * Las dos primeras las tenía el menú "Acciones" del back office viejo
+     * (`reactor-admin/contratos/consultar.php`); el alta es nueva, y es la baja
+     * al revés. Viven en su propio endpoint (`api/contratos_accion.php`) y no en
+     * el PUT del ABM: ninguna es "guardar los campos que mandaste" — facturar
+     * escribe en cuatro tablas, y la baja y el alta en dos — y el detalle de por
+     * qué está en la cabecera de ese archivo.
      */
 
     function accionContrato(c, accion, body) {
@@ -5172,16 +5205,28 @@
         });
     }
 
-    // Dar de baja sí usa confirmDialog: no hay nada que previsualizar — escribe
-    // la fecha de baja y apaga la bandera, y las dos se ven en la ficha.
+    /* Dar de baja y Dar de alta usan confirmDialog y no el modal con
+       previsualización de §15.2: no hay nada que calcular — las cuatro columnas
+       que escriben son siempre las mismas y se ven en la ficha —, así que lo que
+       va a pasar entra en una frase. Lo que esa frase NO puede omitir es que la
+       baja le apaga la app al cliente: `dominios`.`situacion = '3'` deja el
+       dominio sin ningún control de operación.
+
+       El tono separa a las dos: la baja corta un servicio y va en `danger`; el
+       alta no destruye nada y va en `primary` (§15). Las dos nombran su acción
+       en el botón, nunca el `Eliminar` del default. */
     function confirmarBajaContrato(c) {
         confirmDialog(
             'Dar de baja el contrato',
             `Se le va a poner fecha de baja de hoy al contrato #${c.id}` +
             (c.dominio_nombre ? ` de ${c.dominio_nombre}` : '') +
             ' y va a quedar deshabilitado: deja de facturarse y de remitir estado de cuenta. ' +
+            (c.dominio
+                ? 'El dominio queda deshabilitado y en situación Suspendido, así que ' +
+                  'sus usuarios dejan de ver los controles de operación en la app. '
+                : '') +
             'Sus comprobantes y pagos no se tocan, y el dominio conserva la referencia. ' +
-            'Para revertirlo hay que volver a habilitarlo desde Editar.',
+            'Para revertirlo está "Dar de alta" en este mismo menú.',
             async () => {
                 try {
                     const res = await accionContrato(c, 'baja');
@@ -5193,6 +5238,210 @@
             },
             { label: 'Dar de baja', tono: 'danger' }
         );
+    }
+
+    function confirmarAltaContrato(c) {
+        confirmDialog(
+            'Dar de alta el contrato',
+            `El contrato #${c.id}` +
+            (c.dominio_nombre ? ` de ${c.dominio_nombre}` : '') +
+            ' vuelve a quedar habilitado y se le borra la fecha de baja: vuelve a facturarse ' +
+            'según su ciclo. ' +
+            (c.dominio
+                ? 'El dominio queda habilitado y en situación Normal, así que sus usuarios ' +
+                  'recuperan los controles de operación en la app. '
+                : '') +
+            'La situación la vuelve a revisar el recálculo de mora de las 04:00: si el ' +
+            'contrato tiene facturas vencidas, mañana vuelve a Limitado o Suspendido.',
+            async () => {
+                try {
+                    await accionContrato(c, 'alta');
+                    toast('Contrato dado de alta');
+                    navigate();
+                } catch (e) {
+                    toast(e.message, { error: true, duration: 8000 });
+                }
+            },
+            { label: 'Dar de alta', tono: 'primary' }
+        );
+    }
+
+    /* ---- Actualizar situación: la mora, recalculada a mano ----
+     * El mismo cálculo que hace la tarea de las 04:00
+     * (`jobs/contratos_situacion_recalcular.php`) acotado a un dominio, y
+     * literalmente el mismo código: las tres pantallas que lo disparan —el menú
+     * de fila y la ficha de Contratos, y los mismos dos de Dominios— pegan
+     * contra `api/contratos_situacion_lib.php` por dos endpoints distintos.
+     *
+     * VA CON PREVISUALIZACIÓN (§15.2) Y NO CON `confirmDialog`, y no es un lujo:
+     * el resultado puede ser `Suspendido`, o sea dejar al cliente sin ningún
+     * control de operación en la app. Un ítem de menú que apaga un servicio sin
+     * decir antes que lo va a hacer no es una acción, es una trampa. Además el
+     * detalle que muestra —cuántas pendientes, la más antigua, los días de
+     * atraso— ES la función: contesta "¿por qué está así este cliente?".
+     *
+     * `GET` previsualiza y `POST` aplica, los dos resueltos por la MISMA función
+     * del backend. Es lo único que garantiza que la situación que anuncia la
+     * pantalla sea la que después queda en la base.
+     */
+    function pedirPrevioSituacion(ruta, id, sujeto) {
+        api(ruta + '?accion=situacion&id=' + encodeURIComponent(id))
+            .then(previo => openSituacionModal(ruta, id, sujeto, previo))
+            .catch(e => toast(e.message, { error: true, duration: 6000 }));
+    }
+
+    // Una situación que todavía no se calculó llega en `null`: se dibuja como
+    // "Sin calcular" y no como un badge vacío. Es un valor con significado —la
+    // columna nace así— y no un hueco.
+    function situacionCelda(codigo) {
+        const textos = { '1': 'Normal', '2': 'Limitado', '3': 'Suspendido' };
+        if (codigo === null || codigo === undefined || codigo === '') {
+            return `<span class="muted">Sin calcular</span>`;
+        }
+        return badgeSituacion(codigo, textos[String(codigo)] || codigo);
+    }
+
+    function openSituacionModal(ruta, id, sujeto, previo) {
+        const contratos = previo.contratos || [];
+        const avisos    = previo.avisos    || [];
+        const dom       = previo.dominio;
+        // Sin contratos habilitados no hay nada que escribir —el backend no
+        // toca la columna, igual que el job— así que no se dibuja `Aplicar`:
+        // un botón que no puede cambiar nada es una promesa que no se cumple.
+        const aplicable = contratos.length > 0;
+        const cambios   = contratos.filter(c => c.cambio).length + (dom && dom.cambio ? 1 : 0);
+
+        const filas = !contratos.length
+            ? `<tr><td colspan="6" class="muted" style="text-align:center">El dominio no tiene contratos habilitados.</td></tr>`
+            : contratos.map(c => `
+                <tr>
+                    <td><span class="td-id">#${c.id}</span></td>
+                    <td class="td-num">${c.deuda.pendientes}</td>
+                    <td>${c.deuda.venc_min
+                            ? escape(formatDateOnly(c.deuda.venc_min))
+                            : '<span class="muted">—</span>'}</td>
+                    <td>${escape(textoAtrasoJs(c.deuda.dias))}</td>
+                    <td>${situacionCelda(c.situacion_actual)}</td>
+                    <td>${situacionCelda(c.situacion_nueva)}${
+                        c.cambio ? ' <i class="fa-solid fa-arrow-right-long muted"></i>' : ''}</td>
+                </tr>`).join('');
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Actualizar situación</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del recálculo">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${aplicable ? `
+                    <button class="btn btn-sm btn-primary" data-act="ok">
+                        <i class="fa-solid fa-gauge-high"></i> Aplicar situación
+                    </button>` : ''}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se analizó la deuda vencida ${escape(sujeto)} y
+                        ${cambios
+                            ? `van a cambiar <strong>${cambios}</strong> situación(es).`
+                            : `<strong>la situación que corresponde es la que ya tiene</strong>: aplicar no cambia nada.`}
+                    </div>
+                    ${!avisos.length ? '' : `
+                    <div class="del-blocker del-aviso">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <div>
+                            <strong>Tené en cuenta.</strong>
+                            <ul class="del-list">${avisos.map(t =>
+                                `<li class="del-item"><span class="del-item-label">${escape(t)}</span></li>`).join('')}</ul>
+                        </div>
+                    </div>`}
+                    ${viewGrid([
+                        viewCardHalf('Dominio', dom
+                            ? `${escape(dom.nombre || ('#' + dom.id))} <code>#${dom.id}</code>`
+                            : `<span class="muted">El contrato no tiene dominio</span>`),
+                        viewCardHalf('Situación del dominio', dom
+                            ? (dom.situacion_nueva === null
+                                ? `${situacionCelda(dom.situacion_actual)} <span class="muted">· no se toca</span>`
+                                : `${situacionCelda(dom.situacion_actual)}
+                                   <i class="fa-solid fa-arrow-right-long muted"></i>
+                                   ${situacionCelda(dom.situacion_nueva)}`)
+                            : `<span class="muted">—</span>`),
+                    ])}
+                    <div class="ficha-bloque">
+                        <div class="ficha-bloque-head">
+                            <span><i class="fa-solid fa-file-contract"></i> Contratos habilitados del dominio</span>
+                        </div>
+                        <table class="ficha-tabla">
+                            <thead>
+                                <tr>
+                                    <th>Código</th>
+                                    <th class="td-num">Pendientes</th>
+                                    <th>Vence la más antigua</th>
+                                    <th>Atraso</th>
+                                    <th>Situación actual</th>
+                                    <th>Situación que corresponde</th>
+                                </tr>
+                            </thead>
+                            <tbody>${filas}</tbody>
+                        </table>
+                        <div class="form-nota">
+                            Las bandas son las mismas del recálculo diario de las 04:00:
+                            <strong>menos de 15 días</strong> de atraso es Normal,
+                            <strong>de 15 a 29</strong> Limitado y <strong>30 o más</strong> Suspendido.
+                            Cuenta como deuda la <strong>prefactura o factura pendiente</strong>;
+                            un presupuesto, un remito o un recibo, no. El dominio se queda con la
+                            <strong>peor</strong> situación de sus contratos habilitados, y por eso
+                            se recalculan todos: con uno solo, la columna del contrato y la del
+                            dominio dirían cosas distintas. <strong>No se tocan el estado
+                            Habilitado ni la fecha de baja</strong> — eso es de Dar de baja
+                            y Dar de alta.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                const res = await api(ruta + '?accion=situacion&id=' + encodeURIComponent(id),
+                                      { method: 'POST', body: {} });
+                close();
+                const movidos = (res.contratos || []).filter(c => c.cambio).length
+                              + (res.dominio && res.dominio.cambio ? 1 : 0);
+                toast(movidos
+                    ? `Situación actualizada — ${movidos} cambio(s)`
+                    : 'Situación confirmada: no hubo cambios');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 8000 });
+            }
+        });
+    }
+
+    // Gemela de `textoAtraso()` del backend. Son dos por la misma razón que
+    // `lib/habilitado.php` está tres veces: el backend la necesita para el
+    // `.log` del job y para el suceso, y acá hace falta sin pedir otro campo.
+    function textoAtrasoJs(dias) {
+        if (dias === null || dias === undefined) return 'Sin deuda fechada';
+        if (dias < 0)  return `Vence en ${-dias} día(s)`;
+        if (dias === 0) return 'Vence hoy';
+        return `${dias} día(s)`;
     }
 
     /* ---------- Views: Comprobantes ----------
@@ -7986,6 +8235,845 @@
         });
     }
 
+    /* ---------- Views: Clientes ----------
+     *
+     * ABM de `clientes`: a quién se le factura. La razón social, el domicilio,
+     * la condición frente al IVA y el CUIT que se imprimen en cada comprobante,
+     * más el talonario del que sale su numeración y el medio con el que paga.
+     *
+     * Las tres FK que apuntan acá —`dominios`, `contratos` y `comprobantes`—
+     * son RESTRICT, así que la baja va siempre con el modal de desglose y hoy
+     * BLOQUEA en los 64 clientes: todos tienen al menos un vínculo.
+     */
+    const ORDEN_CLIENTES = [
+        { value: 'id',        label: 'Código'        },
+        { value: 'nombre',    label: 'Nombre'        },
+        { value: 'razon',     label: 'Razón social'  },
+        { value: 'localidad', label: 'Localidad'     },
+        { value: 'condicion', label: 'Condición'     },
+    ];
+
+    // Catálogos que deja el render del listado para los modales, igual que en
+    // Talonarios: el GET del listado ya los trae.
+    let CATALOGOS_CLIENTES = {
+        talonarios: [], medios: [], condiciones: [], provincias: [], largos: {},
+    };
+
+    function clientesDefaults() {
+        return {
+            codigo: '', texto: '', condicion: '', talonario: '', medio: '',
+            provincia: '', vinculo: '',
+            orden: 'id', dir: 'desc', limit: 100,
+        };
+    }
+
+    async function renderClientes(root) {
+        try {
+            const data = await api('clientes');
+            const r        = data.resumen;
+            const clientes = data.clientes;
+            CATALOGOS_CLIENTES = data.catalogos;
+
+            const state = tomarEstadoVista('clientes', clientesDefaults());
+
+            root.innerHTML = `
+                ${moduleHeader('Clientes', 'A quién se le factura: los datos fiscales y de contacto que se imprimen en cada comprobante.')}
+                <div class="stats-bar">
+                    <div class="stat-card">
+                        <span class="stat-label">Total</span>
+                        <span class="stat-value">${r.total}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con dominios</span>
+                        <span class="stat-value">${r.con_dominios}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con contratos</span>
+                        <span class="stat-value green">${r.con_contratos}</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Con comprobantes</span>
+                        <span class="stat-value">${r.con_comprobantes}</span>
+                    </div>
+                    ${/* El único KPI accionable de los cinco: sin talonario no
+                         hay de dónde sacar la numeración y `facturar` bloquea
+                         la emisión (contratos_facturar_lib.php). En rojo sólo
+                         cuando hay alguno — un cero en rojo avisa de nada. */''}
+                    <div class="stat-card">
+                        <span class="stat-label">Sin talonario</span>
+                        <span class="stat-value ${r.sin_talonario > 0 ? 'red' : 'muted'}">${r.sin_talonario}</span>
+                    </div>
+                </div>
+                ${abmToolbar({
+                    idPrefix:         'cli',
+                    quickPlaceholder: 'Buscar nombre, razón social, contacto, correo o CUIT…',
+                    newLabel:         'Nuevo cliente',
+                })}
+                <div class="table-card" id="cli-table"></div>
+            `;
+
+            wireClientesView(state, clientes);
+        } catch (e) {
+            root.innerHTML = errorBox(e.message);
+        }
+    }
+
+    // La condición frente al IVA es un código de dos letras de `combos`: se
+    // muestra SIEMPRE traducida (ABM.md). El Consumidor Final va en gris porque
+    // es lo normal —54 de 64 filas— y los otros tres en azul: son los que
+    // cambian qué documento se emite.
+    function clienteCondicionBadge(c) {
+        if (!c.condicion) return '<span class="muted">Sin condición</span>';
+        const cls = c.condicion === 'CF' ? 'badge-info' : 'badge-success';
+        return `<span class="badge ${cls}">${escape(c.condicion_texto || c.condicion)}</span>`;
+    }
+
+    function clientesTableBody(clientes) {
+        if (!clientes.length) {
+            return `<div class="table-empty">No hay clientes que coincidan. Creá el primero con "Nuevo cliente".</div>`;
+        }
+
+        const rows = clientes.map(c => {
+            // Localidad y contacto llevan su dato secundario de glosa debajo
+            // —provincia y celular— en vez de dos columnas más: son cómo se
+            // ubica al cliente, no datos que se comparen entre filas (mismo
+            // criterio que marca y categoría en Artículos).
+            return `
+            <tr class="row-clickable" data-id="${c.id}">
+                <td><span class="td-id">#${c.id}</span></td>
+                <td>
+                    <div class="td-nombre">${escape(c.nombre)}</div>
+                    ${c.cuit ? `<div class="muted">CUIT ${escape(c.cuit)}</div>` : ''}
+                </td>
+                <td>${c.razon ? escape(c.razon) : '<span class="muted">Sin razón social</span>'}</td>
+                <td>${clienteCondicionBadge(c)}</td>
+                <td>
+                    ${c.localidad ? escape(c.localidad) : '<span class="muted">—</span>'}
+                    ${c.provincia ? `<div class="muted">${escape(c.provincia)}</div>` : ''}
+                </td>
+                <td>
+                    ${c.contacto ? escape(c.contacto) : '<span class="muted">—</span>'}
+                    ${c.celular ? `<div class="muted">${escape(c.celular)}</div>` : ''}
+                </td>
+                <td>${c.talonario
+                    ? escape(c.talonario_nombre || ('#' + c.talonario)) +
+                      (c.talonario_estado === 1 ? '' : ' <span class="badge badge-warn">Deshabilitado</span>')
+                    : '<span class="badge badge-danger">Sin talonario</span>'}</td>
+                ${actionCells()}
+            </tr>
+        `;
+        }).join('');
+
+        return `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Razón social</th>
+                        <th>Condición</th>
+                        <th>Localidad</th>
+                        <th>Contacto</th>
+                        <th>Talonario</th>
+                        ${actionHeaderCells()}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    /* Las navegaciones cruzadas del cliente, en UNA función.
+     *
+     * El menú de la fila y el del modal de Consultar ofrecen las mismas, así
+     * que la condición —"sólo si hay a dónde ir"— vive acá y no copiada en los
+     * dos: con la condición duplicada, agregarle un caso deja un menú
+     * ofreciendo lo que el otro ya esconde (ABM.md §1.3).
+     *
+     * Los tres destinos tienen el filtro `Cliente` como campo de su Modal de
+     * Filtros, que es lo que exige ABM.md: así la lista acotada se explica sola
+     * y se puede limpiar. `cerrar` lo pasa el modal para bajarse antes de
+     * saltar; desde la fila no hay nada que cerrar. */
+    function clienteNavegaciones(c, cerrar) {
+        const saltar = (route, campo) => () => {
+            if (typeof cerrar === 'function') cerrar();
+            pedirFiltroCampo(route, campo, c.id);
+        };
+
+        const items = [];
+        if (c.dominios_count > 0) {
+            items.push({ act: 'go-dominios', label: `Ver dominios (${c.dominios_count})`, icon: 'fa-flag',
+                         onSelect: saltar('dominios', 'cliente') });
+        }
+        if (c.contratos_count > 0) {
+            items.push({ act: 'go-contratos', label: `Ver contratos (${c.contratos_count})`, icon: 'fa-file-contract',
+                         onSelect: saltar('contratos', 'cliente') });
+        }
+        if (c.comprobantes_count > 0) {
+            items.push({ act: 'go-comprobantes', label: `Ver comprobantes (${c.comprobantes_count})`, icon: 'fa-file-invoice-dollar',
+                         onSelect: saltar('comprobantes', 'cliente') });
+        }
+        return items;
+    }
+
+    function wireClientesView(state, allClientes) {
+        const tableWrap = document.getElementById('cli-table');
+        const quick     = document.getElementById('cli-quick');
+        const quickClr  = document.querySelector('.toolbar [data-act="quick-clear"]');
+        const btnFilt   = document.getElementById('cli-filters');
+        const btnNew    = document.getElementById('cli-new');
+
+        function applyAndRender() {
+            const codigo = parseInt(state.codigo, 10);
+
+            const filtered = allClientes.filter(c => {
+                if (Number.isFinite(codigo) && c.id !== codigo) return false;
+                if (state.condicion && c.condicion !== state.condicion) return false;
+                if (state.talonario && String(c.talonario ?? '') !== state.talonario) return false;
+                if (state.medio     && String(c.medio     ?? '') !== state.medio)     return false;
+                if (state.provincia && c.provincia !== state.provincia) return false;
+                // El filtro de vínculo contesta las preguntas que las stat
+                // cards cuentan: quién tiene dominios, contratos o comprobantes
+                // y quién se quedó sin talonario.
+                if (state.vinculo === 'dominios'      && c.dominios_count     === 0) return false;
+                if (state.vinculo === 'contratos'     && c.contratos_count    === 0) return false;
+                if (state.vinculo === 'comprobantes'  && c.comprobantes_count === 0) return false;
+                if (state.vinculo === 'sin-talonario' && c.talonario !== null)        return false;
+                return true;
+            });
+
+            filtered.sort((a, b) => {
+                const va = a[state.orden] ?? '';
+                const vb = b[state.orden] ?? '';
+                const cmp = String(va).localeCompare(String(vb), 'es', { numeric: true });
+                return state.dir === 'asc' ? cmp : -cmp;
+            });
+
+            tableWrap.innerHTML = clientesTableBody(filtered.slice(0, state.limit));
+            wireRowActions();
+        }
+
+        function rowMenuFor(c) {
+            const extra = clienteNavegaciones(c);
+            if (c.correo) {
+                extra.push({ act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-envelope',
+                             onSelect: () => copyToClipboard(c.correo) });
+            }
+            if (c.cuit) {
+                extra.push({ act: 'copy-cuit', label: 'Copiar CUIT', icon: 'fa-id-card',
+                             onSelect: () => copyToClipboard(c.cuit) });
+            }
+            extra.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(c.nombre) });
+            extra.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(c.id)) });
+
+            return standardRowMenuItems({
+                view:   true, onView:   () => openClienteViewModal(c),
+                edit:   true, onEdit:   () => openClienteModal(c),
+                delete: true, onDelete: () => pedirImpactoCliente(c),
+                extra,
+            });
+        }
+        function wireRowActions() {
+            tableWrap.querySelectorAll('tbody tr').forEach(tr => {
+                const id = +tr.dataset.id;
+                const c  = allClientes.find(x => x.id === id);
+                if (!c) return;
+                tr.querySelector('button[data-act="menu"]')?.addEventListener('click', e => {
+                    e.stopPropagation();
+                    openRowMenu(rowMenuFor(c), e.currentTarget);
+                });
+                // Click izquierdo sobre la fila -> accion por defecto: Consultar.
+                tr.addEventListener('click', () => openClienteViewModal(c));
+                tr.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    openRowMenu(rowMenuFor(c), { x: e.clientX, y: e.clientY });
+                });
+            });
+        }
+
+        const recargar = wireBuscadorSql({
+            quick, quickClr, tableWrap, state,
+            pedir:    q => api('clientes?q=' + encodeURIComponent(q)).then(d => d.clientes),
+            alLlegar: filas => { allClientes = filas; applyAndRender(); },
+        });
+
+        btnFilt.addEventListener('click', () => openClientesFiltersModal(state, recargar));
+        btnNew.addEventListener('click',  () => openClienteModal(null));
+        wireRefresh('cli', 'clientes', state);
+
+        // El render ya pidió el listado SIN `q`, así que sólo se vuelve a pedir
+        // si el estado venía con una búsqueda puesta (Refrescar los conserva).
+        if (state.texto) recargar(); else applyAndRender();
+    }
+
+    function openClientesFiltersModal(state, onApply) {
+        const cat = CATALOGOS_CLIENTES;
+
+        const opciones = (items, valorSel, todos, mapear) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it => {
+                    const { valor, texto } = mapear(it);
+                    return `<option value="${escape(valor)}"${valor === valorSel ? ' selected' : ''}>${escape(texto)}</option>`;
+                })
+            ).join('');
+
+        const conOpts = opciones(cat.condiciones, state.condicion, 'Todas las condiciones', x => x);
+        const talOpts = opciones(cat.talonarios,  state.talonario, 'Todos los talonarios',
+                                 t => ({ valor: String(t.id),
+                                         texto: (t.nombre || ('#' + t.id)) + (t.estado === 1 ? '' : ' (deshabilitado)') }));
+        const medOpts = opciones(cat.medios,      state.medio,     'Todos los medios',
+                                 m => ({ valor: String(m.id),
+                                         texto: (m.nombre || ('#' + m.id)) + (m.estado === 1 ? '' : ' (deshabilitado)') }));
+        const proOpts = opciones(cat.provincias,  state.provincia, 'Todas las provincias',
+                                 p => ({ valor: p, texto: p }));
+        const vinOpts = opciones([
+            { valor: 'dominios',      texto: 'Con dominios'      },
+            { valor: 'contratos',     texto: 'Con contratos'     },
+            { valor: 'comprobantes',  texto: 'Con comprobantes'  },
+            { valor: 'sin-talonario', texto: 'Sin talonario'     },
+        ], state.vinculo, 'Indistinto', x => x);
+        const ordOpts = ORDEN_CLIENTES.map(o =>
+            `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
+        ).join('');
+
+        const bodyHtml = `
+            <div class="filters-grid">
+                <div class="form-group">
+                    <label for="cli-fm-codigo">Código</label>
+                    <input type="number" id="cli-fm-codigo" min="1" placeholder="ID exacto" value="${escape(state.codigo)}">
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-texto">Buscar (nombre / razón social / contacto / correo / CUIT)</label>
+                    <input type="search" id="cli-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-condicion">Condición frente al IVA</label>
+                    <select id="cli-fm-condicion">${conOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-talonario">Talonario</label>
+                    <select id="cli-fm-talonario">${talOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-medio">Medio de pago</label>
+                    <select id="cli-fm-medio">${medOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-provincia">Provincia</label>
+                    <select id="cli-fm-provincia">${proOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-vinculo">Vínculos</label>
+                    <select id="cli-fm-vinculo">${vinOpts}</select>
+                </div>
+                ${/* Dos huecos para que `Límite / Ordenar por / Dirección` caigan
+                     juntos en el último renglón, que es donde ABM.md los pide.
+                     `.modal-wide .filters-grid` son tres columnas, así que los
+                     campos de contenido tienen que ser múltiplo de tres: con
+                     siete, la tríada final se parte entre dos renglones.
+                     Agregar o quitar un filtro obliga a rehacer esta cuenta —
+                     la misma regla de paridad que la grilla de Consultar. */''}
+                <div class="form-group"></div>
+                <div class="form-group"></div>
+                <div class="form-group">
+                    <label for="cli-fm-limit">Límite</label>
+                    <input type="number" id="cli-fm-limit" min="1" max="1000" value="${state.limit}">
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-orden">Ordenar por</label>
+                    <select id="cli-fm-orden">${ordOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="cli-fm-dir">Dirección</label>
+                    <select id="cli-fm-dir">
+                        <option value="desc"${state.dir === 'desc' ? ' selected' : ''}>Descendente</option>
+                        <option value="asc"${state.dir  === 'asc'  ? ' selected' : ''}>Ascendente</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        openFiltersModal({
+            bodyHtml,
+            wide: true,
+            onApply(modal) {
+                state.codigo    = modal.querySelector('#cli-fm-codigo').value.trim();
+                state.texto     = modal.querySelector('#cli-fm-texto').value.trim();
+                state.condicion = modal.querySelector('#cli-fm-condicion').value;
+                state.talonario = modal.querySelector('#cli-fm-talonario').value;
+                state.medio     = modal.querySelector('#cli-fm-medio').value;
+                state.provincia = modal.querySelector('#cli-fm-provincia').value;
+                state.vinculo   = modal.querySelector('#cli-fm-vinculo').value;
+                state.orden     = modal.querySelector('#cli-fm-orden').value;
+                state.dir       = modal.querySelector('#cli-fm-dir').value;
+                state.limit     = readLimit(modal.querySelector('#cli-fm-limit'), 100);
+                onApply();
+            },
+            onClear(modal) {
+                const d = clientesDefaults();
+                modal.querySelector('#cli-fm-codigo').value    = d.codigo;
+                modal.querySelector('#cli-fm-texto').value     = d.texto;
+                modal.querySelector('#cli-fm-condicion').value = d.condicion;
+                modal.querySelector('#cli-fm-talonario').value = d.talonario;
+                modal.querySelector('#cli-fm-medio').value     = d.medio;
+                modal.querySelector('#cli-fm-provincia').value = d.provincia;
+                modal.querySelector('#cli-fm-vinculo').value   = d.vinculo;
+                modal.querySelector('#cli-fm-orden').value     = d.orden;
+                modal.querySelector('#cli-fm-dir').value       = d.dir;
+                modal.querySelector('#cli-fm-limit').value     = String(d.limit);
+            },
+        });
+    }
+
+    function openClienteViewModal(c) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        const oVacio = (v, glosa) => v ? escape(v) : `<span class="muted">${escape(glosa)}</span>`;
+        const contador = n => n > 0
+            ? `<span class="badge badge-success">${n}</span>`
+            : `<span class="muted">Ninguno</span>`;
+
+        // El talonario es lo único de esta ficha que bloquea la facturación, así
+        // que su ausencia se dice en rojo y no con un "—" (ver
+        // `contratos_facturar_lib.php`: "no hay de dónde sacar la numeración").
+        const talonarioValor = c.talonario
+            ? refValue(c.talonario, c.talonario_nombre) +
+              (c.talonario_estado === 1 ? '' : ' <span class="badge badge-warn">Deshabilitado</span>')
+            : `<span class="badge badge-danger">Sin talonario</span>`;
+
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Consultar cliente</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del cliente">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cerrar
+                    </button>
+                    ${clienteNavegaciones(c).length ? menubarMenu('listar', 'Listar', 'fa-list') : ''}
+                    ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
+                </div>
+                <div class="modal-body">
+                    ${/* 17 tarjetas: 14 `half` + 3 `full` (§25 de DESIGN.md).
+                        `.view-grid` es flex con `flex-grow`, así que los `half`
+                        tienen que ser PARES y cada `full` tiene que caer
+                        después de un renglón cerrado, o la tarjeta suelta se
+                        estira y se lee como un destaque que nadie decidió.
+                        Los tres `full` son los campos anchos de verdad: el
+                        nombre, la razón social y el domicilio.
+                        Agregar o quitar un campo obliga a rehacer esta cuenta. */''}
+                    ${viewGrid([
+                        viewCardHalf('Código',        `<code>#${c.id}</code>`),
+                        viewCardHalf('Condición',     clienteCondicionBadge(c)),
+                        viewCardFull('Nombre',        escape(c.nombre)),
+                        viewCardFull('Razón social',  oVacio(c.razon, 'Sin razón social')),
+                        viewCardHalf('CUIT',          c.cuit ? `<code>${escape(c.cuit)}</code>` : `<span class="muted">Sin CUIT</span>`),
+                        viewCardHalf('Talonario',     talonarioValor),
+                        viewCardHalf('Medio de pago', c.medio
+                            ? refValue(c.medio, c.medio_nombre) +
+                              (c.medio_estado === 1 ? '' : ' <span class="badge badge-warn">Deshabilitado</span>')
+                            : `<span class="muted">Sin medio</span>`),
+                        viewCardHalf('Contacto',      oVacio(c.contacto, 'Sin contacto')),
+                        viewCardHalf('Celular',       oVacio(c.celular, 'Sin celular')),
+                        viewCardHalf('Correo',        oVacio(c.correo, 'Sin correo')),
+                        viewCardFull('Domicilio',     oVacio(c.domicilio, 'Sin domicilio')),
+                        viewCardHalf('Localidad',     oVacio(c.localidad, 'Sin localidad')),
+                        viewCardHalf('Provincia',     oVacio(c.provincia, 'Sin provincia')),
+                        viewCardHalf('País',          oVacio(c.pais, 'Sin país')),
+                        viewCardHalf('Dominios',      contador(c.dominios_count)),
+                        viewCardHalf('Contratos',     contador(c.contratos_count)),
+                        viewCardHalf('Comprobantes',  contador(c.comprobantes_count)),
+                    ])}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const menubar = backdrop.querySelector('.modal-menubar');
+        wireMenubarMenu(menubar, 'listar', () => clienteNavegaciones(c, close));
+        wireMenubarMenu(menubar, 'acciones', () => {
+            const items = [
+                { act: 'edit', label: 'Editar cliente', icon: 'fa-pencil',
+                  onSelect: () => { close(); openClienteModal(c); } },
+                { divider: true },
+            ];
+            if (c.correo) {
+                items.push({ act: 'copy-correo', label: 'Copiar correo', icon: 'fa-regular fa-envelope',
+                             onSelect: () => copyToClipboard(c.correo) });
+            }
+            if (c.cuit) {
+                items.push({ act: 'copy-cuit', label: 'Copiar CUIT', icon: 'fa-id-card',
+                             onSelect: () => copyToClipboard(c.cuit) });
+            }
+            items.push({ act: 'copy-nombre', label: 'Copiar nombre', icon: 'fa-regular fa-copy',
+                         onSelect: () => copyToClipboard(c.nombre) });
+            items.push({ act: 'copy-id', label: 'Copiar ID', icon: 'fa-hashtag',
+                         onSelect: () => copyToClipboard(String(c.id)) });
+            items.push({ divider: true });
+            items.push({ act: 'delete', label: 'Eliminar cliente', icon: 'fa-trash', danger: true,
+                         onSelect: () => { close(); pedirImpactoCliente(c); } });
+            return items;
+        });
+    }
+
+    function openClienteModal(c) {
+        const isEdit = !!c;
+        const cat    = CATALOGOS_CLIENTES;
+        const largos = cat.largos || {};
+
+        /* Un `<select>` que no tenga opción para el valor guardado lo borra en
+           silencio al guardar: el navegador cae en la primera opción. Por eso,
+           cuando el valor actual no figura en el catálogo, se le agrega su
+           propia opción marcada. El backend hace la contraparte: acepta el
+           código heredado y exige el catálogo sólo para los valores nuevos
+           (mismo criterio que `talonarios`.`tipo`). */
+        const selectOpts = (items, valorSel, vacio, mapear) => {
+            const sel  = String(valorSel ?? '');
+            const opts = items.map(mapear);
+            const huerfano = sel !== '' && !opts.some(o => o.valor === sel);
+            if (huerfano) opts.unshift({ valor: sel, texto: sel + ' (fuera de catálogo)' });
+            return (vacio === null ? [] : ['<option value="">' + escape(vacio) + '</option>']).concat(
+                opts.map(o =>
+                    `<option value="${escape(o.valor)}"${o.valor === sel ? ' selected' : ''}>${escape(o.texto)}</option>`)
+            ).join('');
+        };
+
+        // `condicion` es obligatoria —la copia el comprobante y es lo que decide
+        // qué documento se emite—, así que no lleva opción vacía: en el alta
+        // arranca en Consumidor Final, que es lo que tienen 54 de las 64 filas.
+        const conOpts = selectOpts(cat.condiciones, isEdit ? c.condicion : 'CF', null,
+                                   x => ({ valor: x.valor, texto: x.texto }));
+        const talOpts = selectOpts(cat.talonarios, c?.talonario, 'Sin talonario',
+                                   t => ({ valor: String(t.id),
+                                           texto: (t.nombre || ('#' + t.id)) + (t.estado === 1 ? '' : ' (deshabilitado)') }));
+        const medOpts = selectOpts(cat.medios, c?.medio, 'Sin medio',
+                                   m => ({ valor: String(m.id),
+                                           texto: (m.nombre || ('#' + m.id)) + (m.estado === 1 ? '' : ' (deshabilitado)') }));
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal modal-wide" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">${isEdit ? 'Editar cliente' : 'Nuevo cliente'}</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del formulario">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    <button class="btn btn-sm btn-primary" data-act="save">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-section">
+                        <div class="form-section-title">Identificación</div>
+                        <div class="form-group">
+                            <label for="cli-nombre">Nombre</label>
+                            <input type="text" id="cli-nombre" maxlength="${largos.nombre || 255}"
+                                   value="${escape(c?.nombre ?? '')}" placeholder="Con el que se lo busca en el sistema">
+                            <div class="field-error" id="cli-nombre-err" style="display:none"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cli-razon">Razón social</label>
+                            <input type="text" id="cli-razon" maxlength="${largos.razon || 250}"
+                                   value="${escape(c?.razon ?? '')}" placeholder="La que se imprime en el comprobante">
+                            <div class="field-error" id="cli-razon-err" style="display:none"></div>
+                            <div class="form-nota">Es el nombre fiscal: lo copia el comprobante junto con el domicilio,
+                                la condición y el CUIT. El <strong>Nombre</strong> de arriba es el de uso interno.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Facturación</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cli-condicion">Condición frente al IVA</label>
+                                <select id="cli-condicion">${conOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cli-cuit">CUIT</label>
+                                <input type="text" id="cli-cuit" maxlength="${largos.cuit || 13}"
+                                       value="${escape(c?.cuit ?? '')}" placeholder="11 dígitos, sin guiones"
+                                       inputmode="numeric">
+                                <div class="field-error" id="cli-cuit-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cli-talonario">Talonario</label>
+                                <select id="cli-talonario">${talOpts}</select>
+                                <div class="form-nota">De acá sale la numeración de sus comprobantes.
+                                    <strong>Sin talonario no se le puede facturar</strong>: la emisión se bloquea.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cli-medio">Medio de pago</label>
+                                <select id="cli-medio">${medOpts}</select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Domicilio</div>
+                        <div class="form-group">
+                            <label for="cli-domicilio">Domicilio</label>
+                            <input type="text" id="cli-domicilio" maxlength="${largos.domicilio || 250}"
+                                   value="${escape(c?.domicilio ?? '')}" placeholder="Calle y número">
+                            <div class="field-error" id="cli-domicilio-err" style="display:none"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cli-localidad">Localidad</label>
+                                <input type="text" id="cli-localidad" maxlength="${largos.localidad || 255}"
+                                       value="${escape(c?.localidad ?? '')}">
+                            </div>
+                            <div class="form-group">
+                                <label for="cli-provincia">Provincia</label>
+                                <input type="text" id="cli-provincia" maxlength="${largos.provincia || 255}"
+                                       value="${escape(c?.provincia ?? '')}" list="cli-provincias">
+                                ${/* El `<datalist>` ofrece las provincias que YA están cargadas en
+                                     la tabla, no un catálogo de 24 que la base no conoce: es lo que
+                                     evita que la misma provincia entre escrita de dos formas y que
+                                     el filtro del listado la parta en dos. Sigue siendo texto
+                                     libre, así que una provincia nueva se puede tipear. */''}
+                                <datalist id="cli-provincias">
+                                    ${(cat.provincias || []).map(p => `<option value="${escape(p)}"></option>`).join('')}
+                                </datalist>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cli-pais">País</label>
+                                <input type="text" id="cli-pais" maxlength="${largos.pais || 255}"
+                                       value="${escape(c?.pais ?? (isEdit ? '' : 'Argentina'))}">
+                            </div>
+                            <div class="form-group"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Contacto</div>
+                        <div class="form-group">
+                            <label for="cli-contacto">Contacto</label>
+                            <input type="text" id="cli-contacto" maxlength="${largos.contacto || 255}"
+                                   value="${escape(c?.contacto ?? '')}" placeholder="Nombre de la persona">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cli-celular">Celular</label>
+                                <input type="text" id="cli-celular" maxlength="${largos.celular || 100}"
+                                       value="${escape(c?.celular ?? '')}" placeholder="2644123456" inputmode="numeric">
+                                <div class="field-error" id="cli-celular-err" style="display:none"></div>
+                                <div class="form-nota">10 dígitos, sin el 0 de la característica y sin el 15.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cli-correo">Correo</label>
+                                <input type="email" id="cli-correo" maxlength="${largos.correo || 100}"
+                                       value="${escape(c?.correo ?? '')}" placeholder="facturacion@empresa.com">
+                                <div class="field-error" id="cli-correo-err" style="display:none"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        const el      = id => backdrop.querySelector('#cli-' + id);
+        const val     = id => el(id).value.trim();
+        const saveBtn = backdrop.querySelector('[data-act="save"]');
+
+        el('nombre').focus();
+
+        saveBtn.addEventListener('click', async () => {
+            const campos = ['nombre', 'razon', 'domicilio', 'cuit', 'celular', 'correo'];
+            campos.forEach(id => {
+                el(id + '-err').style.display = 'none';
+                el(id).classList.remove('input-invalid');
+            });
+
+            const marcar = (campo, msg) => {
+                const e = el(campo + '-err');
+                e.textContent = msg;
+                e.style.display = 'block';
+                el(campo).classList.add('input-invalid');
+                return el(campo);
+            };
+
+            let firstInvalid = null;
+
+            // El backend valida lo mismo; marcarlo acá evita el viaje y deja el
+            // error pegado al campo en vez de en un toast.
+            if (!val('nombre')) {
+                firstInvalid = marcar('nombre', 'El nombre es obligatorio');
+            }
+
+            /* EL FORMATO SE EXIGE SÓLO CUANDO EL VALOR CAMBIA, igual que en el
+               backend: tres filas de la base no lo cumplen —un CUIT con guiones
+               y dos celulares que no son diez dígitos— y exigirlo a secas las
+               dejaría imposibles de guardar, o sea que nadie podría corregirles
+               ni el correo. */
+            const heredado = (campo) => isEdit && val(campo) === String(c[campo] ?? '').trim();
+
+            const cuit = val('cuit');
+            if (cuit && !heredado('cuit') && !/^\d{11}$/.test(cuit)) {
+                firstInvalid = firstInvalid || marcar('cuit', 'El CUIT son 11 dígitos, sin guiones ni espacios');
+            }
+            const celular = val('celular');
+            if (celular && !heredado('celular') && !/^\d{10}$/.test(celular)) {
+                firstInvalid = firstInvalid || marcar('celular', 'El celular son 10 dígitos, sin el 0 ni el 15');
+            }
+            const correo = val('correo');
+            if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+                firstInvalid = firstInvalid || marcar('correo', 'El correo no es válido');
+            }
+
+            if (firstInvalid) { firstInvalid.focus(); return; }
+
+            const payload = {
+                nombre:    val('nombre'),
+                razon:     val('razon'),
+                condicion: val('condicion'),
+                cuit,
+                talonario: val('talonario'),
+                medio:     val('medio'),
+                domicilio: val('domicilio'),
+                localidad: val('localidad'),
+                provincia: val('provincia'),
+                pais:      val('pais'),
+                contacto:  val('contacto'),
+                celular,
+                correo,
+            };
+
+            saveBtn.disabled = true;
+            try {
+                const res = isEdit
+                    ? await api('clientes', { method: 'PUT',  body: { id: c.id, ...payload } })
+                    : await api('clientes', { method: 'POST', body: payload });
+                toast((isEdit ? 'Cliente actualizado' : 'Cliente creado') +
+                      (res && res.nombre ? ' — ' + res.nombre : ''));
+                close();
+                navigate();
+            } catch (e) {
+                saveBtn.disabled = false;
+                toast(e.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
+    // Las tres FK que apuntan a `clientes` son RESTRICT y las tres bloquean, así
+    // que la baja usa el modal con desglose (ABM.md, "Eliminar"; DESIGN.md
+    // §15.1). Las cantidades las pide el backend.
+    async function pedirImpactoCliente(c) {
+        try {
+            const impacto = await api('clientes?impacto=1&id=' + encodeURIComponent(c.id));
+            openClienteDeleteModal(c, impacto);
+        } catch (e) {
+            toast(e.message, { error: true, duration: 6000 });
+        }
+    }
+
+    function openClienteDeleteModal(c, impacto) {
+        const bloqueos  = impacto.bloqueos || [];
+        const bloqueado = bloqueos.length > 0;
+
+        const linea = (it, badge) => `
+            <li class="del-item">
+                <span class="del-item-label">${escape(it.label)}</span>
+                <span class="badge ${badge}">${it.cantidad}</span>
+            </li>`;
+
+        const avisoBloqueo = !bloqueado ? '' : `
+            <div class="del-blocker">
+                <i class="fa-solid fa-ban"></i>
+                <div>
+                    <strong>No se puede eliminar.</strong>
+                    <ul class="del-list">${bloqueos.map(b => linea(b, 'badge-danger')).join('')}</ul>
+                    Reasigná esos dominios, contratos y comprobantes a otro cliente antes de borrarlo.
+                </div>
+            </div>`;
+
+        const sinDatos = bloqueado ? '' : `
+            <div class="del-empty">No tiene dominios, contratos ni comprobantes asociados.</div>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true">
+                <div class="modal-header modal-header-primary">
+                    <div class="modal-title">Eliminar cliente</div>
+                    <button class="btn-icon-sm" data-act="close" aria-label="Cerrar">×</button>
+                </div>
+                <div class="modal-menubar" role="toolbar" aria-label="Acciones del borrado">
+                    <button class="btn btn-sm btn-ghost" data-act="close">
+                        <i class="fa-solid fa-xmark"></i> Cancelar
+                    </button>
+                    ${bloqueado ? '' : `
+                    <button class="btn btn-sm btn-danger" data-act="ok">
+                        <i class="fa-solid fa-trash"></i> Eliminar cliente
+                    </button>`}
+                </div>
+                <div class="modal-body">
+                    <div class="del-lead">
+                        Se va a eliminar de forma permanente el cliente
+                        <strong>${escape(c.nombre)}</strong>
+                        <code>#${c.id}</code>
+                    </div>
+                    ${avisoBloqueo}
+                    ${sinDatos}
+                    ${bloqueado ? '' : `
+                    <div class="del-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Esta acción no se puede deshacer.
+                    </div>`}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        requestAnimationFrame(() => backdrop.classList.add('open'));
+
+        const close = () => {
+            backdrop.classList.remove('open');
+            setTimeout(() => backdrop.remove(), 200);
+        };
+        backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+        backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        backdrop.querySelector('[data-act="ok"]')?.addEventListener('click', async e => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                await api('clientes?id=' + encodeURIComponent(c.id), { method: 'DELETE' });
+                close();
+                toast('Cliente eliminado');
+                navigate();
+            } catch (err) {
+                btn.disabled = false;
+                toast(err.message, { error: true, duration: 6000 });
+            }
+        });
+    }
+
     /* ---------- Views: Artículos ----------
      * ABM de `articulos`: el catálogo del que cuelga toda la plata del sistema
      * — el abono de cada plan (`planes`.`articulo`), lo que se factura
@@ -9858,7 +10946,7 @@
 
     function dominiosDefaults() {
         return {
-            codigo: '', texto: '',
+            codigo: '', texto: '', cliente: '',
             orden:  'id', dir: 'desc', limit: 100,
         };
     }
@@ -9874,6 +10962,11 @@
             // ABM.md §1.3 para toda navegación cruzada.
             const domPedido = tomarFiltroDominio('dominios');
             if (domPedido) state.codigo = domPedido;
+            // "Ver dominios" desde Clientes, por el filtro `Cliente` — que
+            // existe como campo del Modal de Filtros, así que la lista acotada
+            // se explica sola y se puede limpiar (ABM.md §1.3).
+            const campoPedido = tomarFiltroCampo('dominios');
+            if (campoPedido) state[campoPedido.campo] = campoPedido.valor;
 
             root.innerHTML = `
                 ${moduleHeader('Dominios', 'Espacios lógicos que agrupan dispositivos, chips y perfiles de acceso.')}
@@ -9942,10 +11035,12 @@
         let dominios = allDominios;
 
         function applyAndRender() {
-            const codigo = parseInt(state.codigo, 10);
+            const codigo  = parseInt(state.codigo,  10);
+            const cliente = parseInt(state.cliente, 10);
 
             let filtered = dominios.filter(d => {
-                if (Number.isFinite(codigo) && d.id !== codigo) return false;
+                if (Number.isFinite(codigo)  && d.id      !== codigo)  return false;
+                if (Number.isFinite(cliente) && d.cliente !== cliente) return false;
                 return true;
             });
 
@@ -9966,6 +11061,13 @@
                 edit:   true, onEdit:   () => openDomainModal(dom),
                 delete: true, onDelete: () => confirmDeleteDomain(dom),
                 extra: [
+                    // Va primero porque es lo único de este menú que ESCRIBE, y
+                    // escribe la columna que decide si el cliente ve o no los
+                    // controles de la app. El mismo cálculo que la tarea de las
+                    // 04:00, acotado a este dominio.
+                    { act: 'situacion',  label: 'Actualizar situación', icon: 'fa-gauge-high',
+                      onSelect: () => pedirPrevioSituacion('dominios_accion', dom.id,
+                                                           `del dominio ${dom.nombre || ('#' + dom.id)}`) },
                     { act: 'go-devices', label: 'Ver dispositivos asociados', icon: 'fa-satellite-dish',
                       onSelect: () => pedirFiltroDominio('dispositivos', dom.id) },
                     { act: 'copy-id',    label: 'Copiar ID',     icon: 'fa-hashtag',     onSelect: () => copyToClipboard(String(dom.id)) },
@@ -10022,11 +11124,18 @@
                     <label for="dom-fm-texto">Buscar (nombre / número / identificador)</label>
                     <input type="search" id="dom-fm-texto" placeholder="Texto libre" value="${escape(state.texto)}">
                 </div>
+                ${/* `Cliente` es el filtro que consume "Ver dominios" del
+                     módulo Clientes. Va por ID y no por nombre —como en
+                     Comprobantes— porque acá el cliente es una FK y el listado
+                     no lo trae como columna. */''}
+                <div class="form-group">
+                    <label for="dom-fm-cliente">Cliente</label>
+                    <input type="number" id="dom-fm-cliente" min="1" placeholder="ID del cliente" value="${escape(state.cliente)}">
+                </div>
                 <div class="form-group">
                     <label for="dom-fm-limit">Límite</label>
                     <input type="number" id="dom-fm-limit" min="1" max="1000" value="${state.limit}">
                 </div>
-                <div class="form-group"></div>
                 <div class="form-group">
                     <label for="dom-fm-orden">Ordenar por</label>
                     <select id="dom-fm-orden">${ordOpts}</select>
@@ -10044,20 +11153,22 @@
         openFiltersModal({
             bodyHtml,
             onApply(modal) {
-                state.codigo = modal.querySelector('#dom-fm-codigo').value.trim();
-                state.texto  = modal.querySelector('#dom-fm-texto').value.trim();
-                state.orden  = modal.querySelector('#dom-fm-orden').value;
-                state.dir    = modal.querySelector('#dom-fm-dir').value;
-                state.limit  = readLimit(modal.querySelector('#dom-fm-limit'), 100);
+                state.codigo  = modal.querySelector('#dom-fm-codigo').value.trim();
+                state.texto   = modal.querySelector('#dom-fm-texto').value.trim();
+                state.cliente = modal.querySelector('#dom-fm-cliente').value.trim();
+                state.orden   = modal.querySelector('#dom-fm-orden').value;
+                state.dir     = modal.querySelector('#dom-fm-dir').value;
+                state.limit   = readLimit(modal.querySelector('#dom-fm-limit'), 100);
                 onApply();
             },
             onClear(modal) {
                 const d = dominiosDefaults();
-                modal.querySelector('#dom-fm-codigo').value = d.codigo;
-                modal.querySelector('#dom-fm-texto').value  = d.texto;
-                modal.querySelector('#dom-fm-orden').value  = d.orden;
-                modal.querySelector('#dom-fm-dir').value    = d.dir;
-                modal.querySelector('#dom-fm-limit').value  = String(d.limit);
+                modal.querySelector('#dom-fm-codigo').value  = d.codigo;
+                modal.querySelector('#dom-fm-texto').value   = d.texto;
+                modal.querySelector('#dom-fm-cliente').value = d.cliente;
+                modal.querySelector('#dom-fm-orden').value   = d.orden;
+                modal.querySelector('#dom-fm-dir').value     = d.dir;
+                modal.querySelector('#dom-fm-limit').value   = String(d.limit);
             },
         });
     }
@@ -10252,6 +11363,14 @@
         wireMenubarMenu(menubar, 'acciones', () => [
             { act: 'edit', label: 'Editar dominio', icon: 'fa-pencil',
               onSelect: () => { close(); openDomainModal(dom); } },
+            { divider: true },
+            // Mismo ítem que el menú de la fila, y por el mismo camino. Va
+            // separado de Editar porque no abre un formulario: calcula la mora
+            // de los contratos del dominio y escribe la situación que sale de
+            // ahí — la columna que `app/` lee para dibujar o no los controles.
+            { act: 'situacion', label: 'Actualizar situación', icon: 'fa-gauge-high',
+              onSelect: () => { close(); pedirPrevioSituacion('dominios_accion', dom.id,
+                                                              `del dominio ${dom.nombre || ('#' + dom.id)}`); } },
             { divider: true },
             { act: 'copy-id',   label: 'Copiar ID',     icon: 'fa-hashtag',
               onSelect: () => copyToClipboard(String(dom.id)) },

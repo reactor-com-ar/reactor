@@ -635,6 +635,38 @@ al consumo (`.plan-modo-icon`). Cuatro reglas:
 - **Si el dato base falta, el ícono tampoco va.** Un candado al lado de "Sin
   plan" prometería que hay algo fijado.
 
+**UN ESTADO SÍ ES COLUMNA PROPIA, y no contradice la regla de arriba.** La
+distinción es qué tipo de dato es, no cuánto ocupa: `plan_modo` es un **adjetivo
+del plan** —no se entiende sin saber de qué plan habla, así que va pegado a él—
+mientras que un **estado** es un dato por derecho propio, se lee solo y es
+justamente lo que alguien viene a barrer de arriba abajo. El precedente es
+`habilitado`, que es columna con badge en todos los listados del módulo desde
+siempre.
+
+Por eso **`Situación` es una columna**, con el badge de §11 y los tres tonos de
+`badgeSituacion()` (`1` Normal verde · `2` Limitado ámbar · `3` Suspendido rojo):
+
+| listado | columnas nuevas | de dónde sale |
+|---|---|---|
+| **Dominios** | `Situación` · `Habilitado` | `dominios`.`situacion` y `.habilitado` |
+| **Contratos** | `Situación` | **`dominios`.`situacion`** — la del dominio del contrato |
+
+- **Van las dos últimas antes de `Acciones`**, con `Habilitado` pegado a
+  `Acciones`: es el orden que ya tenían Contratos y el resto de los listados, y
+  mover la bandera rompería la lectura de columna que la gente ya tiene hecha.
+- **EN CONTRATOS LA SITUACIÓN ES LA DEL DOMINIO, no una columna de
+  `contratos`.** El endpoint ya traía `dominio_situacion` y se le agregó
+  `dominio_situacion_texto`; el código corto lo traduce **el backend** contra
+  `combos` (`'$xDominio->situacion'`), nunca una tabla de textos en el front
+  (ABM.md). **Ojo con `contratos`.`situacion`**, que existe desde la migración
+  `20261001_1000` y es **otra cosa** —la mora que calcula el job de las 04:00,
+  §33-septies—: hoy no se muestra en ninguna pantalla, y el día que se muestre
+  necesita un rótulo que la distinga de ésta.
+- **Un contrato sin dominio dibuja la raya**, no un badge: sin dominio no hay
+  situación que mostrar. Hoy no hay ninguno (53 de 53 tienen dominio), igual que
+  los 148 dominios tienen `situacion` cargada — las dos ramas existen para el
+  dato futuro, no para el actual.
+
 ## 11. Badges
 
 Los badges usan fondo translúcido sobre el rojo oscuro de la app — no fondos pasteles sólidos (no contrastarían bien con `--surface`).
@@ -693,7 +725,15 @@ Para cualquier pantalla que muestre métricas, incluido dashboard.
 .stat-value.green  { color: var(--success); }
 .stat-value.orange { color: var(--primary); }
 .stat-value.red    { color: var(--danger); }
+.stat-value.warn   { color: var(--warn); }
 ```
+
+**`.orange` NO es ámbar: apunta a `--primary`, el rojo institucional.** El ámbar
+de verdad es `.warn` (`--warn`), y existe para las tarjetas que son el desglose
+de un estado que la tabla ya pinta con un badge — ahí el tono tiene que ser el
+mismo de los dos lados. *Situación Limitado* usa `badge-warn` en la celda; con
+`.orange` la tarjeta habría dicho rojo mientras la celda decía ámbar, y serían
+dos códigos de color para un solo dato.
 
 Si la stat-card es clickeable, agregale `.dash-link`:
 
@@ -707,9 +747,33 @@ Si la stat-card es clickeable, agregale `.dash-link`:
 
 **Una tarjeta que cuenta un subconjunto del listado que está abajo es el filtro
 rápido de ese subconjunto.** En **Contratos** las cinco —Total, Habilitados,
-Deshabilitados, Facturables, Remisibles— dejan el listado en lo que anuncian.
-Son las mismas cinco entradas del menú `Listar` del back office viejo
-(`reactor-admin/contratos/listar.php`), que es de donde sale la idea.
+**Situación Normal**, **Situación Limitado**, **Situación Suspendido**— dejan el
+listado en lo que anuncian. La idea sale del menú `Listar` del back office viejo
+(`reactor-admin/contratos/listar.php`).
+
+**Las tres de situación son el desglose de `Habilitados`, NO de `total`.** La
+situación es la del **dominio** del contrato (la columna de §10) y **se cuenta
+sólo sobre los habilitados**: un contrato dado de baja no tiene situación que
+atender, y contarlo inflaría los tres números con filas que nadie va a mirar.
+
+**Los dos lados llevan el mismo `habilitado = 1`, y eso no es opcional**: el
+contador (`$resumen['situacion']` en `api/contratos.php`) y el atajo
+(`ATAJOS_CONTRATOS`, que arma `{ estado: '1', situacion: 'N' }`). Si uno filtra
+por habilitado y el otro no, la tarjeta dice un número y la lista muestra otro —
+que es exactamente lo que la regla de abajo prohíbe. Se cambian juntos o no se
+cambian.
+
+Un contrato sin dominio no tiene situación y no entra en ninguna de las tres —
+hoy no hay ninguno, así que los tres suman `Habilitados`; el backend no fuerza
+esa suma.
+
+**EL MENÚ `Listar` ES EL SUPERCONJUNTO, NO EL ESPEJO.** Hasta que las tarjetas
+pasaron a mostrar el desglose por situación eran las mismas cinco entradas de los
+dos lados. Ahora el menú tiene **ocho**: `Deshabilitados`, `Facturables` y
+`Remisibles` salieron de las tarjetas y **siguen vivos ahí**, que es lo que
+impide que un cambio de tarjetas se lleve puesta una forma de listar. Lo que no
+puede pasar es lo inverso —una tarjeta sin entrada de menú—, porque entonces
+habría un atajo que sólo existe mientras esa tarjeta esté a la vista.
 
 **Los mismos atajos tienen un segundo acceso: el desplegable `Listar` de la
 toolbar** (§9). La tarjeta y el ítem del menú son el mismo atajo por dos
@@ -717,6 +781,12 @@ caminos, y se aplican por **una sola función** (`aplicarAtajo()`): el catálogo
 del menú (`MENU_LISTAR_CONTRATOS`) dice qué se dibuja y en qué orden, pero el
 estado de cada atajo sale siempre de `ATAJOS_CONTRATOS`, que es lo que leen
 también las tarjetas.
+
+**Un atajo nuevo que filtre por un campo exige el campo en el Modal de Filtros**
+(ABM.md §1.3): por eso `Situación` se sumó ahí, pegada a `Habilitado`. Sin ese
+campo el listado queda acotado sin que la pantalla lo explique ni se pueda
+limpiar. Sus opciones salen del catálogo del endpoint (`situaciones`, que es
+`comboLista('$xDominio->situacion')`), nunca de una lista escrita en el front.
 
 ```html
 <div class="stat-card dash-link" data-atajo="habilitados" role="button" tabindex="0"
@@ -1229,7 +1299,12 @@ diálogo se usó sólo para bajas, y la primera acción no destructiva que lo ll
   `tono: 'primary'`; que exista la confirmación ya comunica el peso.
 - **El rótulo nombra la acción, no la genérica.** `Generar acceso a Panel`, no
   `Aceptar`: el botón tiene que poder leerse solo, sin el título.
-- Los doce call sites de baja no pasan `opts` y siguen en `Eliminar` / rojo.
+- **Y tampoco nombra otra acción.** Lo destructivo que no es una baja conserva el
+  rojo pero pasa su propio `label`: *Anular comprobante* dice **Anular**, porque
+  anular no borra la fila —el número queda consumido y el comprobante sigue
+  listado— y un botón que dijera `Eliminar` estaría prometiendo otra cosa. El
+  default sólo sirve cuando la acción efectivamente es eliminar.
+- Los call sites de baja no pasan `opts` y siguen en `Eliminar` / rojo.
 
 ### 15.1 Confirmación de borrado con desglose de impacto
 
@@ -1561,7 +1636,8 @@ dos preguntas distintas sobre el mismo usuario y el menú las ofrece por
 separado.
 
 - **El pedido se consume siempre y sólo aplica si la ruta coincide.** Si el usuario se desvía a otra pantalla, se descarta en vez de filtrar un listado equivocado más tarde.
-- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Contratos; para usuario: Perfiles y Adopciones; para contrato: Contratos, desde Comprobantes; para comprobante: Comprobantes, desde Contratos). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **Sólo entran al menú los módulos que ya tienen filtro propio por esa entidad** (para dominio: Contratos, Dispositivos, Chips, Perfiles, Señales, Registros, Adopciones, Notificaciones, Difusión; para usuario: Perfiles y Adopciones; para contrato: Contratos —desde Comprobantes— y Comprobantes —desde Contratos—; para comprobante: Comprobantes, desde Contratos). Un módulo sin ese filtro no se agrega al menú "para que quede completo".
+- **`Consultar contrato` lista un solo destino y está bien así.** Comprobantes es el único módulo con filtro por contrato, y el menú se dibuja igual que si tuviera ocho: un desplegable de un ítem no es un botón directo disfrazado — `Listar` significa lo mismo en los cuatro modales que lo tienen, y degradarlo a botón acá obligaría a reconocer la familia por la forma en vez de por el rótulo. `Pagos` no entra porque no es un módulo sino una pestaña del comprobante.
 - **El mismo par sirve para llevar al registro que una acción acaba de crear**, no sólo para los ítems de `Listar`: `Contratos → Facturar` termina con `pedirFiltroComprobante('comprobantes', res.comprobante)`, que es a donde llevaba el back office viejo después de facturar. La regla no cambia — el filtro tiene que existir en el Modal de Filtros del destino (ahí, `Código`) — y por eso el pedido se vuelca en `state.id` **antes** del fetch: Comprobantes filtra en el servidor, así que un recorte posterior mostraría "las 100 últimas de todos" y el comprobante recién emitido podría no estar entre ellas.
 - **El destino puede volcar el pedido en el filtro que le corresponda, que no siempre se llama igual.** `Contratos → Ver dominio` usa el mismo `pedirFiltroDominio`, pero en **Dominios** el dominio no es una FK sino la fila misma: `renderDominios()` lo vuelca en `state.codigo`. Lo que no cambia es la regla — el filtro usado **tiene que existir en el Modal de Filtros del destino**, para que se vea por qué la lista viene acotada y se pueda limpiar.
 - **Si el endpoint sabe filtrar, el filtro va en el fetch inicial**, no sólo client-side: en tablas grandes (`registros`, `senales`, `adopciones`) recortar después de traer la ventana muestra "las N últimas de todos" filtradas, que es casi nada. Adopciones manda `?dominio=`; Señales y Registros no tienen el parámetro en la API y filtran sobre la ventana, igual que su propio modal de Filtros. `adoptador` / `liberador` tampoco existen en la API de Adopciones: ésos filtran client-side, como ya lo hace el modal de Filtros de ese módulo.
@@ -2396,7 +2472,7 @@ Utilidad de **Herramientas** que administra procesos automáticos programables. 
 
 **Infraestructura de jobs** (`cloud/jobs/`): `_scheduler.php` (tick minutal), `_bootstrap.php` (runtime común con `marcarEjecucionOk/Error`, `anotarLog`, `ejecucionId`), `_cleanup_logs.php` (cleanup nocturno por `retencion_dias`), `.htaccess` (`Require all denied`), `crontab` (versionado; se instala en `/etc/cron.d/reactor-cloud`). Cada ejecución tiene su propio `.log` en `/var/log/reactor/cloud/ejecuciones/<id>.log`.
 
-**Jobs de negocio**: `dolar_actualizar.php` (§33-quater).
+**Jobs de negocio**: `dolar_actualizar.php` (§33-quater), `articulos_recalcular.php` (§33-quinquies) y `contratos_plan_recalcular.php` (§33-sexies), que corren **en ese orden todos los días** — 06:00 la cotización, 07:00 el recálculo de los precios que salen de ella, 08:00 la reasignación de los planes que se cobran con esos precios. Cada eslabón falla por su cuenta: el de abajo corre igual con el dato que haya.
 
 **Reglas de la infraestructura:**
 - **`cron_expr` SE EVALÚA EN HORA DE ARGENTINA.** `cronMatch()` compara contra `new DateTime('now')`, o sea contra el reloj de PHP, y **el contenedor corre en UTC** (`docker/Dockerfile` no fija `TZ`, a diferencia de `motor/Dockerfile`). Por eso los tres entrypoints de `cloud/jobs/` —`_scheduler.php`, `_bootstrap.php` y `_cleanup_logs.php`— abren con `date_default_timezone_set('America/Argentina/Buenos_Aires')`, igual que `api/bootstrap.php` para la web. Sin esa línea `0 6 * * *` dispara a las 03:00, y además `anotarLog()` estampa horas UTC en el `.log` mientras la base escribe `inicio` / `fin` en `-03:00` (`SET time_zone = '-03:00'`): el mismo evento con dos horas distintas según dónde se lo mire.
@@ -2478,7 +2554,7 @@ Utilidad de **Herramientas** (§27) que compara la **estructura** de la base de 
 **Reemplaza a un robot del legacy que dejó de correr** (`reactor-api/robot/articulosActualizar.php`). No es una estimación: al 30/09/2026 producción seguía en `1530.00` con fecha `2026-09-05`, veinticinco días vieja, mientras con ese número se valorizaban los artículos importados, el cotizador de planes de `www` y la cotización que se sella en cada comprobante.
 
 - **SE GUARDA `venta`, NO `compra`, y está verificado contra el histórico.** Al 2026-05-19 el microservicio devuelve `compra 1370 / venta 1420` y la fila de `parametros` de esa misma fecha vale exactamente `1420.00`. Coincide además con la lectura del negocio: la columna valoriza artículos **importados** (`compra = importacion * cotizacion`, §15.2), o sea el precio al que se **compran** dólares, que es la punta `venta` del mercado. Elegir `compra` serían ~3 % menos en todos los precios en dólares.
-- **EL JOB NO RECALCULA LOS ARTÍCULOS, y el robot del legacy sí lo hacía.** Es deliberado: en cloud recalcular es una acción con nombre que muestra los cuatro números y los contratos afectados antes de confirmar, porque mueve el abono de contratos vivos. Mover la cotización es información; repreciar la tabla entera a las 6 de la mañana y sin que nadie lo mire es plata.
+- **ESTE JOB NO RECALCULA LOS ARTÍCULOS: lo hace el de las 07:00** (§33-quinquies). Son dos tareas y no una a propósito. Si Databox se cae, la cotización no se mueve, esta tarea queda en `error` y el recálculo corre igual una hora más tarde y sale `ok` con 0 filas tocadas — no hay nada que mover. Fusionadas, un fallo de red del microservicio dejaría sin correr el recálculo, que no depende de la red. Hasta el 30/09/2026 el recálculo en masa **no existía** y este bullet decía por qué; ver §33-quinquies para el cambio de decisión.
 - **Se pide SIN `?fecha=`.** Con la fecha de hoy el endpoint contesta **404** los sábados, domingos y feriados (verificado: `?fecha=2026-09-05` → *"Cotizacion no encontrada"*), así que el job fallaría dos de cada siete corridas por algo que no es una falla. Sin fecha devuelve la última registrada, que es la del último día hábil.
 - **Los dos parámetros se escriben en una transacción, o no se escribe ninguno.** Una cotización sin su fecha —o una fecha de hoy sobre el número de la semana pasada— es peor que no haber actualizado: las tres pantallas que la muestran dicen *"Cotización $X · actualizada el …"* y estarían afirmando algo falso.
 - **`actualizado` lo estampa el `NOW()` de la base, nunca el reloj de PHP**, sobre la misma conexión que fija `SET time_zone = '-03:00'`. Guarda **cuándo se corrió**, que es la semántica que ya tenían las filas del legacy (`09:00:03`, `20:00:04` son horas de corrida, no fechas de cotización).
@@ -2505,6 +2581,96 @@ Utilidad de **Herramientas** (§27) que compara la **estructura** de la base de 
 - **Sólo Prefactura (`F`) y Factura (`T`) en los dos caminos manuales.** Los otros cinco tipos de `talonarios`.`tipo` —`P` Presupuesto, `D` Pedido, `R` Recibo, `M` Remito, `N` Nota de Crédito— nacen en `0`: la cotización es la referencia del día en que se le puso precio a lo que se factura, y eso pasa al emitir el documento de la deuda. El tipo se resuelve **contra la base**, por el talonario, y no contra lo que mande el front — que en esos dos caminos no manda ninguno.
 - **Facturar un contrato sella para cualquier tipo, y es a propósito.** Es lo que viene haciendo desde el legacy y lo que respaldan las 424 filas con cotización de la base: **234 Prefacturas y 190 Recibos, todas con `contrato`**. Hay clientes cuyo talonario de facturación es de Recibo; acotarlo ahora les sacaría la cotización a contratos vivos.
 - **Sin el parámetro cargado va `0`**, que es lo que devolvía `cParametro::valorLeer()` del legacy y lo que ya tienen las 1.908 filas sin cotización. Un `0` se lee como *"no se selló"*; inventar un número, no.
+
+## 33-quinquies. Job: recálculo de precios en dólares
+
+`cloud/jobs/articulos_recalcular.php`, que corre **todos los días a las 07:00** por el Programador de tareas (§33), **una hora después** del job de la cotización (§33-quater). Recorre `articulos` con `moneda = 'D'` y reescribe `compra` y `venta` con la cotización vigente. La tarea se da de alta con la migración `20260930_1200_tarea_articulos_recalcular.sql`.
+
+**REVIERTE UNA DECISIÓN QUE ESTUVO TOMADA AL REVÉS, y queda dicho porque el repo entero la documentaba.** Hasta el 30/09/2026 mover la cotización y repreciar eran dos cosas a propósito, y repreciar era **sólo** la acción de fila con confirmación (§41), con este argumento: cambia el abono de contratos vivos, o sea que es plata y alguien tiene que mirarlo. El argumento sigue siendo cierto —es la razón de todo lo que sigue— pero la decisión es la contraria: **el precio de un artículo importado se sigue del dólar todos los días, y dejarlo clavado hasta que alguien se acuerde de tocar la fila también es una decisión de plata, tomada por omisión.** Al 30/09/2026 convivían **cinco** cotizaciones implícitas en la tabla (1370, 1375, 1380, 1415, 1450) contra un parámetro en 1540: **70 de las 79 filas en dólares vendían a una cotización vieja**, entre 6 % y 12 % por debajo.
+
+- **LA ACCIÓN DE FILA NO SE VA.** Sigue siendo la que se usa cuando hay que repreciar *ya* —recién cargada una fila, o movida la cotización a mano— y es la única que muestra los cuatro números antes de escribir. Este job es el piso diario, no su reemplazo. Lo que cambia en §41 es que la stat card `Precio viejo` pasa a ser un indicador de **hoy** (lo que se tocó después de las 07:00), no el estado de fondo de la tabla.
+- **LA CUENTA ES LA MISMA FUNCIÓN, y eso obliga a una rareza que vale la pena.** `articuloPrecios()` vive en `api/articulos_lib.php`, que resuelve la conexión con `db()` — declarada en `api/bootstrap.php`, un archivo que manda headers HTTP y llama a `requireAuth()`, o sea que no se puede incluir desde CLI. El job **declara su propio `db()`** apuntando al PDO del bootstrap de jobs y después requiere la librería. Cuesta seis líneas y evita lo único que no se puede permitir: una segunda copia de la fórmula, que el día que alguien toque una sola de las dos haría que el precio que anuncia la pantalla de recalcular y el que escribe el job dejen de ser el mismo número.
+- **TODAS LAS FILAS EN UNA SOLA TRANSACCIÓN**, con `SELECT … FOR UPDATE` sobre las filas en dólares. La lista de precios es una: si el proceso se muere a mitad, media tabla a 1540 y media a 1380 es un estado que **nadie eligió** — y `cContrato::facturar()` cobra `articulos`.`venta` tal cual, así que un contrato facturado en esa ventana saldría con el precio de la mitad que alcanzó a tocarse. Son ~80 filas: el lock dura milisegundos y son las 07:00. `moneda` no tiene índice, así que el `FOR UPDATE` bloquea el scan de las 106 filas; con la tabla diez veces más grande habría que indexar `moneda` antes que cambiar el lock.
+- **La cotización se lee UNA VEZ y se valida ANTES de abrir la transacción.** `cotizacionDolar()` cachea el parámetro por proceso, así que las ~80 filas quedan repreciadas con **el mismo** número aunque alguien mueva el parámetro a mitad de corrida — una lista de precios con dos cotizaciones adentro es justamente lo que el job existe para deshacer. Fuera de la banda `1..1000000` corta con excepción y **no escribe nada**: `cotizacionDolar()` devuelve `0` cuando el parámetro falta o no es numérico, y con eso el job pondría la tabla entera en dólares a **$ 0,00**, incluido el abono de los contratos que facturan esos artículos. Es el mismo bloqueo que ya tiene la acción de fila, y acá pesa más porque no hay nadie mirando la pantalla.
+- **Dos guardas por fila que la acción de fila no necesita, porque ahí hay alguien mirando:**
+  - **Una fila que tenía precio no se manda a cero.** Pasa cuando `importacion` quedó en `NULL` o en `0` con `compra` cargada: la cuenta da `$ 0,00` y la fila pasaría a venderse gratis. La acción de fila escribe ese `0` porque antes se lo muestra a quien confirma; el job la saltea y la reporta. Al 30/09/2026 las 9 filas en dólares sin `importacion` **ya están en 0** —dos son planes Free, que valen 0 de verdad—, así que hoy esta guarda no desvía ninguna: existe para la fila futura a la que alguien le borre la importación.
+  - **Lo que se pasa de `decimal(10,2)` se saltea y se reporta, no se recorta.** Con `STRICT_TRANS_TABLES` el `UPDATE` revienta y **se llevaría la transacción entera**, o sea las 79 filas sanas; sin modo estricto guardaría `99999999.99` en silencio, que es un precio inventado.
+- **Las filas que no cambian no se escriben.** El umbral es el centavo porque `articuloPrecios()` ya redondeó a dos decimales: menos que eso es ruido de punto flotante, no un precio distinto. Así el `.log` habla sólo de los precios que de verdad se movieron, y una segunda corrida del mismo día es un no-op verificable (`0 repreciados | 79 sin cambios`).
+- **Cuenta el abono afectado, después de escribir.** Los planes que facturan esos artículos cobran `articulos`.`venta` como abono, así que mover el precio les cambió el abono a todos los contratos que cuelgan de ellos. La acción de fila lo dice **antes** de confirmar; un job no tiene a quién decírselo antes, así que lo deja contado después —`29 planes / 40 contratos` en la primera corrida—, que es el número por el que alguien va a venir a preguntar.
+- **El `.log` de cada ejecución lista fila por fila el antes, el después y el delta**, y la retención es de **30 días** y no de los 7 del default: `articulos` **no guarda historial de precios**, así que ese `.log` es el único lugar donde queda escrito que un artículo pasó de X a Y y cuándo.
+- **ES EL CANARIO DE LA TAREA DE LA COTIZACIÓN.** Si la de las 06:00 falla, el parámetro se queda quieto y el recálculo de las 07:00 no tiene nada que mover: sale `ok` con 0 filas tocadas, **indistinguible de un día en que el dólar no se movió**. Por eso mira `articulos.dolar.actualizado` y sube a `alerta` cuando tiene más de **2 días** — dos corridas fallidas de la otra tarea.
+- **Deja rastro en el Visor de sucesos también cuando sale bien** (`cron/articulos_recalcular`), con los cuatro contadores y la cotización aplicada. Sube a `alerta` —sin cortar: lo que se escribió se escribió bien— cuando alguna guarda salteó una fila o cuando la cotización está vieja. El detalle fila por fila **no** va al suceso (sólo los 5 primeros avisos y un `+N más en el log`): un job que saltea 70 filas no tiene que escribir un párrafo de 70 renglones en el Visor.
+
+## 33-sexies. Job: recálculo de planes dinámicos
+
+`cloud/jobs/contratos_plan_recalcular.php`, que corre **todos los días a las 08:00** por el Programador de tareas (§33), **una hora después** del recálculo de precios (§33-quinquies). Recorre `contratos` con `habilitado = 1` **y `plan_modo = 'dinamico'`**, cuenta los usuarios del dominio y le escribe el plan habilitado más chico de la misma familia que los cubra. La tarea se da de alta con la migración `20260930_1300_tarea_contratos_plan_recalcular.sql`.
+
+**ESCRIBE UNA SOLA COLUMNA, `contratos`.`plan`.** No toca `facturado`, `facturar` ni `remitir` —el ciclo de facturación es de `api/contratos_accion.php?accion=facturar` y de nadie más—, no factura, y no escribe `dominios`.`usuarios` ni ninguna otra columna de `dominios`. Si el plan cambia, el comprobante del período siguiente sale con el abono nuevo porque `facturar` lee el plan en el momento de emitir (§15.2).
+
+**ES LA PIEZA QUE LE DA EFECTO A `contratos`.`plan_modo`.** La columna existe desde la migración `20260929_1100` y hasta este job **no hacía nada**: se elegía en el ABM, se guardaba, se mostraba en el listado y en la ficha, y ningún camino del sistema la leía. **El día que se aplica no cambia nada**: las 50 filas están en `fijo` (el default del ENUM, elegido justamente para que un `ALTER` no le cambiara el comportamiento a ningún contrato vivo), así que la primera corrida sale `ok` con *0 contratos evaluados*. Y está verificado que tampoco movería ninguno si se pasaran los 26 contratos habilitados a `dinamico`: **los 26 ya están parados exactamente en el plan que les corresponde**.
+
+**Reemplaza a `reactor-api/robot/contratosActualizar.php`** (crontab del legacy, 05:45), que es un `for` sobre `cContrato::actualizar()` → `cPlan::detectar($dominio->usuarios)`. Cinco diferencias, ninguna de estilo — cada una tapa un camino por el que el robot viejo movía plata sin que nadie lo decidiera:
+
+- **NO HAY FALLBACK AL PLAN FREE.** `cPlan::detectar()` cierra con `if ($plan == 0) $plan = 100; // plan free`: al dominio que **no entra en ningún plan** —porque creció por encima del cupo más grande— le asigna el plan gratuito. Hoy el techo Standard es 200 usuarios; el día que un dominio llegue a 201, ese `if` lo pasa de pagar el abono más caro a no pagar nada, de madrugada y sin dejar rastro. Acá se saltea y se reporta **como aviso**, porque es un contrato que está facturando menos de lo que le toca. Es la misma decisión que ya tomó `api/contratos_accion.php` al portar `cContrato::facturar()`, que traía el mismo `if`.
+- **LOS CANDIDATOS SE ACOTAN AL `tipo` DEL PLAN QUE EL CONTRATO YA TIENE.** `detectar()` consulta `where (N<=usuarios) and (habilitado='1') order by usuarios limit 1` **sin mirar `planes`.`tipo`**, y con el catálogo de hoy eso reparte planes de otra familia: los **ocho** planes Developer habilitados tienen `usuarios = 10`, igual que el Standard Free. Para un dominio de 10 usuarios o menos el `limit 1` empata nueve filas y el ganador lo decide el motor — un dominio Standard puede terminar facturando *Plan Developer de 50001 a 100000 peticiones*. Con `tipo = 'S'` los cupos son 10, 20, 30, 40, 50, 100, 150 y 200: todos distintos, así que el mínimo es uno solo.
+- **UN EMPATE EN EL CUPO MÍNIMO NO SE DESEMPATA: SE SALTEA.** El ancla por `tipo` alcanza para Standard, pero no es una propiedad del esquema —nada impide cargar mañana dos planes Standard con el mismo cupo— y para Developer el empate **es el estado actual**. Elegir por `id` o por `orden` sería inventar un criterio comercial dentro de un job. Consecuencia buscada: **un contrato Developer en modo dinámico no se mueve y lo dice**, que es correcto porque Developer se tarifa por `usos`.
+- **LOS USUARIOS SE CUENTAN, NO SE LEEN DE `dominios`.`usuarios`.** `detectar()` recibe esa columna *cache*, que este repo ya declaró no confiable: `api/dominios.php`, `panel/api/dominio.php` y `panel/api/dashboard.php` calculan los cinco contadores en vez de leerlos, porque el cache está desfasado en **23 de los 148** dominios (el alta suma y la baja no resta). Tarifar sobre esa columna ataría el abono a que siga corriendo `dominiosActualizar.php` del legacy —el andamio que este repo está desarmando—, y cuando un robot del legacy se muere lo hace en silencio: `articulosActualizar.php` dejó la cotización clavada veinticinco días y nadie se enteró. **Se usa `COUNT(DISTINCT p.usuario)`, la misma expresión que la pantalla**: no es lo mismo que el `COUNT(id)` del cache, porque una persona puede tener más de un perfil en el mismo dominio (hoy hay 8 pares repetidos; el dominio 2 declara 18 y tiene 13 personas). Si el job tarifara por perfiles mientras la pantalla muestra personas, **la misma palabra diría dos números y el abono saldría del que nadie ve**.
+- **EL PLAN DESTINO TIENE QUE PODER FACTURARSE.** Un plan sin `articulo` bloquea el facturar del contrato (*"El plan no tiene articulo: no hay precio que facturar"*). Hoy los 22 planes habilitados tienen artículo, así que esta guarda no desvía ninguno: existe para que un plan a medio cargar no deje un contrato sin poder emitir.
+
+**PENDIENTE DE INFRAESTRUCTURA, y no lo resuelve este job: hay que comentar la línea del robot viejo.** `reactor-api/robot/contratosActualizar.php` está **sin comentar** en el crontab del legacy (`reactor-api/cron/jobs`, 05:45), un renglón después de `dominiosActualizar` — que está demostrablemente vivo: los 53 dominios habilitados tienen los cuatro contadores frescos mientras 17 de los 95 deshabilitados están desfasados, que es exactamente el `WHERE habilitado = 1` de ese robot. **Mientras los dos corran, el viejo manda sobre los contratos `fijo`**: reasigna el plan de *todos* los habilitados porque `plan_modo` es de este repo y el legacy no la conoce. El job de las 08:00 corre después y arregla los `dinamico`, pero un contrato que alguien puso en `fijo` seguiría moviéndose a las 05:45. **`fijo` no significa nada hasta que esa línea se comente.**
+
+**Reglas propias:**
+- **UN PLAN CON CUPO `-1` (ILIMITADO) NUNCA ES CANDIDATO, por más que la semántica de la columna diga lo contrario.** `p.usuarios >= N` lo deja afuera, igual que el `N <= usuarios` de `detectar()`. Admitirlo sería peor: `-1` es el mínimo de `ORDER BY usuarios`, así que un plan ilimitado **ganaría siempre**, sobre cualquier cupo acotado y para cualquier dominio. Los seis planes Telemetry habilitados tienen `usuarios = -1` y es correcto que ninguno salga de ahí: Telemetry se tarifa por `usos`. Un `usuarios` en `NULL` queda afuera por la misma comparación.
+- **EL PLAN ACTUAL TIENE QUE ESTAR HABILITADO**, y es la condición que pone el límite del job. Los 11 planes deshabilitados son los viejos (Edificio / Ciudad / Casa Inteligente, Anónimo, Reactor Ilimitado) y tienen contratos colgados **a propósito**: el plan se retiró de la venta y esos contratos se quedaron con su precio. Meterlos en la escalera Standard les cambiaría el abono por una decisión que nadie tomó. Los once tienen además `tipo` vacío, así que no habría familia a la que acotar los candidatos.
+- **TODO EN UNA SOLA TRANSACCIÓN, con los contratos bloqueados** (`SELECT … FOR UPDATE`). El lock es lo que serializa esto contra `accion=facturar`, que abre con `FOR UPDATE` sobre el contrato y después arma los renglones leyendo el plan: sin él, una facturación que arrancó con el plan viejo podría emitir el comprobante con el abono viejo **después** de que la corrida lo cambió, y el renglón ya quedó escrito.
+- **El `SELECT … FOR UPDATE` va sin joins.** En MySQL un `FOR UPDATE` sobre un `LEFT JOIN` bloquea también las filas de `planes` y `articulos`, que este job sólo lee. El contexto se trae después, sin lock. `plan_modo` y `habilitado` no tienen índice, así que el lock abarca el scan de las 50 filas; a esta escala y a las 08:00 no es un problema.
+- **No filtra por `dominios`.`habilitado`.** Lo que se factura es el contrato, y hay contratos habilitados con el dominio apagado (el 156). El flag del dominio nunca gateó nada acá — el legacy tampoco lo miraba.
+- **Lo que no cambia no se escribe**, igual que §33-quinquies: así el `.log` habla sólo de los planes que de verdad se movieron y una segunda corrida del mismo día es un no-op verificable.
+- **El `.log` informa el abono antes y después, contrato por contrato, y la suma al pie.** Es plata: la línea `Abono mensual: $ X -> $ Y (+$ Z)` es el número por el que alguien va a venir a preguntar. **Sólo se suman los contratos con los dos abonos cargados**: con un `NULL` de un lado el delta no es cero, es desconocido, y sumarlo como cero daría un total que parece exacto y no lo es.
+- **El `.log` anota los dos conteos que NO deciden nada** cuando difieren del que sí: `dominios.usuarios` (el cache del legacy — es donde se ve si ese robot todavía respira) y el conteo de usuarios habilitados (la pregunta que sigue a *"cuántos usuarios tiene este dominio"*). Ninguno de los dos entra en la cuenta del cupo.
+- **Retención de 30 días** y no los 7 del default, por el mismo motivo que §33-quinquies: `contratos` **no guarda historial de planes**, así que ese `.log` es el único lugar donde queda escrito que un contrato pasó del plan X al plan Y, con cuántos usuarios y con qué cambio de abono.
+- **Deja rastro en el Visor de sucesos también cuando sale bien** (`cron/contratos_plan_recalcular`), con los tres contadores y el delta de abono. Sube a `alerta` —sin cortar: lo que se escribió se escribió bien— cuando salteó algún contrato, porque cada salteo es un contrato que **no** quedó en el plan que le corresponde.
+
+## 33-septies. Job: recálculo de situación de contratos (mora)
+
+`cloud/jobs/contratos_situacion_recalcular.php`, que corre **todos los días a las 04:00** por el Programador de tareas (§33). Recorre `contratos` con `habilitado = 1`, cuenta sus facturas/prefacturas **pendientes**, toma el **vencimiento de la más antigua** y de los días de atraso sale `contratos`.`situacion`. La columna la crea la migración `20261001_1000_contratos_situacion.sql` y la tarea se da de alta con `20261001_1100_tarea_contratos_situacion_recalcular.sql`.
+
+| atraso de la pendiente más antigua | `situacion` |
+|---|---|
+| sin pendientes, o todavía sin vencer, o menos de 15 días | `'1'` Normal |
+| 15 a 29 días | `'2'` Limitado |
+| 30 días o más | `'3'` Suspendido |
+
+**ESCRIBE DOS COLUMNAS, Y LAS DOS EN LA MISMA TRANSACCIÓN**: `contratos`.`situacion` (una por contrato habilitado) y **`dominios`.`situacion`, que es la que corta el servicio** — `app/index.php` no dibuja ningún control de operación con `'3'`, y con `'2'` agrega el aviso *"su cuenta pronto será suspendida"* dejando los controles. La de `contratos` no la lee nadie: es el detalle por contrato y el rastro de por qué el dominio quedó como quedó. No factura, no anula, no cancela: no toca una sola columna de `comprobantes` —el ciclo de facturación es de `api/contratos_accion.php` y de nadie más—.
+
+**HASTA EL 01/10/2026 NO TOCABA `dominios` A PROPÓSITO, y la decisión se revirtió por pedido explícito.** El argumento de entonces —suspender clientes es una decisión de negocio, no de un recálculo— sigue siendo la razón de las guardas: el `.log` nombra uno por uno los dominios que se quedan sin servicio **y con qué valor venían** (revertir a mano es leer ese renglón), el suceso sube a `alerta` cuando pasa, y la escritura es condicional. Pero escribir una sola columna dejaba el contrato en Suspendido y el dominio operando: dos afirmaciones distintas sobre el mismo cliente, y una pantalla donde la `Situación` del listado no se movía nunca.
+
+**NO ENTRA EN LA CADENA DE LAS 06:00 / 07:00 / 08:00, y las 04:00 son por eso.** Las otras tres tareas diarias son una cadena cuyo orden es parte del diseño (cotización → precios → planes, §33-quater a §33-sexies) porque cada una lee lo que la anterior escribió. Ésta no se engancha ni arriba ni abajo: lee `comprobantes`.`estado` y `.vencimiento`, dos columnas que ninguna de las tres escribe, y escribe una que ninguna de las tres lee. Corriendo a las 04:00 o a las 09:00 el resultado es idéntico, así que se elige la hora más vacía del día. **Lo que sí importa es que sea diaria**: la situación envejece sola —un comprobante cruza el día 15 o el 30 sin que nadie toque la base— así que no hay evento del sistema al que colgarla. Emitir un comprobante nuevo no vence nada.
+
+**LA PRIMERA CORRIDA ESCRIBE LAS 26 FILAS, y no le corta el servicio a nadie.** A diferencia de §33-sexies —que el primer día sale `ok` con 0 contratos evaluados porque las 50 filas están en `plan_modo = 'fijo'`— acá la columna nace en `NULL` ("todavía no se calculó") y pasar de `NULL` a un código es un cambio real. Verificado en desarrollo al 01/10/2026: **18 Normal · 0 Limitado · 8 Suspendido**, con los ocho vencidos hace 146, 146, 146, 146, 162, 207, 235 y 417 días. La banda de Limitado **sale vacía**: hoy no hay ningún contrato con un atraso de entre 15 y 29 días.
+
+- **SI UN DOMINIO TIENE VARIOS CONTRATOS HABILITADOS, GANA LA PEOR SITUACIÓN** (`peorSituacion()`). Hoy ninguno tiene dos, pero nada del esquema lo impide: con un contrato impago el cliente **no** está al día por más que el otro sí, y quedarse con la mejor dejaría operando a quien debe plata con sólo abrirle un contrato nuevo al lado.
+- **NO ES UN TRINQUETE: si la deuda se paga, el dominio vuelve solo.** El job recalcula desde cero todos los días, así que un dominio en `'3'` pasa a `'1'` en la corrida siguiente a que se cancelen sus pendientes — verificado en los dos sentidos. Nadie tiene que destrabarlo a mano.
+- **Sólo toca dominios con al menos un contrato habilitado** (en desarrollo, 26 de 148). Un dominio sin contrato vivo no tiene mora que mirar y pisarle la `situacion` sería opinar sobre un cliente del que este job no sabe nada: su valor queda como esté, puesto a mano o por el back office viejo.
+- **El orden de los locks es `contratos` y después `dominios`, siempre por `id` ascendente.** Dos corridas encimadas —que el `overlap = skip` de la tarea ya evita— tomarían los locks en el mismo orden y se esperarían en vez de abrazarse.
+- **Es la columna gemela de `dominios`.`situacion` y por eso tiene su misma forma**: `varchar(1)` nullable, los mismos tres códigos y el mismo catálogo de textos (`combos` con la clave `'$xDominio->situacion'`, 1 Normal / 2 Limitado / 3 Suspendido). **No hay `'$xContrato->situacion'` en `combos`**: el sistema histórico no tiene esta noción a nivel contrato, así que la columna es nueva de verdad y no el rescate de algo que el legacy ya escribía.
+- **NACE EN `NULL` Y NO EN `'1'`.** Sembrar `'1'` sería que un `ALTER` **afirme** que los 50 contratos están al día, y es falso: ocho de los 26 habilitados están vencidos hace 146 días o más. `NULL` significa "todavía no se calculó", igual que el `NULL` de `perfiles.registrante` significa "no se sabe".
+- **QUÉ CUENTA COMO DEUDA: `comprobantes.estado = '2'` (Pendiente) y `talonarios.tipo IN ('F','T')`** (Prefactura y Factura). Preparación queda afuera a propósito —ese comprobante no se autorizó, tiene `serie = 0`, o sea que no tiene número y nadie puede reclamarlo—; Anulado y Cancelado tampoco, que uno no existe y el otro ya se cobró. El filtro por tipo no es cosmético: de los 209 comprobantes pendientes de la base, **72 son Presupuestos y 16 Remitos**, documentos que no se cobran.
+- **EL CASO INCÓMODO ES RECIBO (`R`), Y QUEDA AFUERA A SABIENDAS.** §33-quater.1 dice que facturar un contrato sella cotización *"para cualquier tipo"* porque **"hay clientes cuyo talonario de facturación es de Recibo"**, y lo respaldan 959 Recibos con `contrato` ya cancelados: para esos clientes el documento de la deuda **es** un Recibo y este job no lo está mirando. Está verificado que hoy no cambia ni un resultado —el único Recibo pendiente con contrato es el 5652 del contrato 143, que ya cae en `'3'` por sus prefacturas (162 días) antes de mirarlo; con el Recibo serían 1.262—. Si algún día se decide contarlos, el cambio es agregar `'R'` a la constante `TIPOS_DEUDA`: por eso es una constante y no una lista escrita adentro del SQL.
+- **LOS BORDES DE LAS BANDAS: CADA UNA SE QUEDA CON SU LÍMITE INFERIOR.** El enunciado da las bandas solapadas ("0 a 15", "15 a 30", "30 o más"), así que los días 15 y 30 están en dos a la vez y hay que elegir. Se resuelve por el único borde que el enunciado sí define solo —*"30 días o más"* es Suspendido, o sea que el 30 es de la banda de arriba— y por simetría el 15 también: **día 14 → `'1'`, día 15 → `'2'`, día 29 → `'2'`, día 30 → `'3'`** (los cuatro verificados contra la base). Son dos `>=` en orden descendente y no un `switch` de rangos, así no hay forma de escribir un hueco entre dos bandas.
+- **UN VENCIMIENTO FUTURO DA ATRASO NEGATIVO Y ESO ES NORMAL, no un error**: el comprobante está emitido y pendiente pero todavía no venció (hoy, el contrato 154, que vence seis días adelante).
+- **EL ATRASO LO CUENTA LA BASE** (`DATEDIFF(CURDATE(), MIN(vencimiento))`), nunca el reloj de PHP, sobre la conexión que fija `SET time_zone = '-03:00'`. El contenedor corre en UTC y a las 04:00 de Argentina allá son las 07:00 del mismo día; el criterio es el de siempre porque son dos relojes que pueden separarse y de acá sale si un cliente queda suspendido.
+- **LO QUE NO SE PUEDE FECHAR NO ENTRA EN EL `MIN()`, y se avisa.** Dos valores se excluyen en el `WHERE` y no después: el `NULL` —que `MIN()` ya ignora, pero entonces un contrato con todos sus pendientes sin fecha parecería no tener deuda— y **el centinela `'1500-01-01'`** (`cTiempo::genesis()`), que es el que de verdad muerde: sin excluirlo `MIN()` se queda con él y `DATEDIFF` da ~190.000 días, o sea **Suspendido para cualquier contrato que tenga uno**. Hoy no hay ninguno entre los pendientes F/T (verificado, 0 filas), así que la guarda no desvía nada: existe para el día que alguien guarde un comprobante sin vencimiento. El aviso lo dice con todas las letras — *"el contrato queda Normal por falta de fecha, no por falta de deuda"*.
+- **NO LEE `contratos`.`tolerancia`**, la fecha de gracia que se carga a mano en el ABM y la única columna del contrato que podría pisar este cálculo. Queda afuera porque el enunciado no la menciona y porque **nada en este repo la lee todavía**: engancharla sería inventar una regla de perdón que nadie pidió, y perdonar mora es plata. Los 26 contratos habilitados tienen una cargada (14 con el centinela `'1500-01-01'`), así que si algún día entra al cálculo hay que decidir primero qué significa ese centinela.
+- **NO filtra por `dominios`.`habilitado`**, igual que §33-sexies: lo que se factura es el contrato, y hay contratos habilitados con el dominio apagado (el 156).
+- **NO toca los contratos deshabilitados** (24 de las 50 filas). Un contrato dado de baja no tiene mora que administrar, y su `situacion` se queda con el último valor que tuvo —o en `NULL` si nunca se calculó—, que es el dato histórico y no una afirmación sobre hoy.
+- **TODO EN UNA SOLA TRANSACCIÓN, con los contratos bloqueados** (`SELECT … FOR UPDATE`, sin joins para no bloquear las tablas que sólo se leen). Serializa contra `accion=facturar`, que abre con `FOR UPDATE` sobre el contrato. `habilitado` no tiene índice, así que el lock abarca el scan de las 50 filas; a esta escala y a las 04:00 no es un problema. La consulta de deuda por contrato cae sobre el índice `fk_comprobantes_contrato`.
+- **Lo que no cambia no se escribe**, igual que §33-quinquies y §33-sexies: el `.log` habla sólo de las situaciones que de verdad se movieron y una segunda corrida del mismo día es un no-op verificable (*0 situaciones cambiadas | 26 sin cambios*). **El `NULL` inicial sí cuenta como cambio**: pasar de "no se sabe" a `'1'` es escribir un dato que antes no estaba.
+- **El `.log` lista al pie los que entran a Suspendido, uno por uno**, con el atraso y de dónde venían. Es el movimiento por el que alguien va a venir a preguntar: son los contratos que dejaron de estar al día, no una estadística. Y explica por qué un contrato con comprobantes pendientes sale Normal — anota aparte los pendientes de los otros cinco tipos de talonario, que no son deuda.
+- **Retención de 30 días** y no los 7 del default, por el mismo motivo que las otras dos tareas que escriben plata: `contratos` **no guarda historial de situaciones**, así que ese `.log` es el único lugar donde queda escrito que un contrato pasó a Suspendido, con cuántos días de atraso y sobre qué comprobante.
+- **Deja rastro en el Visor de sucesos también cuando sale bien** (`cron/contratos_situacion_recalcular`), con los contadores y el reparto. Sube a `alerta` —sin cortar: lo que se escribió se escribió bien— cuando algún pendiente no se pudo fechar, porque eso es deuda que el cálculo no vio.
+
+**PENDIENTE, y no lo resuelve este job: la columna todavía no se ve ni se usa.** `api/contratos.php` enumera sus columnas una por una en el `SELECT`, el `INSERT` y el `UPDATE`, así que `situacion` **no se filtra sola** al JSON del ABM: no sale en el listado, ni en la ficha, ni en los filtros. Es la misma situación en la que estuvo `plan_modo` entre su migración y su tarea. Mostrarla es una decisión de UI aparte —y si se muestra, va **traducida** con el badge de `'$xDominio->situacion'` que ya usan Dominios en cloud y el panel (ABM.md), nunca el número pelado.
 
 ## 34. Selector de ids (Roles y Controladores)
 
@@ -3080,13 +3246,14 @@ Casi todo sale de piezas ya documentadas — `moduleHeader()` (§23), `abmToolba
   Verificado contra la base: las 106 filas cumplen la segunda al centavo. Por eso `Precio de venta` va **siempre** `readonly` y `Precio de compra` lo va **cuando la moneda es Dólar** — dejarlo editable ahí prometería un valor que el guardado descarta. Los dos llevan vista previa en vivo y una `.form-nota` que dice de qué se arman, porque un campo que no se puede editar y no dice por qué se lee como un error (§8, y el mismo trato que `talonarios`.`nombre`).
 - **LA CUENTA LA HACE EL BACKEND; EL FRONT SÓLO LA MUESTRA.** Vive en `api/articulos_lib.php` y la aplican por igual el `PUT` del ABM y la acción de recalcular. El JS del modal reproduce la fórmula **para la vista previa** y nada más: lo que se guarda no sale de ahí.
 - **LOS PRECIOS SE RECALCULAN EN CADA GUARDADO, y eso sorprende: hay que decirlo.** Es lo que hace el back office viejo (`editar.php` llama a `recalcular()` antes de `agregar()` y de `modificar()`) y es la lectura correcta de la columna — `compra` en pesos **es** `importacion` por la cotización. La consecuencia es que corregirle el nombre a un artículo en dólares le actualiza el precio; la nota del formulario lo anuncia **antes** de guardar, que es la única diferencia con el legacy.
-- **LA COTIZACIÓN NO ES UNA COLUMNA: vive en `parametros`.`articulos.dolar.cotizacion`** y la mueve una tarea del sistema histórico (`reactor-api/robot/articulosActualizar.php`). Por eso cada fila arrastra la cotización del día en que se la tocó: al 30/09/2026 conviven cinco (1370, 1375, 1380, 1415, 1450) y **70 de las 106 filas están con una anterior a la vigente**. Eso **no es un error de datos**, es el estado normal entre dos corridas — y por eso el módulo lo cuenta en la stat card `Precio viejo`, lo marca en la fila con `.precio-viejo-icon`, lo filtra desde el modal (`Precio`) y ofrece `Recalcular precios` como acción con nombre.
+- **LA COTIZACIÓN NO ES UNA COLUMNA: vive en `parametros`.`articulos.dolar.cotizacion`** y la mueve el job de las 06:00 (§33-quater). Cada fila arrastra la cotización del día en que se la tocó, así que `Precio viejo` es una pregunta legítima: el módulo lo cuenta en la stat card, lo marca en la fila con `.precio-viejo-icon`, lo filtra desde el modal (`Precio`) y ofrece `Recalcular precios` como acción con nombre.
+  - **Desde el 30/09/2026 el piso lo pone un job diario** (`articulos_recalcular.php`, 07:00, §33-quinquies), así que lo normal es que la stat card esté en **0** y que lo que marque sean las filas tocadas **después** de esa corrida. Antes de ese job el desfasaje era el estado de fondo de la tabla: convivían cinco cotizaciones implícitas (1370, 1375, 1380, 1415, 1450) y **70 de las 79 filas en dólares** estaban por debajo de la vigente. La stat card pasó de medir deuda acumulada a medir el día.
 - **La cotización vigente se muestra bajo las KPIs, con su fecha y con de dónde sale.** Un precio derivado de un parámetro que la pantalla no muestra no se puede verificar contra nada.
 - **`Recalcular precios` es una ACCIÓN DE NEGOCIO, no un `PUT`.** Vive en `api/articulos_accion.php?accion=recalcular`, `GET` previsualiza y `POST` ejecuta, y los dos resuelven la misma función (§15.2, ABM.md). Es el `Actualizar` del menú `Acciones` del back office viejo. Va **primera dentro del bloque de extras** del menú de fila, antes de las navegaciones y las copias (ABM.md §1.3).
   - **La confirmación muestra los cuatro números** —compra y venta, antes y después, con el delta— y **los planes que facturan ese artículo con sus contratos** en el recuadro ámbar de avisos: tocar el precio les cambia el abono a todos. Es plata, va dicho antes de confirmar.
   - **El `POST` rehace la cuenta dentro de la transacción y con la fila bloqueada** (`SELECT … FOR UPDATE`): entre la previsualización y el click alguien pudo editar el artículo o mover la cotización. La `.form-nota` al pie lo dice.
   - **Sin cotización cargada hay bloqueo, no un recálculo a cero**: el botón de confirmar no se dibuja y el endpoint corta igual con 409. Esconder el botón no es el control (`CLAUDE.md`).
-  - **No hay "recalcular todos".** El robot del legacy sigue siendo el que lo hace en masa; un botón que reescriba el precio de los 106 artículos desde un menú de fila no es la misma decisión.
+  - **No hay "recalcular todos" EN LA PANTALLA, y sigue sin haberlo.** Un botón que reescriba el precio de los 106 artículos desde un menú de fila no es la misma decisión que repreciar uno. Lo masivo lo hace el job de las 07:00 (§33-quinquies), que para eso tiene guardas que esta acción no necesita —no manda a `$ 0,00` una fila que tenía precio, saltea lo que se pasa de la columna— porque ahí no hay nadie mirando la confirmación. Esta acción es para repreciar **ya**, sin esperar a mañana.
 - **VISIBILIDAD NO ES `habilitado`: son dos preguntas y van dos badges.** `habilitado` dice si el artículo se puede usar (95 de 106) y `visibilidad` si además se publica en la tienda (38). Un artículo público y deshabilitado es posible y no es una inconsistencia. `visibilidad` es `varchar(10)` con los códigos `'0'`/`'1'` de `combos`, así que **no** se toca con `esHabilitado()` / `valorHabilitado()` — se compara como string, la misma excepción que `aprobacion` en Técnicos (§38).
 - **Marca y categoría van de glosa bajo el nombre, no en columnas propias.** Son cómo se identifica el artículo, no datos que se comparen entre filas. La categoría sí es columna del Modal de Filtros, y en los desplegables se muestra con su **jerarquía** (`Monitores de Corriente · 001.003`), que es lo que dice de qué cuelga.
 - **La columna `USD` sólo trae número cuando la moneda es Dólar.** En pesos la importación no participa de ninguna cuenta: mostrar un `0,00` la haría leer como un precio.

@@ -28,11 +28,18 @@ require_once __DIR__ . '/articulos_lib.php';
  * el modal ni siquiera ofrece el boton. Esconder el boton no es el control
  * (CLAUDE.md).
  *
- * POR QUE NO HAY UN "RECALCULAR TODO". El robot del sistema historico
- * (`reactor-api/robot/articulosActualizar.php`) recorre la tabla entera y sigue
- * siendo el que lo hace en masa. Esta accion es la de UNA fila, que es la que
- * ofrece la pantalla de la que se porto: un boton que reescriba el precio de
- * los 106 articulos desde un menu de fila no es la misma decision.
+ * POR QUE NO HAY UN "RECALCULAR TODO" EN LA PANTALLA. Lo masivo lo hace la
+ * tarea `cloud/jobs/articulos_recalcular.php` todos los dias a las 07:00, con
+ * ESTA misma cuenta (`articuloPrecios()`). Esta accion es la de UNA fila, que es
+ * la que ofrece la pantalla de la que se porto: un boton que reescriba el precio
+ * de los 106 articulos desde un menu de fila no es la misma decision. Sirve para
+ * repreciar YA —recien cargada una fila, o movida la cotizacion a mano— sin
+ * esperar a la corrida de mañana.
+ *
+ * Y POR ESO EL JOB TIENE GUARDAS QUE ACA NO HACEN FALTA: no manda a $ 0,00 una
+ * fila que tenia precio y saltea la que se pasa de `decimal(10,2)`. Acá las dos
+ * cosas se las muestra la previsualizacion a quien confirma; allá no hay nadie
+ * mirando.
  */
 
 $accion = isset($_GET['accion']) ? trim((string) $_GET['accion']) : '';

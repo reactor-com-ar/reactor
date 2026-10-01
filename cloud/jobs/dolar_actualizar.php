@@ -23,14 +23,18 @@ declare(strict_types=1);
  * valoriza articulos IMPORTADOS (`compra = importacion * cotizacion`), o sea el
  * precio al que se COMPRAN dolares, que es la punta `venta` del mercado.
  *
- * ESTE JOB NO RECALCULA LOS ARTICULOS, y el robot del legacy si lo hacia.
- * La separacion es deliberada: en cloud recalcular es una accion con nombre
- * (`api/articulos_accion.php?accion=recalcular`, DESIGN.md §15.2) que muestra
- * los cuatro numeros y los planes afectados antes de confirmar, porque mueve el
- * abono de contratos vivos. Mover la cotizacion es informacion; repreciar la
- * tabla entera a las 6 de la mañana y sin que nadie lo mire es plata.
- * Que las filas en dolares queden con cotizaciones implicitas distintas entre
- * si es el estado normal de la tabla entre dos recalculos (`articulos_lib.php`).
+ * ESTE JOB NO RECALCULA LOS ARTICULOS: lo hace `articulos_recalcular.php` una
+ * hora despues, a las 07:00. La separacion es deliberada y sobrevivio al cambio
+ * de decision del 30/09/2026 (hasta esa fecha no habia recalculo en masa; ver
+ * el encabezado de ese archivo). El motivo de que sean dos tareas y no una: si
+ * Databox se cae, la cotizacion no se mueve, ESTA tarea queda en `error` y el
+ * recalculo corre igual una hora mas tarde y sale `ok` con 0 filas tocadas —no
+ * hay nada que mover—. Fusionadas, un fallo de red del microservicio dejaria
+ * sin correr el recalculo, que no depende de la red.
+ *
+ * El orden tambien importa: invertido, el recalculo de cada dia aplicaria la
+ * cotizacion del dia anterior y el numero nuevo recien llegaria a los precios
+ * 24 horas mas tarde.
  */
 
 require_once __DIR__ . '/_bootstrap.php';

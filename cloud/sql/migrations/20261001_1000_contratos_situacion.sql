@@ -1,0 +1,74 @@
+-- `contratos`.`situacion`: en que situacion esta el contrato por su mora.
+--
+--   1  Normal
+--   2  Limitado
+--   3  Suspendido
+--
+-- La escribe UNA tarea y nadie mas:
+-- `cloud/jobs/contratos_situacion_recalcular.php`, todos los dias a las 04:00
+-- (migracion `20261001_1100`). Se calcula desde el vencimiento de la
+-- factura/prefactura PENDIENTE mas antigua del contrato.
+--
+-- ------------------------------------------------------------------------
+-- ES LA COLUMNA GEMELA DE `dominios`.`situacion`, Y POR ESO TIENE SU MISMA FORMA
+-- ------------------------------------------------------------------------
+--
+-- `dominios`.`situacion` ya existe, es `varchar(1)` nullable y guarda EXACTAMENTE
+-- esos tres codigos: los textos salen de `combos` con la clave
+-- `'$xDominio->situacion'` (1 Normal / 2 Limitado / 3 Suspendido), que es lo que
+-- traducen `api/dominios.php` y `panel/api/dominio.php`. Esta columna se declara
+-- igual —mismo tipo, mismo collate, mismo largo, nullable— porque significa lo
+-- mismo y la va a traducir el mismo catalogo. Un `ENUM` seria mas estricto pero
+-- partiria en dos el tipo de un valor que las dos puntas comparan contra los
+-- mismos tres caracteres, y obligaria a un segundo criterio de orden
+-- (`ORDER BY` sobre un ENUM ordena por el indice interno y sobre un varchar por
+-- el texto: para '1','2','3' coinciden, pero deja de coincidir con el valor que
+-- alguien agregue manana).
+--
+-- NO HAY `'$xContrato->situacion'` EN `combos`: el sistema historico no tiene
+-- esta nocion a nivel contrato. O sea que la columna es nueva de verdad y no el
+-- rescate de algo que el legacy ya escribia.
+--
+-- ------------------------------------------------------------------------
+-- NACE EN `NULL`, Y NO EN `'1'`
+-- ------------------------------------------------------------------------
+--
+-- `NULL` significa "todavia no se calculo", igual que el `NULL` de
+-- `perfiles`.`registrante` significa "no se sabe" (CLAUDE.md). Sembrar `'1'`
+-- seria que un ALTER AFIRME que los 50 contratos estan al dia, y es falso: de
+-- los 26 habilitados, OCHO tienen una prefactura pendiente vencida hace 146 dias
+-- o mas (una hace 417). La primera corrida de la tarea es la que pone el valor
+-- real; hasta entonces la columna dice que no sabe, que es la verdad.
+--
+-- Por eso tampoco es `NOT NULL`: aca el `NULL` es un valor con significado y no
+-- el hueco que el resto del esquema evita.
+--
+-- ------------------------------------------------------------------------
+-- NO CAMBIA EL COMPORTAMIENTO DE NADA EL DIA QUE SE APLICA
+-- ------------------------------------------------------------------------
+--
+-- Ningun camino del sistema lee esta columna todavia: ni `api/contratos.php`
+-- (que enumera sus columnas una por una en el SELECT, el INSERT y el UPDATE, asi
+-- que no se filtra sola al JSON del ABM), ni el panel, ni la app. Es la misma
+-- situacion en la que estuvo `plan_modo` entre su migracion y su tarea.
+--
+-- OJO CON LA PUNTA QUE SI GATEA SERVICIO: `app/index.php` corta el servicio con
+-- `dominios`.`situacion === '3'` y dibuja el aviso de limitado con `'2'`. ESA
+-- columna es otra y esta tarea NO la toca. Los numeros dicen por que importa: la
+-- regla de mora pondria 8 contratos habilitados en `'3'`, mientras hoy hay 4
+-- dominios habilitados en `'3'` — o sea que copiar una columna en la otra
+-- suspenderia clientes que nadie decidio suspender.
+--
+-- IDEMPOTENTE con el patron `SET @s / PREPARE` del resto de las migraciones de
+-- este repo: `ADD COLUMN IF NOT EXISTS` no existe en MySQL 8 (dev) aunque si en
+-- MariaDB 10.11 (prod), asi que se pregunta a information_schema.
+--
+-- Sin `USE <base>`: la conexion PDO ya selecciona la del entorno (CLAUDE.md).
+
+
+-- Va pegada a `habilitado`, que es donde esta en `dominios`: las dos columnas
+-- que dicen "en que estado esta esto" quedan juntas en las dos tablas.
+SET @s = (SELECT IF(EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contratos' AND COLUMN_NAME = 'situacion'),
+    'DO 0',
+    'ALTER TABLE `contratos` ADD COLUMN `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT ''mora del contrato: 1 Normal, 2 Limitado, 3 Suspendido. NULL = todavia no se calculo'' AFTER `remitido`'));
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;

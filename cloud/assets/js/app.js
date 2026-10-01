@@ -3707,7 +3707,7 @@
     function contratosDefaults() {
         return {
             codigo: '', texto: '', cliente: '', dominio: '', plan: '', planModo: '', tipo: '',
-            estado: '', remitir: '', facturarDesde: '', facturarHasta: '',
+            estado: '', situacion: '', remitir: '', facturarDesde: '', facturarHasta: '',
             orden: 'id', dir: 'desc', limit: 100,
         };
     }
@@ -3734,11 +3734,21 @@
 
             root.innerHTML = `
                 ${moduleHeader('Contratos', 'El acuerdo comercial de cada dominio: cliente, plan y las fechas del ciclo de facturación.')}
-                ${/* LAS CINCO TARJETAS SON LOS FILTROS RÁPIDOS, no un adorno:
-                     son exactamente las cinco entradas del menú `Listar` del
-                     back office viejo (Todos / Habilitados / Deshabilitados /
-                     Facturables / Remisibles) y el número que muestran ya es el
-                     de cada una. Tocarlas deja el listado en eso. Ver §12. */''}
+                ${/* LAS CINCO TARJETAS SON LOS FILTROS RÁPIDOS, no un adorno: el
+                     número que muestran es el de las filas que deja el listado
+                     al tocarlas, y el estado que arman sale de
+                     ATAJOS_CONTRATOS. Ver §12.
+
+                     Las tres últimas son el DESGLOSE POR SITUACIÓN —la del
+                     dominio del contrato— y se cuentan SÓLO SOBRE LOS
+                     HABILITADOS: suman la tarjeta de al lado, no `total`. Un
+                     contrato dado de baja no tiene situación que atender. Por
+                     eso sus atajos llevan `estado: '1'`, que es lo que mantiene
+                     cierto que la tarjeta anuncia las filas que deja el
+                     listado. Reemplazaron a Deshabilitados / Facturables /
+                     Remisibles, que NO se perdieron: siguen en el menú
+                     `Listar`, que desde entonces es el superconjunto (las ocho
+                     entradas) en vez del espejo exacto de las tarjetas. */''}
                 <div class="stats-bar">
                     <div class="stat-card dash-link" data-atajo="total" role="button" tabindex="0"
                          title="Ver todos los contratos">
@@ -3750,20 +3760,24 @@
                         <span class="stat-label">Habilitados</span>
                         <span class="stat-value green">${r.habilitados}</span>
                     </div>
-                    <div class="stat-card dash-link" data-atajo="deshabilitados" role="button" tabindex="0"
-                         title="Ver sólo los deshabilitados">
-                        <span class="stat-label">Deshabilitados</span>
-                        <span class="stat-value muted">${r.deshabilitados}</span>
+                    ${/* Los tres tonos son los del badge de la columna
+                         `Situación` (§10): verde / ámbar / rojo. Si la tarjeta
+                         y la celda pintaran distinto el mismo estado, habría
+                         que aprender dos códigos de color para un solo dato. */''}
+                    <div class="stat-card dash-link" data-atajo="normal" role="button" tabindex="0"
+                         title="Habilitados cuyo dominio está en situación Normal">
+                        <span class="stat-label">Situación Normal</span>
+                        <span class="stat-value green">${r.situacion?.['1'] ?? 0}</span>
                     </div>
-                    <div class="stat-card dash-link" data-atajo="facturables" role="button" tabindex="0"
-                         title="Habilitados con la fecha de facturar ya cumplida">
-                        <span class="stat-label">Facturables</span>
-                        <span class="stat-value orange">${r.facturables}</span>
+                    <div class="stat-card dash-link" data-atajo="limitado" role="button" tabindex="0"
+                         title="Habilitados cuyo dominio está en situación Limitado">
+                        <span class="stat-label">Situación Limitado</span>
+                        <span class="stat-value warn">${r.situacion?.['2'] ?? 0}</span>
                     </div>
-                    <div class="stat-card dash-link" data-atajo="remisibles" role="button" tabindex="0"
-                         title="Habilitados con el estado de cuenta pendiente de envío">
-                        <span class="stat-label">Remisibles</span>
-                        <span class="stat-value">${r.remisibles}</span>
+                    <div class="stat-card dash-link" data-atajo="suspendido" role="button" tabindex="0"
+                         title="Habilitados cuyo dominio está en situación Suspendido">
+                        <span class="stat-label">Situación Suspendido</span>
+                        <span class="stat-value red">${r.situacion?.['3'] ?? 0}</span>
                     </div>
                 </div>
                 ${abmToolbar({
@@ -3851,6 +3865,11 @@
                 <td>${contratoTipoPlanCelda(c)}</td>
                 <td>${contratoFecha(c.facturado)}</td>
                 <td>${contratoFecha(c.facturar)}</td>
+                ${/* La situación es la del DOMINIO del contrato, no una columna
+                     de `contratos`: un contrato sin dominio no tiene ninguna. */''}
+                <td>${c.dominio
+                    ? badgeSituacion(c.dominio_situacion, c.dominio_situacion_texto)
+                    : '<span class="muted">—</span>'}</td>
                 <td>${contratoEstadoBadge(c.habilitado)}</td>
                 ${actionCells()}
             </tr>
@@ -3866,6 +3885,7 @@
                         <th>Tipo / Plan</th>
                         <th>Facturado</th>
                         <th>Facturar</th>
+                        <th>Situación</th>
                         <th>Habilitado</th>
                         ${actionHeaderCells()}
                     </tr>
@@ -3905,6 +3925,14 @@
         deshabilitados: ()    => ({ estado: '0' }),
         facturables:    (hoy) => ({ estado: '1', facturarHasta: hoy }),
         remisibles:     ()    => ({ estado: '1', remitir: '1' }),
+        // Los tres de situación LLEVAN `estado: '1'`, y no es opcional: el
+        // contador que anuncia la tarjeta cuenta sólo sobre los habilitados
+        // (ver `$resumen['situacion']` en `api/contratos.php`). Sacarlo de acá
+        // haría que la lista mostrara MÁS filas de las que dice la tarjeta que
+        // se acaba de tocar — los dos lados se cambian juntos o no se cambian.
+        normal:         ()    => ({ estado: '1', situacion: '1' }),
+        limitado:       ()    => ({ estado: '1', situacion: '2' }),
+        suspendido:     ()    => ({ estado: '1', situacion: '3' }),
     };
 
     /* Los mismos cinco atajos en el desplegable `Listar` de la toolbar, en el
@@ -3918,12 +3946,25 @@
 
        Las tarjetas siguen estando: son las que muestran CUÁNTOS hay. El menú
        resuelve el otro lado —elegir sin apuntarle a una tarjeta y sin abrir
-       Filtros para armarlo campo por campo— y por eso conviven. */
+       Filtros para armarlo campo por campo— y por eso conviven.
+
+       EL MENÚ ES EL SUPERCONJUNTO, NO EL ESPEJO. Hasta que las tarjetas pasaron
+       a mostrar el desglose por situación eran las mismas cinco entradas de los
+       dos lados. Ahora son ocho acá y cinco arriba: `Deshabilitados`,
+       `Facturables` y `Remisibles` salieron de las tarjetas y **siguen vivos
+       acá**, que es lo que impide que un cambio de tarjetas se lleve puesta una
+       forma de listar. Lo que no puede pasar es lo inverso —una tarjeta sin
+       entrada de menú— porque entonces habría un atajo que sólo existe mientras
+       la tarjeta esté a la vista. */
     const MENU_LISTAR_CONTRATOS = [
         { atajo: 'total',          label: 'Todos',          icon: 'fa-list' },
         { divider: true },
         { atajo: 'habilitados',    label: 'Habilitados',    icon: 'fa-check' },
         { atajo: 'deshabilitados', label: 'Deshabilitados', icon: 'fa-xmark' },
+        { divider: true },
+        { atajo: 'normal',         label: 'Situación Normal',     icon: 'fa-circle-check' },
+        { atajo: 'limitado',       label: 'Situación Limitado',   icon: 'fa-circle-exclamation' },
+        { atajo: 'suspendido',     label: 'Situación Suspendido', icon: 'fa-ban' },
         { divider: true },
         { atajo: 'facturables',    label: 'Facturables',    icon: 'fa-cash-register' },
         { atajo: 'remisibles',     label: 'Remisibles',     icon: 'fa-paper-plane' },
@@ -3969,6 +4010,11 @@
                 if (state.tipo    && c.tipo            !== state.tipo)    return false;
                 if (state.remitir && c.remitir         !== state.remitir) return false;
                 if (state.estado  && String(c.habilitado) !== state.estado) return false;
+                // La situación es la del DOMINIO del contrato. Un contrato sin
+                // dominio la trae vacía, así que cualquier filtro de situación
+                // lo deja afuera — que es lo correcto: no está en ninguna de
+                // las tres, y por eso tampoco lo cuenta ninguna tarjeta.
+                if (state.situacion && c.dominio_situacion !== state.situacion) return false;
                 // El rango es sobre `facturar`, igual que los atajos
                 // "Facturables" del listado histórico. Un contrato sin fecha
                 // (centinela) queda fuera de cualquier rango: no es que
@@ -4105,6 +4151,8 @@
                                   t => ({ valor: t.valor, texto: t.texto }));
         const remOpts  = opciones(cat.remitir, state.remitir, 'Indistinto',
                                   t => ({ valor: t.valor, texto: t.texto }));
+        const sitOpts  = opciones(cat.situaciones || [], state.situacion, 'Todas las situaciones',
+                                  t => ({ valor: t.valor, texto: t.texto }));
         const modOpts  = opciones(cat.plan_modos || [], state.planModo, 'Indistinto',
                                   m => ({ valor: m.valor, texto: m.texto }));
         const ordOpts  = ORDEN_CONTRATOS.map(o =>
@@ -4161,11 +4209,21 @@
                         <option value="0"${state.estado === '0' ? ' selected' : ''}>Deshabilitado</option>
                     </select>
                 </div>
-                ${/* Doce campos antes de Ordenar/Dirección: cuatro renglones de
-                     tres que cierran justos, así esos dos arrancan el suyo. Por
-                     eso ya no hace falta el `.form-group` vacío de relleno que
-                     había acá — con `Modo del plan` la cuenta cierra sola, y
-                     agregar o quitar un filtro obliga a rehacerla. */''}
+                ${/* Situación va pegada a Habilitado porque son las dos columnas
+                     de estado del listado, y existe como campo PORQUE las tres
+                     tarjetas nuevas filtran por ella: un filtro que no se puede
+                     ver ni limpiar desde acá deja al listado acotado sin que la
+                     pantalla lo explique (ABM.md §1.3). */''}
+                <div class="form-group">
+                    <label for="con-fm-situacion">Situación</label>
+                    <select id="con-fm-situacion">${sitOpts}</select>
+                </div>
+                ${/* Trece campos antes de Ordenar/Dirección: con esos dos son
+                     quince, o sea cinco renglones de tres que cierran justos.
+                     Ya no arrancan renglón propio —comparten el último con
+                     `Límite`— y es el precio de sumar `Situación`: la
+                     alternativa era un renglón con un solo campo. Agregar o
+                     quitar un filtro obliga a rehacer esta cuenta. */''}
                 <div class="form-group">
                     <label for="con-fm-limit">Límite</label>
                     <input type="number" id="con-fm-limit" min="1" max="1000" value="${state.limit}">
@@ -4199,6 +4257,7 @@
                 state.facturarHasta = modal.querySelector('#con-fm-facturar-hasta').value;
                 state.remitir       = modal.querySelector('#con-fm-remitir').value;
                 state.estado        = modal.querySelector('#con-fm-estado').value;
+                state.situacion     = modal.querySelector('#con-fm-situacion').value;
                 state.orden         = modal.querySelector('#con-fm-orden').value;
                 state.dir           = modal.querySelector('#con-fm-dir').value;
                 state.limit         = readLimit(modal.querySelector('#con-fm-limit'), 100);
@@ -4217,6 +4276,7 @@
                 modal.querySelector('#con-fm-facturar-hasta').value = d.facturarHasta;
                 modal.querySelector('#con-fm-remitir').value        = d.remitir;
                 modal.querySelector('#con-fm-estado').value         = d.estado;
+                modal.querySelector('#con-fm-situacion').value      = d.situacion;
                 modal.querySelector('#con-fm-orden').value          = d.orden;
                 modal.querySelector('#con-fm-dir').value            = d.dir;
                 modal.querySelector('#con-fm-limit').value          = String(d.limit);
@@ -4257,6 +4317,7 @@
                     <button class="btn btn-sm btn-ghost" data-act="close">
                         <i class="fa-solid fa-xmark"></i> Cerrar
                     </button>
+                    ${menubarMenu('listar',   'Listar',   'fa-list')}
                     ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
                 </div>
                 <div class="modal-body">
@@ -4359,7 +4420,31 @@
         // que cargar aparte, así que no va `onShow`.
         wireModalTabs(backdrop);
 
-        wireMenubarMenu(backdrop.querySelector('.modal-menubar'), 'acciones', () => {
+        const menubar = backdrop.querySelector('.modal-menubar');
+
+        /* "Listar": un solo destino, y no es que falten.
+         *
+         * `Comprobantes` es el ÚNICO módulo con filtro propio por contrato
+         * (`cpb-fm-contrato` en su Modal de Filtros), que es la condición para
+         * entrar acá (§21-bis.1). `Pagos` no es un módulo sino una pestaña del
+         * comprobante, y Dominios no filtra por contrato — la tarjeta `Dominio`
+         * de arriba ya dice cuál es.
+         *
+         * Va por `pedirFiltroCampo` y no por un par propio: lo que cambia entre
+         * un pedido y otro es en qué filtro del destino se vuelca el valor, y
+         * acá es `contrato`. El par `pedirFiltroContrato` NO sirve — ése apunta
+         * al módulo Contratos, donde el contrato es la fila y no una FK.
+         *
+         * El contrato tiene `comprobantes_count` a la vista, pero el ítem se
+         * ofrece siempre: un contrato sin comprobantes es justamente lo que se
+         * quiere ir a confirmar, y el listado vacío lo dice con su propio
+         * mensaje. */
+        wireMenubarMenu(menubar, 'listar', () => [
+            { act: 'comprobantes', label: 'Comprobantes', icon: 'fa-file-invoice-dollar',
+              onSelect: () => { close(); pedirFiltroCampo('comprobantes', 'contrato', c.id); } },
+        ]);
+
+        wireMenubarMenu(menubar, 'acciones', () => {
             const items = [
                 { act: 'edit', label: 'Editar contrato', icon: 'fa-pencil',
                   onSelect: () => { close(); openContratoModal(c); } },
@@ -5169,6 +5254,12 @@
             // de emitir. Va antes del GET: el filtro viaja al backend.
             const cpbPedido = tomarFiltroComprobante('comprobantes');
             if (cpbPedido) state.id = cpbPedido;
+            // "Listar → Comprobantes" desde Consultar contrato, por el filtro
+            // `Contrato`. También antes del GET y por lo mismo: acá el recorte
+            // lo hace el SQL, así que aplicarlo después mostraría los últimos
+            // 100 de todos los contratos filtrados por éste — casi siempre nada.
+            const campoPedido = tomarFiltroCampo('comprobantes');
+            if (campoPedido) state[campoPedido.campo] = campoPedido.valor;
             const data  = await api('comprobantes?' + comprobantesQuery(state));
             CATALOGOS_COMPROBANTES = data.catalogos;
 
@@ -6897,7 +6988,8 @@
                 } catch (e) {
                     toast(e.message, { error: true, duration: 8000 });
                 }
-            }
+            },
+            { label: 'Anular' }
         );
     }
 
@@ -9811,6 +9903,10 @@
                 <td><span class="badge badge-info">${d.usuarios_count}</span></td>
                 <td><span class="badge badge-info">${d.dispositivos_count}</span></td>
                 <td><span class="badge badge-info">${d.chips_count}</span></td>
+                <td>${badgeSituacion(d.situacion, d.situacion_texto)}</td>
+                <td>${d.habilitado === 1
+                    ? '<span class="badge badge-success">Habilitado</span>'
+                    : '<span class="badge badge-danger">Deshabilitado</span>'}</td>
                 ${actionCells()}
             </tr>
         `).join('');
@@ -9824,6 +9920,8 @@
                         <th>Usuarios</th>
                         <th>Dispositivos</th>
                         <th>Chips</th>
+                        <th>Situación</th>
+                        <th>Habilitado</th>
                         ${actionHeaderCells()}
                     </tr>
                 </thead>
@@ -10119,7 +10217,7 @@
         const menubar = backdrop.querySelector('.modal-menubar');
 
         // "Listar": salta al módulo destino ya filtrado por este dominio. Los
-        // ocho listados son los que tienen filtro por dominio propio; el resto
+        // nueve listados son los que tienen filtro por dominio propio; el resto
         // no entra al menú porque no habría con qué acotarlos.
         const irAListado = route => {
             close();
@@ -10127,6 +10225,14 @@
         };
 
         wireMenubarMenu(menubar, 'listar', () => [
+            // Comercial: el acuerdo bajo el que existe el dominio. Va primero y
+            // solo porque no es de la misma familia que lo que sigue — abajo
+            // está lo que el dominio TIENE y lo que el dominio HIZO; el contrato
+            // es por qué está habilitado. La tarjeta `Contrato` de arriba abre
+            // ese registro; esto abre el listado acotado, que es el mismo
+            // reparto que ya hace Consultar perfil entre pastillas y menú.
+            { act: 'contratos',    label: 'Contratos',    icon: 'fa-file-contract',  onSelect: () => irAListado('contratos') },
+            { divider: true },
             { act: 'dispositivos', label: 'Dispositivos', icon: 'fa-microchip',      onSelect: () => irAListado('dispositivos') },
             { act: 'chips',        label: 'Chips',        icon: 'fa-sim-card',       onSelect: () => irAListado('chips') },
             { act: 'perfiles',     label: 'Perfiles',     icon: 'fa-id-card',        onSelect: () => irAListado('profiles') },

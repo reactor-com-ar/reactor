@@ -1011,6 +1011,7 @@ CREATE TABLE `contratos` (
   `tolerancia` date DEFAULT NULL,
   `remitir` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `remitido` datetime DEFAULT NULL,
+  `situacion` varchar(1) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'mora del contrato: 1 Normal, 2 Limitado, 3 Suspendido. NULL = todavia no se calculo',
   `habilitado` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `fk_contratos_cliente` (`cliente`),

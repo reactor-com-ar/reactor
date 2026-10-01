@@ -28,7 +28,9 @@ comparación acá.
 | **La cookie `sesionToken`** | La tienen guardada todos los celulares, dura un año y `app/` la adopta | cuando caduque el parque instalado |
 | **El service worker `/serviceworker.js`** | Los celulares ya lo tienen registrado con scope `/` | idem |
 | **La cola `mensajes`** | **Nadie la consume desde el 2024-06-22** — ni el legacy. `app/` ya no depende de ella (ver "El código de verificación") y sólo le escribe el rastro | — |
-| **El robot de la cotización** (`reactor-api/robot/articulosActualizar.php`) | **Nada: dejó de correr.** Movía `parametros`.`articulos.dolar.cotizacion` y de paso recalculaba `articulos` entera. Al 30/09/2026 el parámetro de producción seguía en `1530.00` con fecha `2026-09-05` | ya se fue: lo reemplaza [cloud/jobs/dolar_actualizar.php](cloud/jobs/dolar_actualizar.php), que **sólo** escribe los dos parámetros |
+| **El robot de la cotización** (`reactor-api/robot/articulosActualizar.php`) | **Nada: dejó de correr.** Movía `parametros`.`articulos.dolar.cotizacion` y de paso recalculaba `articulos` entera. Al 30/09/2026 el parámetro de producción seguía en `1530.00` con fecha `2026-09-05` | ya se fue: lo reemplazan **dos** tareas, [cloud/jobs/dolar_actualizar.php](cloud/jobs/dolar_actualizar.php) a las 06:00 (escribe los dos parámetros) y [cloud/jobs/articulos_recalcular.php](cloud/jobs/articulos_recalcular.php) a las 07:00 (reprecia las filas en dólares) |
+| **El robot de los contadores del dominio** (`reactor-api/robot/dominiosActualizar.php`) | 05:30: refresca `dominios`.`usuarios` / `.dispositivos` / `.chips` / `.paneles` con un `COUNT`. **Está vivo, y es medible**: los 53 dominios habilitados tienen los cuatro contadores frescos y 17 de los 95 deshabilitados están desfasados — exactamente el `WHERE habilitado = 1` del robot | sin fecha, y **no hace falta esperarlo**: ninguna app de este repo lee ese cache, las cuatro pantallas que muestran esos números los calculan |
+| **El robot de los planes** (`reactor-api/robot/contratosActualizar.php`) | Está **sin comentar** en el crontab del legacy a las 05:45, un renglón después del de arriba —que está vivo—, así que hay que asumir que corre. Le reasigna el plan a **todos** los contratos habilitados, sin mirar `plan_modo`, que es de este repo y el legacy no conoce | lo reemplaza [cloud/jobs/contratos_plan_recalcular.php](cloud/jobs/contratos_plan_recalcular.php) a las 08:00, que sólo toca los `dinamico`. **Mientras los dos corran, el viejo manda sobre los `fijo`**: hay que comentar esa línea de `reactor-api/cron/jobs` para que `fijo` signifique algo |
 | **`control.reactor.com.ar`** | nginx lo redirige con 301 a `panel.` | al terminar la transición |
 
 ### Las consecuencias que hay que respetar al escribir código
@@ -567,6 +569,141 @@ Valen las reglas de `perfiles.tipo`: se escribe con el valor del catálogo
 (`PLAN_MODOS` en [cloud/api/contratos.php](cloud/api/contratos.php)) y **un valor
 nuevo va al final del `ENUM`** — `ORDER BY plan_modo` ordena por el índice
 interno, no por el texto.
+
+**Lo que hace `dinamico` lo hace UNA tarea y nadie más**:
+[cloud/jobs/contratos_plan_recalcular.php](cloud/jobs/contratos_plan_recalcular.php),
+todos los días a las 08:00 (migración
+[20260930_1300](cloud/sql/migrations/20260930_1300_tarea_contratos_plan_recalcular.sql)).
+Reemplaza al robot `reactor-api/robot/contratosActualizar.php` del legacy.
+Entre la migración que creó la columna (29/09/2026) y esa tarea (30/09/2026)
+`plan_modo` **no hacía nada**: se elegía, se guardaba, se mostraba y nadie la
+leía.
+
+- **FACTURAR NO RECALCULA EL PLAN, Y NO ES UNA OMISIÓN.** `accion=facturar`
+  ([cloud/api/contratos_accion.php](cloud/api/contratos_accion.php)) lee
+  `contratos.plan` tal como está y ni mira `plan_modo`. Recalcular ahí
+  significaría que emitir una factura le cambia el plan al contrato — que es
+  exactamente lo que hacía el legacy por el fallback `if ($plan == 0) $plan =
+  100` y lo primero que ese endpoint se negó a portar. El plan lo mueve la tarea
+  de las 08:00 y el comprobante del período siguiente sale con el abono nuevo
+  porque `facturar` lee el plan al emitir.
+- **EL ABONO NO SE RECALCULA AL FACTURAR TAMPOCO.** Sale de `articulos.venta` tal
+  cual, y esa columna la mueve el job de las 07:00. La `cotizacion` que se sella
+  en el comprobante es una referencia del día, no un factor: no convierte nada.
+- **La cadena diaria es 06:00 → 07:00 → 08:00** y el orden no es cosmético:
+  cotización → precios → planes. Cada eslabón falla por su cuenta y el de abajo
+  corre igual con el dato que haya. Invertir dos de los tres hace que el de
+  arriba aplique el dato del día anterior.
+- **Un plan con cupo `-1` (ilimitado) NUNCA es el plan que corresponde.** Es el
+  mínimo de `ORDER BY usuarios`, así que admitirlo lo haría ganar siempre y para
+  cualquier dominio. Los seis planes Telemetry habilitados tienen `usuarios =
+  -1`: se tarifan por `usos`, no por usuarios.
+- **Y el plan que corresponde se busca SÓLO dentro de la familia (`planes.tipo`)
+  del plan que el contrato ya tiene.** `cPlan::detectar()` del legacy no lo hace,
+  y con el catálogo actual eso reparte planes de otra familia: los ocho planes
+  Developer habilitados tienen `usuarios = 10` igual que el Standard Free, así
+  que para un dominio chico el `order by usuarios limit 1` empata nueve filas y
+  gana la que quiera el motor. Un empate en el cupo mínimo **se saltea**, no se
+  desempata: elegir por `id` sería inventar un criterio comercial dentro de un
+  job.
+- **"Cuántos usuarios tiene un dominio" es `COUNT(DISTINCT perfiles.usuario)`, en
+  todo el repo.** Es lo que calculan [cloud/api/dominios.php](cloud/api/dominios.php),
+  [panel/api/dominio.php](panel/api/dominio.php) y
+  [panel/api/dashboard.php](panel/api/dashboard.php), y es lo que cuenta la tarea
+  para elegir el plan. **NO es `dominios.usuarios`**, que es un cache que
+  mantiene a mano el legacy (`dominiosActualizar.php`) y que está desfasado en 23
+  de los 148 dominios. Tarifar sobre esa columna ataría el abono a un robot del
+  andamio, y cuando uno de ésos se muere lo hace en silencio —
+  `articulosActualizar.php` dejó la cotización clavada veinticinco días. Tampoco
+  es `COUNT(id)`: una persona puede tener varios perfiles en el mismo dominio
+  (hoy 8 pares repetidos; el dominio 2 declara 18 y tiene 13 personas), y si el
+  job tarifara por perfiles mientras la pantalla muestra personas, la misma
+  palabra diría dos números y el abono saldría del que nadie ve.
+
+### `contratos.situacion`: la mora, y NO es `dominios.situacion`
+
+`varchar(1)` nullable, de la migración
+[cloud/sql/migrations/20261001_1000_contratos_situacion.sql](cloud/sql/migrations/20261001_1000_contratos_situacion.sql):
+en qué situación está el contrato **por su deuda vencida**.
+
+| valor | significado |
+|---|---|
+| `1` | Normal |
+| `2` | Limitado |
+| `3` | Suspendido |
+| `NULL` | todavía no se calculó |
+
+**Es la columna gemela de `dominios`.`situacion`**: mismos tres códigos, mismo
+tipo, y los textos salen del mismo catálogo —`combos` con la clave
+`'$xDominio->situacion'`, que es lo que traducen
+[cloud/api/dominios.php](cloud/api/dominios.php) y
+[panel/api/dominio.php](panel/api/dominio.php)—. **No hay
+`'$xContrato->situacion'` en `combos`**: el sistema histórico no tiene esta
+noción a nivel contrato, así que la columna es nueva de verdad y no el rescate de
+algo que el legacy ya escribía.
+
+**La escribe UNA tarea y nadie más**:
+[cloud/jobs/contratos_situacion_recalcular.php](cloud/jobs/contratos_situacion_recalcular.php),
+todos los días a las 04:00 (migración
+[20261001_1100](cloud/sql/migrations/20261001_1100_tarea_contratos_situacion_recalcular.sql)).
+Toma el vencimiento de la factura/prefactura **pendiente** más antigua del
+contrato y de los días de atraso sale el código: menos de 15 → `1`, de 15 a 29 →
+`2`, 30 o más → `3`. Sin pendientes, o con la más antigua todavía sin vencer, es
+`1`. El detalle de las decisiones está en DESIGN.md §33-septies.
+
+- **LA TAREA ESCRIBE TAMBIÉN `dominios`.`situacion`, Y ESO ES LO QUE CORTA EL
+  SERVICIO.** [app/index.php](app/index.php) lee **esa** columna: con `3` no
+  dibuja ningún control de operación y con `2` agrega el aviso de "pronto será
+  suspendida" dejando los controles. La de `contratos` no la lee nadie — es el
+  detalle por contrato y el rastro de por qué el dominio quedó como quedó. Las
+  dos se escriben **en la misma transacción**: con una sola, el contrato quedaba
+  en Suspendido y el dominio operando, dos afirmaciones distintas sobre el mismo
+  cliente.
+  **Hasta el 01/10/2026 el job NO tocaba `dominios` a propósito** y se revirtió
+  por decisión explícita. Lo que queda de aquel argumento son las guardas: el
+  `.log` nombra uno por uno los dominios que pierden el servicio **y con qué
+  valor venían** (revertir a mano es leer ese renglón), el suceso sube a
+  `alerta` cuando pasa, y la escritura es condicional.
+- **SI UN DOMINIO TIENE VARIOS CONTRATOS HABILITADOS, GANA LA PEOR SITUACIÓN.**
+  Con un contrato impago el cliente no está al día por más que el otro sí;
+  quedarse con la mejor dejaría operando a quien debe plata con sólo abrirle un
+  contrato nuevo al lado. Hoy ningún dominio tiene dos, pero nada del esquema lo
+  impide.
+- **NO ES UN TRINQUETE: si la deuda se paga, el dominio vuelve solo.** La tarea
+  recalcula desde cero todos los días, así que un dominio en `3` pasa a `1` en
+  la corrida siguiente a que se cancelen sus pendientes. No hace falta
+  destrabarlo a mano.
+- **Sólo toca dominios con al menos un contrato habilitado.** Un dominio sin
+  contrato vivo no tiene mora que mirar y su `situacion` queda como esté —
+  puesta a mano o por el back office viejo.
+- **`NULL` es un valor válido y significa "todavía no se calculó".** La columna
+  nace así a propósito: sembrar `1` sería que un `ALTER` **afirme** que los 50
+  contratos están al día, y es falso. Por eso tampoco es `NOT NULL` — acá el
+  `NULL` es un dato, no el hueco que el resto del esquema evita.
+- **"Deuda" es `comprobantes.estado = '2'` (Pendiente) con
+  `talonarios.tipo IN ('F','T')`** (Prefactura y Factura). Los otros tres estados
+  no son deuda —Preparación no tiene número todavía (`serie = 0`), Anulado no
+  existe y Cancelado ya se cobró— y los otros cinco tipos de talonario no la
+  documentan. El `estado` se compara **como string**, igual que en
+  [cloud/api/comprobantes_lib.php](cloud/api/comprobantes_lib.php): la columna es
+  `varchar(1)` y `'0'` es un valor real.
+- **Recibo (`R`) queda afuera a sabiendas**, y es el punto más discutible del
+  job: DESIGN.md §33-quater.1 dice que hay clientes cuyo talonario de facturación
+  **es** de Recibo. Hoy no cambia ningún resultado (verificado), y el día que se
+  decida contarlos el cambio es agregar `'R'` a `TIPOS_DEUDA`.
+- **El centinela `'1500-01-01'` se excluye del `MIN(vencimiento)`**, no se
+  normaliza después: si entra, `DATEDIFF` da ~190.000 días y el contrato sale
+  **Suspendido**. Mismo criterio que el resto del repo con esa fecha.
+- **`contratos.tolerancia` NO entra en el cálculo.** Es la fecha de gracia que se
+  carga a mano en el ABM y nada en este repo la lee todavía; engancharla sería
+  inventar una regla de perdón de mora que nadie pidió. Si algún día entra, hay
+  que decidir primero qué significa su centinela (14 de los 26 contratos
+  habilitados lo tienen).
+- **Todavía nadie la lee.** [cloud/api/contratos.php](cloud/api/contratos.php)
+  enumera sus columnas una por una, así que no se filtra sola al JSON del ABM. Es
+  la misma situación en la que estuvo `plan_modo` entre su migración y su tarea.
+  Si se muestra, va **traducida** con el badge de `'$xDominio->situacion'`, nunca
+  el número pelado.
 
 ## `perfiles.registrante`: quién otorgó el acceso
 

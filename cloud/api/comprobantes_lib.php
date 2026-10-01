@@ -325,6 +325,14 @@ function comprobanteUuidLibre(): string
  * detalle: con dos fuentes, el renglon diria un precio calculado con una
  * cotizacion y la cabecera mostraria otra.
  *
+ * OJO AL AUDITAR COMPROBANTES VIEJOS: una sola fuente no alcanzaba para que
+ * coincidieran. Hasta el 30/09/2026 no habia recalculo en masa, asi que el
+ * renglon podia salir de la cotizacion con la que se habia tocado el articulo
+ * por ultima vez (1380) mientras la cabecera sellaba la vigente (1540) — el
+ * desfasaje que el comentario de arriba atribuye a tener dos fuentes pasaba con
+ * una. Desde que `articulos_recalcular.php` corre a las 07:00 las dos puntas se
+ * refrescan el mismo dia y el desfasaje se acota a lo que se toque a mano.
+ *
  * Se llama igual que la de `articulos_lib.php` y eso NO colisiona: los dos lib
  * ya declaran `COMBOS_FALLBACK`, `combo()`, `idOrNull()` y `readJson()` con los
  * mismos nombres, asi que son excluyentes por construccion -- ningun endpoint

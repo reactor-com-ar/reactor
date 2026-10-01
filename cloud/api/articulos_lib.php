@@ -29,17 +29,24 @@ declare(strict_types=1);
  * `cloud/jobs/dolar_actualizar.php` todos los dias a las 06:00, con la punta
  * `venta` del microservicio de Databox.
  *
- * ESA TAREA NO RECALCULA LOS ARTICULOS, y el robot del legacy al que reemplaza
- * (`reactor-api/robot/articulosActualizar.php`) si lo hacia: recorria la tabla
- * entera llamando a `recalcular()`. Acá mover la cotizacion y repreciar son dos
- * cosas distintas a proposito — la segunda le cambia el abono a contratos vivos
- * y por eso es una accion con nombre, que muestra los cuatro numeros y los
- * planes afectados antes de confirmar.
+ * ESA TAREA NO RECALCULA LOS ARTICULOS: lo hace `cloud/jobs/articulos_recalcular.php`
+ * una hora despues, a las 07:00, repreciando las filas en dolares con ESTA
+ * MISMA funcion. Son dos tareas y no una porque si Databox se cae la cotizacion
+ * no se mueve y el recalculo —que no depende de la red— tiene que correr igual.
  *
- * Consecuencia: las filas en dolares tienen cotizaciones implicitas distintas
- * entre si —1370, 1375, 1380, 1415 y 1450 al 30/09/2026— segun cuando se las
- * toco por ultima vez. NO estan desactualizadas por error, es el estado normal
- * de la tabla entre dos recalculos.
+ * HAY TRES LLAMADORES Y POR ESO LA FUNCION ES UNA SOLA. El ABM la aplica al
+ * guardar, la accion de fila la aplica sin tocar nada mas y el job la aplica a
+ * la tabla entera. El job no puede incluir `bootstrap.php` (manda headers y
+ * llama a `requireAuth()`), asi que declara su propio `db()` apuntando al PDO
+ * del bootstrap de jobs y despues requiere este archivo: son seis lineas a
+ * cambio de no tener una segunda copia de `articuloPrecios()`.
+ *
+ * Hasta el 30/09/2026 no habia recalculo en masa a proposito, y la consecuencia
+ * era que las filas en dolares arrastraban cotizaciones implicitas distintas
+ * entre si —1370, 1375, 1380, 1415 y 1450— segun cuando se las habia tocado por
+ * ultima vez, contra un parametro en 1540. Eso ya no es el estado normal de la
+ * tabla: lo normal es que todas tengan la vigente y que las unicas desfasadas
+ * sean las tocadas despues de la corrida de las 07:00.
  */
 
 /** Claves de `combos` con los textos de los codigos cortos de `articulos`. */

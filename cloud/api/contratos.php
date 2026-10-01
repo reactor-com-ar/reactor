@@ -68,6 +68,18 @@ const COMBO_TIPO       = '$xContrato->tipo';
 const COMBO_REMITIR    = '$xContrato->remitir';
 
 /**
+ * La situacion del DOMINIO del contrato, que el listado muestra en su propia
+ * columna. La clave es la de `dominios` —no hay `'$xContrato->situacion'` en
+ * `combos`— y es la MISMA que traducen `api/dominios.php` y
+ * `panel/api/dominio.php`: 1 Normal / 2 Limitado / 3 Suspendido.
+ *
+ * Se traduce aca, contra la base, y no con una tabla de textos en el front:
+ * misma regla que el resto de los codigos cortos del sistema historico
+ * (ABM.md).
+ */
+const COMBO_SITUACION  = '$xDominio->situacion';
+
+/**
  * Los limites del porcentaje de descuento. `PROMO_PASO` es solo el salto de las
  * flechitas del campo numerico: entre 1 y 100 se puede escribir cualquier
  * entero, y por eso el endpoint NO valida que sea multiplo. Viajan al front en
@@ -202,8 +214,9 @@ function handleList(): void
     $hoy = date('Y-m-d');
 
     $contratos = array_map(static function (array $r) use ($hoy): array {
-        $tipo    = trim((string) ($r['tipo']    ?? ''));
-        $remitir = trim((string) ($r['remitir'] ?? ''));
+        $tipo      = trim((string) ($r['tipo']    ?? ''));
+        $remitir   = trim((string) ($r['remitir'] ?? ''));
+        $situacion = trim((string) ($r['dominio_situacion'] ?? ''));
 
         $fila = [
             'id'                 => (int) $r['id'],
@@ -214,7 +227,10 @@ function handleList(): void
             'cliente_nombre'     => trim((string) ($r['cliente_nombre'] ?? '')),
             'dominio'            => idOrNull($r['dominio']),
             'dominio_nombre'     => trim((string) ($r['dominio_nombre'] ?? '')),
-            'dominio_situacion'  => trim((string) ($r['dominio_situacion'] ?? '')),
+            // La situacion es del DOMINIO, no del contrato: un contrato sin
+            // dominio la trae vacia y el front dibuja la raya.
+            'dominio_situacion'  => $situacion,
+            'dominio_situacion_texto' => combo(COMBO_SITUACION)[$situacion] ?? '',
             'tipo'               => $tipo,
             'tipo_texto'         => combo(COMBO_TIPO)[$tipo] ?? '',
             'plan'               => idOrNull($r['plan']),
@@ -262,12 +278,31 @@ function handleList(): void
     // el del reloj del operador: a las 21 h de Buenos Aires, `toISOString()` ya
     // devuelve manana, y el atajo mostraria una cantidad distinta de la que
     // anuncia la tarjeta que se acaba de tocar.
+    // LOS TRES CONTADORES DE SITUACION SE CUENTAN **SOLO SOBRE LOS
+    // HABILITADOS**: son el desglose de la segunda tarjeta, no de `total`. Un
+    // contrato dado de baja no tiene situacion que administrar, asi que
+    // contarlo solo inflaria los tres numeros con filas que a nadie le importa
+    // atender.
+    //
+    // EL ATAJO DE CADA TARJETA TIENE QUE LLEVAR EL MISMO `habilitado = 1`
+    // (`ATAJOS_CONTRATOS` en `assets/js/app.js`). Es la regla de DESIGN.md
+    // §12.1: la tarjeta anuncia la cantidad de filas que deja el listado al
+    // tocarla. Si uno de los dos lados filtra por habilitado y el otro no, la
+    // tarjeta dice un numero y la lista muestra otro.
+    //
+    // Un contrato sin dominio no tiene situacion y no entra en ninguno de los
+    // tres (hoy no hay ninguno: los 50 tienen dominio). Por eso los tres suman
+    // `habilitados` solo mientras eso siga siendo cierto, y no se fuerza a que
+    // sumen.
     $resumen = [
         'total'          => count($contratos),
         'habilitados'    => 0,
         'deshabilitados' => 0,
         'facturables'    => 0,
         'remisibles'     => 0,
+        // Las claves son los codigos de `dominios`.`situacion` (1/2/3), no los
+        // textos: el nombre lo pone la pantalla desde el catalogo.
+        'situacion'      => ['1' => 0, '2' => 0, '3' => 0],
         'hoy'            => $hoy,
     ];
     foreach ($contratos as $c) {
@@ -275,6 +310,10 @@ function handleList(): void
         else                        $resumen['deshabilitados']++;
         if ($c['facturable'])       $resumen['facturables']++;
         if ($c['remisible'])        $resumen['remisibles']++;
+
+        if ($c['habilitado'] !== 1) continue;
+        $sit = $c['dominio_situacion'];
+        if (isset($resumen['situacion'][$sit])) $resumen['situacion'][$sit]++;
     }
 
     json_ok([
@@ -335,6 +374,10 @@ function catalogos(): array
             array_values(PLAN_MODOS)
         ),
         'remitir'    => comboLista(COMBO_REMITIR),
+        // La situacion del dominio, para el filtro del listado. Sale del mismo
+        // combo que traduce la columna y NO de una lista escrita en el front:
+        // es un codigo corto del sistema historico (ABM.md).
+        'situaciones' => comboLista(COMBO_SITUACION),
     ];
 }
 

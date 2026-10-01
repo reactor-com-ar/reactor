@@ -540,6 +540,12 @@ tbody tr.row-clickable { cursor: pointer; }
 .stat-value.green  { color: var(--success); }
 .stat-value.orange { color: var(--primary); }
 .stat-value.red    { color: var(--danger); }
+/* Ámbar REAL (`--warn`), que es lo que `.orange` no es: esa clase apunta a
+   `--primary`, el rojo institucional. Existe para las tarjetas que son el
+   desglose de un estado que la tabla ya pinta con un badge — Situación
+   Limitado usa `badge-warn`, y con `.orange` la tarjeta habría dicho rojo
+   mientras la celda decía ámbar. */
+.stat-value.warn   { color: var(--warn); }
 .stat-value.muted  { color: var(--muted); }
 
 .dash-link { cursor: pointer; transition: opacity .15s; }

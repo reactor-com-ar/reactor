@@ -8400,17 +8400,21 @@
             pedirFiltroCampo(route, campo, c.id);
         };
 
+        // El ítem NO lleva la cantidad entre paréntesis: el menú dice a dónde se
+        // va y los tres números ya están en la ficha, en sus propias tarjetas.
+        // Repetirlos acá los pone a competir con el rótulo justo donde lo único
+        // que hay que leer es el destino.
         const items = [];
         if (c.dominios_count > 0) {
-            items.push({ act: 'go-dominios', label: `Ver dominios (${c.dominios_count})`, icon: 'fa-flag',
+            items.push({ act: 'go-dominios', label: 'Ver dominios', icon: 'fa-flag',
                          onSelect: saltar('dominios', 'cliente') });
         }
         if (c.contratos_count > 0) {
-            items.push({ act: 'go-contratos', label: `Ver contratos (${c.contratos_count})`, icon: 'fa-file-contract',
+            items.push({ act: 'go-contratos', label: 'Ver contratos', icon: 'fa-file-contract',
                          onSelect: saltar('contratos', 'cliente') });
         }
         if (c.comprobantes_count > 0) {
-            items.push({ act: 'go-comprobantes', label: `Ver comprobantes (${c.comprobantes_count})`, icon: 'fa-file-invoice-dollar',
+            items.push({ act: 'go-comprobantes', label: 'Ver comprobantes', icon: 'fa-file-invoice-dollar',
                          onSelect: saltar('comprobantes', 'cliente') });
         }
         return items;
@@ -8657,36 +8661,76 @@
                     ${menubarMenu('acciones', 'Acciones', 'fa-bolt')}
                 </div>
                 <div class="modal-body">
-                    ${/* 17 tarjetas: 14 `half` + 3 `full` (§25 de DESIGN.md).
-                        `.view-grid` es flex con `flex-grow`, así que los `half`
-                        tienen que ser PARES y cada `full` tiene que caer
-                        después de un renglón cerrado, o la tarjeta suelta se
-                        estira y se lee como un destaque que nadie decidió.
-                        Los tres `full` son los campos anchos de verdad: el
-                        nombre, la razón social y el domicilio.
-                        Agregar o quitar un campo obliga a rehacer esta cuenta. */''}
-                    ${viewGrid([
-                        viewCardHalf('Código',        `<code>#${c.id}</code>`),
-                        viewCardHalf('Condición',     clienteCondicionBadge(c)),
-                        viewCardFull('Nombre',        escape(c.nombre)),
-                        viewCardFull('Razón social',  oVacio(c.razon, 'Sin razón social')),
-                        viewCardHalf('CUIT',          c.cuit ? `<code>${escape(c.cuit)}</code>` : `<span class="muted">Sin CUIT</span>`),
-                        viewCardHalf('Talonario',     talonarioValor),
-                        viewCardHalf('Medio de pago', c.medio
-                            ? refValue(c.medio, c.medio_nombre) +
-                              (c.medio_estado === 1 ? '' : ' <span class="badge badge-warn">Deshabilitado</span>')
-                            : `<span class="muted">Sin medio</span>`),
-                        viewCardHalf('Contacto',      oVacio(c.contacto, 'Sin contacto')),
-                        viewCardHalf('Celular',       oVacio(c.celular, 'Sin celular')),
-                        viewCardHalf('Correo',        oVacio(c.correo, 'Sin correo')),
-                        viewCardFull('Domicilio',     oVacio(c.domicilio, 'Sin domicilio')),
-                        viewCardHalf('Localidad',     oVacio(c.localidad, 'Sin localidad')),
-                        viewCardHalf('Provincia',     oVacio(c.provincia, 'Sin provincia')),
-                        viewCardHalf('País',          oVacio(c.pais, 'Sin país')),
-                        viewCardHalf('Dominios',      contador(c.dominios_count)),
-                        viewCardHalf('Contratos',     contador(c.contratos_count)),
-                        viewCardHalf('Comprobantes',  contador(c.comprobantes_count)),
-                    ])}
+                    ${/* Las mismas tres pestañas que el formulario (DESIGN.md
+                        §25): consultar y editar el mismo registro no se pueden
+                        ver como dos pantallas distintas, así que el corte es el
+                        mismo — quién es, dónde está y cómo se le factura. */''}
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general" role="tab">
+                            <i class="fa-solid fa-circle-info"></i> General
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="ubicacion" role="tab">
+                            <i class="fa-solid fa-location-dot"></i> Ubicación
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="facturacion" role="tab">
+                            <i class="fa-solid fa-file-invoice-dollar"></i> Facturación
+                        </button>
+                    </div>
+
+                    ${/* LA CUENTA DE TARJETAS SE HACE POR PESTAÑA, no sobre el
+                        total: cada `view-grid` es su propio flex. Acá son ocho
+                        `half` y ningún `full` — ninguno de los ocho valores es
+                        ancho de verdad (el nombre más largo son 35 caracteres y
+                        el correo 36), así que estirar uno sería un destaque que
+                        nadie decidió. Los `half` tienen que ser PARES o la
+                        tarjeta suelta se estira sola (§25).
+
+                        Código y los tres contadores no estaban en el reparto
+                        pedido porque no son campos de la tabla: el primero es la
+                        identidad y los otros tres son los vínculos, y los cuatro
+                        contestan "qué es este cliente", que es esta pestaña.
+                        Agregar o quitar un campo obliga a rehacer la cuenta. */''}
+                    <div class="modal-tabpanel" data-panel="general">
+                        ${viewGrid([
+                            viewCardHalf('Código',       `<code>#${c.id}</code>`),
+                            viewCardHalf('Nombre',       escape(c.nombre)),
+                            viewCardHalf('Contacto',     oVacio(c.contacto, 'Sin contacto')),
+                            viewCardHalf('Celular',      oVacio(c.celular, 'Sin celular')),
+                            viewCardHalf('Correo',       oVacio(c.correo, 'Sin correo')),
+                            viewCardHalf('Dominios',     contador(c.dominios_count)),
+                            viewCardHalf('Contratos',    contador(c.contratos_count)),
+                            viewCardHalf('Comprobantes', contador(c.comprobantes_count)),
+                        ])}
+                    </div>
+
+                    ${/* Cuatro `half` y ningún `full`: el domicilio más largo de
+                        la tabla son 51 caracteres y entra en media tarjeta. Con
+                        uno `full` los otros tres quedarían impares. */''}
+                    <div class="modal-tabpanel" data-panel="ubicacion" hidden>
+                        ${viewGrid([
+                            viewCardHalf('Domicilio', oVacio(c.domicilio, 'Sin domicilio')),
+                            viewCardHalf('Localidad', oVacio(c.localidad, 'Sin localidad')),
+                            viewCardHalf('Provincia', oVacio(c.provincia, 'Sin provincia')),
+                            viewCardHalf('País',      oVacio(c.pais, 'Sin país')),
+                        ])}
+                    </div>
+
+                    ${/* Cinco tarjetas: `Razón social` es el único campo ancho
+                        de verdad —es la que se imprime en el comprobante y
+                        admite 250 caracteres—, así que va `full` y arriba; los
+                        otros cuatro cierran dos renglones parejos. */''}
+                    <div class="modal-tabpanel" data-panel="facturacion" hidden>
+                        ${viewGrid([
+                            viewCardFull('Razón social',  oVacio(c.razon, 'Sin razón social')),
+                            viewCardHalf('Condición',     clienteCondicionBadge(c)),
+                            viewCardHalf('CUIT',          c.cuit ? `<code>${escape(c.cuit)}</code>` : `<span class="muted">Sin CUIT</span>`),
+                            viewCardHalf('Talonario',     talonarioValor),
+                            viewCardHalf('Medio de pago', c.medio
+                                ? refValue(c.medio, c.medio_nombre) +
+                                  (c.medio_estado === 1 ? '' : ' <span class="badge badge-warn">Deshabilitado</span>')
+                                : `<span class="muted">Sin medio</span>`),
+                        ])}
+                    </div>
                 </div>
             </div>
         `;
@@ -8699,6 +8743,8 @@
         };
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
+
+        wireModalTabs(backdrop);
 
         const menubar = backdrop.querySelector('.modal-menubar');
         wireMenubarMenu(menubar, 'listar', () => clienteNavegaciones(c, close));
@@ -8778,60 +8824,67 @@
                     </button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-section">
-                        <div class="form-section-title">Identificación</div>
+                    ${/* Tres pestañas (DESIGN.md §25), el mismo corte que
+                         Consultar: `General` es quién es el cliente y cómo se lo
+                         ubica, `Ubicación` dónde está y `Facturación` con qué
+                         datos se le emite.
+
+                         Los paneles NO llevan `form-section`: el rótulo de la
+                         sección repetiría el nombre de la pestaña, que es el
+                         mismo criterio por el que la pestaña `Paneles` de
+                         Perfiles no envuelve su lista en una tarjeta madre.
+                         `.modal-tabpanel` ya es un flex en columna con el mismo
+                         gap que `.form-section`. */''}
+                    <div class="modal-tabs" role="tablist">
+                        <button type="button" class="modal-tab active" data-tab="general" role="tab">
+                            <i class="fa-solid fa-circle-info"></i> General
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="ubicacion" role="tab">
+                            <i class="fa-solid fa-location-dot"></i> Ubicación
+                        </button>
+                        <button type="button" class="modal-tab" data-tab="facturacion" role="tab">
+                            <i class="fa-solid fa-file-invoice-dollar"></i> Facturación
+                        </button>
+                    </div>
+
+                    <div class="modal-tabpanel" data-panel="general">
                         <div class="form-group">
                             <label for="cli-nombre">Nombre</label>
                             <input type="text" id="cli-nombre" maxlength="${largos.nombre || 255}"
                                    value="${escape(c?.nombre ?? '')}" placeholder="Con el que se lo busca en el sistema">
                             <div class="field-error" id="cli-nombre-err" style="display:none"></div>
+                            <div class="form-nota">Es el de uso interno. El nombre fiscal —el que se imprime en el
+                                comprobante— es la <strong>Razón social</strong>, en la pestaña Facturación.</div>
                         </div>
                         <div class="form-group">
-                            <label for="cli-razon">Razón social</label>
-                            <input type="text" id="cli-razon" maxlength="${largos.razon || 250}"
-                                   value="${escape(c?.razon ?? '')}" placeholder="La que se imprime en el comprobante">
-                            <div class="field-error" id="cli-razon-err" style="display:none"></div>
-                            <div class="form-nota">Es el nombre fiscal: lo copia el comprobante junto con el domicilio,
-                                la condición y el CUIT. El <strong>Nombre</strong> de arriba es el de uso interno.</div>
-                        </div>
-                    </div>
-
-                    <div class="form-section">
-                        <div class="form-section-title">Facturación</div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="cli-condicion">Condición frente al IVA</label>
-                                <select id="cli-condicion">${conOpts}</select>
-                            </div>
-                            <div class="form-group">
-                                <label for="cli-cuit">CUIT</label>
-                                <input type="text" id="cli-cuit" maxlength="${largos.cuit || 13}"
-                                       value="${escape(c?.cuit ?? '')}" placeholder="11 dígitos, sin guiones"
-                                       inputmode="numeric">
-                                <div class="field-error" id="cli-cuit-err" style="display:none"></div>
-                            </div>
+                            <label for="cli-contacto">Contacto</label>
+                            <input type="text" id="cli-contacto" maxlength="${largos.contacto || 255}"
+                                   value="${escape(c?.contacto ?? '')}" placeholder="Nombre de la persona">
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="cli-talonario">Talonario</label>
-                                <select id="cli-talonario">${talOpts}</select>
-                                <div class="form-nota">De acá sale la numeración de sus comprobantes.
-                                    <strong>Sin talonario no se le puede facturar</strong>: la emisión se bloquea.</div>
+                                <label for="cli-celular">Celular</label>
+                                <input type="text" id="cli-celular" maxlength="${largos.celular || 100}"
+                                       value="${escape(c?.celular ?? '')}" placeholder="2644123456" inputmode="numeric">
+                                <div class="field-error" id="cli-celular-err" style="display:none"></div>
+                                <div class="form-nota">10 dígitos, sin el 0 de la característica y sin el 15.</div>
                             </div>
                             <div class="form-group">
-                                <label for="cli-medio">Medio de pago</label>
-                                <select id="cli-medio">${medOpts}</select>
+                                <label for="cli-correo">Correo</label>
+                                <input type="email" id="cli-correo" maxlength="${largos.correo || 100}"
+                                       value="${escape(c?.correo ?? '')}" placeholder="facturacion@empresa.com">
+                                <div class="field-error" id="cli-correo-err" style="display:none"></div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="form-section">
-                        <div class="form-section-title">Domicilio</div>
+                    <div class="modal-tabpanel" data-panel="ubicacion" hidden>
                         <div class="form-group">
                             <label for="cli-domicilio">Domicilio</label>
                             <input type="text" id="cli-domicilio" maxlength="${largos.domicilio || 250}"
                                    value="${escape(c?.domicilio ?? '')}" placeholder="Calle y número">
                             <div class="field-error" id="cli-domicilio-err" style="display:none"></div>
+                            <div class="form-nota">Se imprime en el comprobante junto con la razón social.</div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -8863,26 +8916,38 @@
                         </div>
                     </div>
 
-                    <div class="form-section">
-                        <div class="form-section-title">Contacto</div>
+                    <div class="modal-tabpanel" data-panel="facturacion" hidden>
                         <div class="form-group">
-                            <label for="cli-contacto">Contacto</label>
-                            <input type="text" id="cli-contacto" maxlength="${largos.contacto || 255}"
-                                   value="${escape(c?.contacto ?? '')}" placeholder="Nombre de la persona">
+                            <label for="cli-razon">Razón social</label>
+                            <input type="text" id="cli-razon" maxlength="${largos.razon || 250}"
+                                   value="${escape(c?.razon ?? '')}" placeholder="La que se imprime en el comprobante">
+                            <div class="field-error" id="cli-razon-err" style="display:none"></div>
+                            <div class="form-nota">Es el nombre fiscal: lo copia el comprobante junto con el domicilio,
+                                la condición y el CUIT.</div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="cli-celular">Celular</label>
-                                <input type="text" id="cli-celular" maxlength="${largos.celular || 100}"
-                                       value="${escape(c?.celular ?? '')}" placeholder="2644123456" inputmode="numeric">
-                                <div class="field-error" id="cli-celular-err" style="display:none"></div>
-                                <div class="form-nota">10 dígitos, sin el 0 de la característica y sin el 15.</div>
+                                <label for="cli-condicion">Condición frente al IVA</label>
+                                <select id="cli-condicion">${conOpts}</select>
                             </div>
                             <div class="form-group">
-                                <label for="cli-correo">Correo</label>
-                                <input type="email" id="cli-correo" maxlength="${largos.correo || 100}"
-                                       value="${escape(c?.correo ?? '')}" placeholder="facturacion@empresa.com">
-                                <div class="field-error" id="cli-correo-err" style="display:none"></div>
+                                <label for="cli-cuit">CUIT</label>
+                                <input type="text" id="cli-cuit" maxlength="${largos.cuit || 13}"
+                                       value="${escape(c?.cuit ?? '')}" placeholder="11 dígitos, sin guiones"
+                                       inputmode="numeric">
+                                <div class="field-error" id="cli-cuit-err" style="display:none"></div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cli-talonario">Talonario</label>
+                                <select id="cli-talonario">${talOpts}</select>
+                                <div class="form-nota">De acá sale la numeración de sus comprobantes.
+                                    <strong>Sin talonario no se le puede facturar</strong>: la emisión se bloquea.</div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cli-medio">Medio de pago</label>
+                                <select id="cli-medio">${medOpts}</select>
                             </div>
                         </div>
                     </div>
@@ -8899,6 +8964,13 @@
         backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
         backdrop.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', close));
 
+        // Los campos que se validan están repartidos entre las tres solapas
+        // —Nombre, Celular y Correo en General; CUIT en Facturación—, así que
+        // hay que traer al operador a la que falló ANTES de enfocar: marcar el
+        // error en un panel `hidden` se lee como un Guardar que no responde
+        // (DESIGN.md §25).
+        const mostrarPestana = wireModalTabs(backdrop);
+
         const el      = id => backdrop.querySelector('#cli-' + id);
         const val     = id => el(id).value.trim();
         const saveBtn = backdrop.querySelector('[data-act="save"]');
@@ -8912,12 +8984,14 @@
                 el(id).classList.remove('input-invalid');
             });
 
-            const marcar = (campo, msg) => {
+            // Devuelve el campo junto con la pestaña en la que vive: sin eso el
+            // `focus()` caería sobre un panel oculto.
+            const marcar = (campo, msg, panel) => {
                 const e = el(campo + '-err');
                 e.textContent = msg;
                 e.style.display = 'block';
                 el(campo).classList.add('input-invalid');
-                return el(campo);
+                return { el: el(campo), panel };
             };
 
             let firstInvalid = null;
@@ -8925,7 +8999,7 @@
             // El backend valida lo mismo; marcarlo acá evita el viaje y deja el
             // error pegado al campo en vez de en un toast.
             if (!val('nombre')) {
-                firstInvalid = marcar('nombre', 'El nombre es obligatorio');
+                firstInvalid = marcar('nombre', 'El nombre es obligatorio', 'general');
             }
 
             /* EL FORMATO SE EXIGE SÓLO CUANDO EL VALOR CAMBIA, igual que en el
@@ -8937,18 +9011,22 @@
 
             const cuit = val('cuit');
             if (cuit && !heredado('cuit') && !/^\d{11}$/.test(cuit)) {
-                firstInvalid = firstInvalid || marcar('cuit', 'El CUIT son 11 dígitos, sin guiones ni espacios');
+                firstInvalid = firstInvalid || marcar('cuit', 'El CUIT son 11 dígitos, sin guiones ni espacios', 'facturacion');
             }
             const celular = val('celular');
             if (celular && !heredado('celular') && !/^\d{10}$/.test(celular)) {
-                firstInvalid = firstInvalid || marcar('celular', 'El celular son 10 dígitos, sin el 0 ni el 15');
+                firstInvalid = firstInvalid || marcar('celular', 'El celular son 10 dígitos, sin el 0 ni el 15', 'general');
             }
             const correo = val('correo');
             if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
-                firstInvalid = firstInvalid || marcar('correo', 'El correo no es válido');
+                firstInvalid = firstInvalid || marcar('correo', 'El correo no es válido', 'general');
             }
 
-            if (firstInvalid) { firstInvalid.focus(); return; }
+            if (firstInvalid) {
+                mostrarPestana(firstInvalid.panel);
+                firstInvalid.el.focus();
+                return;
+            }
 
             const payload = {
                 nombre:    val('nombre'),
@@ -10944,9 +11022,15 @@
         { value: 'chips_count',        label: 'Chips'        },
     ];
 
+    // Los textos de `situacion` los traduce el backend contra `combos` (ABM.md):
+    // acá no hay una tabla de códigos hardcodeada, ni para el badge ni para el
+    // filtro. `habilitado` no viaja en el catálogo porque no es uno: son los dos
+    // valores de la bandera, y nada más.
+    let CATALOGOS_DOMINIOS = { situaciones: [] };
+
     function dominiosDefaults() {
         return {
-            codigo: '', texto: '', cliente: '',
+            codigo: '', texto: '', cliente: '', situacion: '', habilitado: '',
             orden:  'id', dir: 'desc', limit: 100,
         };
     }
@@ -10955,6 +11039,7 @@
         try {
             const data = await api('dominios');
             const dominios = data.dominios;
+            CATALOGOS_DOMINIOS = data.catalogos;
             const state = tomarEstadoVista('dominios', dominiosDefaults());
             // "Ver dominio" desde Contratos deja pedido este id. Acá el dominio
             // no es una FK sino la fila misma, así que el pedido se vuelca al
@@ -11041,6 +11126,12 @@
             let filtered = dominios.filter(d => {
                 if (Number.isFinite(codigo)  && d.id      !== codigo)  return false;
                 if (Number.isFinite(cliente) && d.cliente !== cliente) return false;
+                // Los dos se comparan como string: `situacion` es varchar(1) y
+                // el valor del <select> también, así que un dominio sin
+                // situación cargada no entra en ninguna de las tres opciones —
+                // que es lo correcto, no un caso a contemplar aparte.
+                if (state.situacion  && String(d.situacion)  !== state.situacion)  return false;
+                if (state.habilitado && String(d.habilitado) !== state.habilitado) return false;
                 return true;
             });
 
@@ -11110,6 +11201,16 @@
     }
 
     function openDominiosFiltersModal(state, onApply) {
+        const opciones = (items, valorSel, todos) =>
+            ['<option value="">' + escape(todos) + '</option>'].concat(
+                items.map(it =>
+                    `<option value="${escape(it.valor)}"${it.valor === valorSel ? ' selected' : ''}>${escape(it.texto)}</option>`)
+            ).join('');
+
+        const sitOpts = opciones(CATALOGOS_DOMINIOS.situaciones || [], state.situacion, 'Todas');
+        const habOpts = opciones(
+            [{ valor: '1', texto: 'Habilitado' }, { valor: '0', texto: 'Deshabilitado' }],
+            state.habilitado, 'Todos');
         const ordOpts = ORDEN_DOMINIOS.map(o =>
             `<option value="${o.value}"${o.value === state.orden ? ' selected' : ''}>${escape(o.label)}</option>`
         ).join('');
@@ -11132,6 +11233,19 @@
                     <label for="dom-fm-cliente">Cliente</label>
                     <input type="number" id="dom-fm-cliente" min="1" placeholder="ID del cliente" value="${escape(state.cliente)}">
                 </div>
+                ${/* Las dos columnas de estado del listado son también sus dos
+                     filtros: `Situación` y `Habilitado` son lo que se viene a
+                     barrer de arriba abajo (DESIGN.md §10), y sin filtro hay
+                     que leer las 148 filas para juntar las que están
+                     suspendidas. */''}
+                <div class="form-group">
+                    <label for="dom-fm-situacion">Situación</label>
+                    <select id="dom-fm-situacion">${sitOpts}</select>
+                </div>
+                <div class="form-group">
+                    <label for="dom-fm-habilitado">Habilitado</label>
+                    <select id="dom-fm-habilitado">${habOpts}</select>
+                </div>
                 <div class="form-group">
                     <label for="dom-fm-limit">Límite</label>
                     <input type="number" id="dom-fm-limit" min="1" max="1000" value="${state.limit}">
@@ -11153,22 +11267,26 @@
         openFiltersModal({
             bodyHtml,
             onApply(modal) {
-                state.codigo  = modal.querySelector('#dom-fm-codigo').value.trim();
-                state.texto   = modal.querySelector('#dom-fm-texto').value.trim();
-                state.cliente = modal.querySelector('#dom-fm-cliente').value.trim();
-                state.orden   = modal.querySelector('#dom-fm-orden').value;
-                state.dir     = modal.querySelector('#dom-fm-dir').value;
-                state.limit   = readLimit(modal.querySelector('#dom-fm-limit'), 100);
+                state.codigo     = modal.querySelector('#dom-fm-codigo').value.trim();
+                state.texto      = modal.querySelector('#dom-fm-texto').value.trim();
+                state.cliente    = modal.querySelector('#dom-fm-cliente').value.trim();
+                state.situacion  = modal.querySelector('#dom-fm-situacion').value;
+                state.habilitado = modal.querySelector('#dom-fm-habilitado').value;
+                state.orden      = modal.querySelector('#dom-fm-orden').value;
+                state.dir        = modal.querySelector('#dom-fm-dir').value;
+                state.limit      = readLimit(modal.querySelector('#dom-fm-limit'), 100);
                 onApply();
             },
             onClear(modal) {
                 const d = dominiosDefaults();
-                modal.querySelector('#dom-fm-codigo').value  = d.codigo;
-                modal.querySelector('#dom-fm-texto').value   = d.texto;
-                modal.querySelector('#dom-fm-cliente').value = d.cliente;
-                modal.querySelector('#dom-fm-orden').value   = d.orden;
-                modal.querySelector('#dom-fm-dir').value     = d.dir;
-                modal.querySelector('#dom-fm-limit').value   = String(d.limit);
+                modal.querySelector('#dom-fm-codigo').value     = d.codigo;
+                modal.querySelector('#dom-fm-texto').value      = d.texto;
+                modal.querySelector('#dom-fm-cliente').value    = d.cliente;
+                modal.querySelector('#dom-fm-situacion').value  = d.situacion;
+                modal.querySelector('#dom-fm-habilitado').value = d.habilitado;
+                modal.querySelector('#dom-fm-orden').value      = d.orden;
+                modal.querySelector('#dom-fm-dir').value        = d.dir;
+                modal.querySelector('#dom-fm-limit').value      = String(d.limit);
             },
         });
     }

@@ -123,7 +123,28 @@ function handleList(): void
         ];
     }, $stmt->fetchAll());
 
-    json_ok(['dominios' => $dominios]);
+    json_ok([
+        'dominios'  => $dominios,
+        'catalogos' => catalogos(),
+    ]);
+}
+
+/**
+ * Catalogos de los desplegables del modal de Filtros.
+ *
+ * `situaciones` sale de `combos` y NO de una tabla de textos en el front: el
+ * codigo corto (1/2/3) se traduce en el backend, igual que `situacion_texto`
+ * de cada fila (ABM.md, "Consultar"). Si el combo se amplia, el filtro lo
+ * acompana solo.
+ *
+ * `habilitado` NO es un catalogo: es la bandera de dos valores que documenta
+ * el CLAUDE.md de la raiz, asi que sus dos opciones las dibuja el front.
+ */
+function catalogos(): array
+{
+    return [
+        'situaciones' => comboLista(COMBO_SITUACION),
+    ];
 }
 
 function handleCreate(): void
@@ -243,6 +264,16 @@ function combo(string $clave): array
     }
 
     return $cache[$clave] = $textos;
+}
+
+/** El mismo combo, como lista ordenada para poblar un <select>. */
+function comboLista(string $clave): array
+{
+    $items = [];
+    foreach (combo($clave) as $valor => $texto) {
+        $items[] = ['valor' => (string) $valor, 'texto' => $texto];
+    }
+    return $items;
 }
 
 /**

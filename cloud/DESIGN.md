@@ -667,6 +667,33 @@ Por eso **`Situación` es una columna**, con el badge de §11 y los tres tonos d
   los 148 dominios tienen `situacion` cargada — las dos ramas existen para el
   dato futuro, no para el actual.
 
+**Y EN DOMINIOS LAS DOS COLUMNAS SON TAMBIÉN DOS FILTROS** (01/10/2026): el
+modal de Filtros del módulo suma `Situación` y `Habilitado`, los dos
+desplegables, entre `Cliente` y `Límite` —o sea en el bloque de campos comunes
+que ABM.md ubica después de `Código` y antes de `Límite`—. Si un estado es un
+dato por derecho propio y es lo que alguien viene a barrer de arriba abajo,
+tiene que poder recortarse: sin el filtro, juntar los 14 dominios suspendidos
+es leer las 148 filas a ojo.
+
+- **Las opciones de `Situación` salen del backend, no del front.** El endpoint
+  devuelve ahora `catalogos.situaciones` —`comboLista('$xDominio->situacion')`,
+  el mismo combo con el que ya traducía `situacion_texto` fila por fila—, así
+  que la lista del desplegable y el texto del badge no pueden discrepar, y si el
+  combo se amplía el filtro lo acompaña solo. Es la misma regla de ABM.md con la
+  que el código corto nunca se traduce en el navegador.
+- **`Habilitado` NO viaja en ese catálogo, y no es una inconsistencia**: no es
+  un combo del sistema histórico sino la bandera de dos valores del CLAUDE.md de
+  la raíz, así que sus dos opciones las dibuja el front — igual que en Artículos
+  y Planes, que ya tenían ese mismo desplegable con el rótulo `Estado`. Acá va
+  rotulado `Habilitado` porque así se llama la columna del listado que recorta:
+  el filtro y la columna tienen que leerse como la misma cosa.
+- **Los dos recortan en el navegador**, como `Código` y `Cliente`: el módulo ya
+  se trae los 148 dominios en el `render*()` y el único filtro que va al
+  servidor es el texto libre (ABM.md, "Dónde se filtra").
+- **Un dominio sin `situacion` cargada no entra en ninguna de las tres
+  opciones**, y así queda: hoy no hay ninguno, y agregar un "Sin calcular" al
+  desplegable sería dibujar en la pantalla un estado que el dato no tiene.
+
 ## 11. Badges
 
 Los badges usan fondo translúcido sobre el rojo oscuro de la app — no fondos pasteles sólidos (no contrastarían bien con `--surface`).
@@ -1994,6 +2021,11 @@ El modal **Consultar** muestra TODOS los campos del registro como tarjetas read-
 - **El corte es el mismo en los dos modales.** Es §14 aplicado a las pestañas: consultar y editar el mismo registro no pueden verse como dos pantallas de sistemas distintos, así que `Tolerancia` y `Remitido` están en `General` también en el formulario, bajo la sección `Seguimiento`.
 - **La cuenta de tarjetas de §25 se hace POR PESTAÑA, no sobre el total.** Cada `view-grid` es su propio flex: los `half` tienen que ser pares **dentro de cada panel** y cada `full` caer después de un renglón cerrado de ese panel. Contratos queda 10 `half` + 1 `full` en General y 12 `half` en Facturación.
 - **Una nota que habla de los campos de las dos pestañas va afuera de los paneles**, al pie del `.modal-body`. En Contratos es la de las fechas centinela (`1500-01-01` / `2500-01-01`): hay fechas en las dos solapas y repetirla en cada panel sería ruido.
+
+**Clientes** (§40-bis) es el segundo caso y lleva **tres**: `General` / `Ubicación` / `Facturación`. Suma dos reglas que Contratos no necesitaba:
+
+- **Cuando cada pestaña ES una sección, el panel no lleva `form-section`.** El `form-section-title` repetiría el rótulo de la pestaña. En Contratos sí van —cada panel agrupa varias secciones (`Identificación`, `Seguimiento`, …)—; en Clientes cada panel es una sola, así que los `.form-group` cuelgan directo del `.modal-tabpanel`, que ya es un flex en columna con el mismo `gap`. Es el mismo criterio por el que la pestaña `Paneles` de Perfiles no envuelve su lista en una tarjeta madre (§35.1).
+- **Dos campos que se explican mutuamente y quedan en pestañas distintas tienen que nombrarse el uno al otro.** `Nombre` (General) y `Razón social` (Facturación) son el nombre interno y el fiscal; antes iban pegados en la misma sección y ahora no se ven juntos nunca, así que cada uno lleva una `.form-nota` que dice qué es el otro y dónde está. Sin eso, quien abre el alta en General no tiene cómo saber que el nombre que se imprime se carga en otro lado.
 
 **Un campo que no se edita desde esta pantalla se dibuja como `<input readonly>`, no como un `<select>` deshabilitado ni como un select que no se puede cambiar.** En **Editar contrato** son `Dominio` y `Cliente`: muestran el nombre en un input de sólo lectura, mientras que el **Alta** los sigue dibujando como selects. Cuatro reglas:
 
@@ -3599,7 +3631,12 @@ Reemplaza a `reactor-admin/clientes/` del sistema histórico. El módulo **no ap
   - **`medio` NO es FK en el esquema y una fila tiene el centinela `0`.** Se normaliza a `null` al leer y se escribe `null` al guardar, como toda FK del sistema histórico — pero **no se declara la constraint acá**: eso es un cambio de esquema y va por su propia migración (`CLAUDE.md`, "El 0 es centinela").
 - **`Provincia` es texto libre con `<datalist>` de lo que YA está cargado**, no un catálogo de 24 que la base no conoce. Es lo que evita que la misma provincia entre escrita de dos formas y que el filtro del listado la parta en dos; una provincia nueva se sigue pudiendo tipear. El filtro del modal, en cambio, es un `<select>` con esos mismos valores: ahí no hay nada que inventar.
 - **Localidad y contacto llevan su dato secundario de glosa debajo** —provincia y celular— en vez de dos columnas más, y el CUIT va de glosa bajo el nombre: son cómo se ubica al cliente, no datos que se comparen entre filas (mismo criterio que marca y categoría en Artículos, §41.2).
-- **Diecisiete tarjetas en Consultar: catorce `half` y tres `full`** — `Nombre` y `Razón social` en las ranuras 3 y 4, `Domicilio` después del renglón de contacto. Agregar o quitar un campo obliga a rehacer esa cuenta (§25).
+- **TRES PESTAÑAS, Y LAS MISMAS EN CONSULTAR Y EN EL FORMULARIO** (§25): `General` (Nombre, Contacto, Celular, Correo), `Ubicación` (Domicilio, Localidad, Provincia, País) y `Facturación` (Razón social, CUIT, Condición frente al IVA, Talonario, Medio de pago). Consultar y editar el mismo registro no se pueden ver como dos pantallas distintas, así que el corte es idéntico — quién es, dónde está y con qué datos se le emite.
+  - **`Código` y los tres contadores van en `General` aunque no sean campos de la tabla**: el primero es la identidad y los otros tres son los vínculos, y los cuatro contestan *qué es este cliente*, que es lo que esa pestaña responde. Sólo existen en Consultar.
+  - **La cuenta de tarjetas se hace POR PESTAÑA, no sobre el total**: cada `view-grid` es su propio flex. `General` son **ocho `half` y ningún `full`** —ninguno de los ocho valores es ancho de verdad: el nombre más largo son 35 caracteres y el correo 36—, `Ubicación` **cuatro `half`** —el domicilio más largo son 51 y entra en media tarjeta; con uno `full` los otros tres quedarían impares— y `Facturación` **un `full` arriba** (`Razón social`, la que se imprime y admite 250) **más cuatro `half`**. Agregar o quitar un campo obliga a rehacer la cuenta de **esa** pestaña.
+  - **Los paneles del formulario NO llevan `form-section`.** El rótulo de la sección repetiría el nombre de la pestaña — el mismo criterio por el que la pestaña `Paneles` de Perfiles no envuelve su lista en una tarjeta madre (§35.1). `.modal-tabpanel` ya es un flex en columna con el mismo `gap` que `.form-section`.
+  - **Si la validación falla, el modal SALTA a la pestaña del campo antes de enfocarlo.** Los campos que se validan están repartidos —`Nombre`, `Celular` y `Correo` en General, `CUIT` en Facturación—, así que `marcar()` devuelve `{el, panel}` y el `Guardar` llama a `mostrarPestana()` primero. Marcar el error en un panel `hidden` se lee como un Guardar que no responde.
+  - **`Nombre` y `Razón social` quedaron en pestañas distintas, y por eso cada uno dice dónde está el otro.** Son las dos mitades de la misma pregunta —el nombre interno y el fiscal— y antes iban pegados en la misma sección; separados, una `.form-nota` en cada uno nombra al otro y la pestaña donde vive. Sin eso, quien abre el alta en General no tiene cómo saber que el nombre que se imprime se carga en otro lado.
 - **La baja va con el modal de desglose** (§15.1): las tres FK que apuntan acá son `RESTRICT` y las tres **bloquean** — dominios, contratos y comprobantes. No hay nada que se borre en cascada ni que quede sin referencia, así que las dos secciones del modal viajan vacías y sólo se dibuja el recuadro rojo. **Hoy ningún cliente se puede borrar** —los 64 tienen al menos un vínculo— y eso es lo correcto: lo que cuelga de un cliente son comprobantes fiscales emitidos y dominios en producción.
 - **`Ver dominios` estrenó el filtro `Cliente` en Dominios.** Las tres navegaciones van por el par genérico `pedirFiltroCampo()` / `tomarFiltroCampo()` (§21-bis.1) y las tres exigen que el filtro **exista como campo del Modal de Filtros del destino**: Contratos y Comprobantes ya lo tenían, Dominios no, así que se le agregó —por ID, como en Comprobantes, porque allá el cliente es una FK y el listado no lo trae como columna—. Sin ese campo el ítem no se habría agregado "para que el menú quede completo".
 - **La condición de las tres navegaciones vive en UNA función** (`clienteNavegaciones()`), no copiada en el menú de la fila y en el del modal: con la condición duplicada, agregarle un caso deja un menú ofreciendo lo que el otro ya esconde (ABM.md §1.3).
